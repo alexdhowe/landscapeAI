@@ -13,7 +13,7 @@ not negotiable.
 | Phase | State |
 |---|---|
 | 1 — Pricing engine (`lib/pricing`) | ✅ done — 16 golden tests passing |
-| 1.5 — Typology bands | not started |
+| 1.5 — Typology bands | ✅ done — WI-average seed data, 8 tests passing |
 | 2 — Photo experience | not started |
 | 3 — Aerial measurement | not started |
 | 3.5 — Time slider | not started |
@@ -50,10 +50,26 @@ anything that does I/O.
 - `disclosure.ts` — `applyDisclosure`: the only path from an internal
   estimate to a customer surface (band / Good-Better-Best tiers / figure);
   never leaks unit rates, costs, or margin
+- `typology.ts` — `getTypologyBand(jobType, context, config)`: P25/P75 of
+  the historical quantity distributions run through the engine → the
+  opening band shown before anything is measured
 
-## Seed data still needed (section 7 of the map)
+## Seed data — Wisconsin averages, pending real bids
 
-The fixture price book in `lib/pricing/__tests__/fixtures.ts` uses
-**placeholder numbers**. The real ~40 SKUs, plant metadata, burden/overhead
-percentages, 10 historical bids, and quantity distributions by job type must
-come from the contractor before Phase 1.5 bands can be defended.
+Real contractor bid data is not available yet, so `seed/pricebook.seed.ts`
+carries **Wisconsin state-average placeholders** (sources cited in the file
+header): ~45 SKUs including 26 zone-4/5 plants with full metadata (install
+size, mature height/spread, growth rate class, form, hardiness, foliage),
+costed assemblies, burden/margin defaults, and *estimated* P25/P50/P75
+quantity distributions per job type. Everything is centralized in that one
+file — when real bids arrive, replace its contents and keep the exported
+names; the typology tests validate structure and self-consistency rather
+than pinned dollar values, so they survive the swap.
+
+Current WI-average opening bands (sell price):
+
+| Job type | Residential | HOA / commercial |
+|---|---|---|
+| Mulch-to-stone conversion | $1,600 – $5,900 | $6,300 – $26,000 |
+| Bed renovation | $2,700 – $8,200 | $10,300 – $39,500 |
+| Foundation planting refresh | $1,200 – $3,300 | $3,500 – $12,600 |

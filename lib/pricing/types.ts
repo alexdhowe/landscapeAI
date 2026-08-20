@@ -14,7 +14,9 @@ export type QuantitySource =
   | "photo"
   | "user_drawn"
   | "rep_confirmed"
-  | "as_built";
+  | "as_built"
+  /** Percentile of a historical bid distribution — nothing measured yet. */
+  | "typology";
 
 /**
  * Architectural invariant: no bare numbers. Every quantity carries

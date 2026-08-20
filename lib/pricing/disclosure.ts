@@ -4,23 +4,13 @@ import type {
   InternalEstimate,
 } from "./types";
 
+import { ceilTo, floorTo, roundTo } from "./rounding";
+
 const DEFAULT_TIERS = [
   { label: "Good", multiplier: 1.0 },
   { label: "Better", multiplier: 1.15 },
   { label: "Best", multiplier: 1.35 },
 ];
-
-function floorTo(value: number, step: number): number {
-  return Math.floor(value / step) * step;
-}
-
-function ceilTo(value: number, step: number): number {
-  return Math.ceil(value / step) * step;
-}
-
-function roundTo(value: number, step: number): number {
-  return Math.round(value / step) * step;
-}
 
 /**
  * Project the internal estimate through the contractor's disclosure policy.
