@@ -14,6 +14,7 @@
     "db:migrate": "drizzle-kit migrate"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.120.0",
     "drizzle-orm": "^0.44.0",
     "next": "^15.4.0",
     "postgres": "^3.4.5",

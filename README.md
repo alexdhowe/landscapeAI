@@ -14,7 +14,7 @@ not negotiable.
 |---|---|
 | 1 — Pricing engine (`lib/pricing`) | ✅ done — 16 golden tests passing |
 | 1.5 — Typology bands | ✅ done — WI-average seed data, 8 tests passing |
-| 2 — Photo experience | not started |
+| 2 — Photo experience | ✅ done — upload → segmentation → click-to-swap → band |
 | 3 — Aerial measurement | not started |
 | 3.5 — Time slider | not started |
 | 4 — Reconciliation | not started |
@@ -35,6 +35,31 @@ npm run typecheck
 npm run dev
 npm run build
 ```
+
+## The photo experience (Phase 2)
+
+`/start` uploads a yard photo (no address, no form) and lands on
+`/design/[projectId]`: the photo with labeled region polygons, a catalog
+picker filtered to the clicked region's kind, and a budget band that reads
+"projects like this typically run $X–$Y".
+
+- `lib/vision/` — Claude vision segmentation (`classify.ts`, model
+  `claude-opus-5`) with a pure, unit-tested response parser (`parse.ts`).
+  Without `ANTHROPIC_API_KEY` the app falls back to a deterministic demo
+  overlay, clearly labeled as such in the UI.
+- `lib/catalog/options.ts` — the click-to-swap catalog. Every option maps
+  to assemblies/SKUs that exist in the seed price book; a test enforces it
+  (the catalog is the guardrail — nothing can be offered that can't be
+  priced).
+- `lib/design/band.ts` — selections → implied job type → the Phase 1.5
+  typology band. Pure; runs only server-side in `/api/price`, which returns
+  band endpoints and scope labels — never line items, rates, or margin.
+- Visual swap is deterministic: the region polygon fills with an SVG
+  material pattern generated from the selection. The image stays a view of
+  the object graph, never the artifact.
+- Projects live in a file-backed store under `.data/` (gitignored) behind
+  `lib/store/projects.ts` — the only module that knows storage; Postgres
+  replaces it at the lead-capture phase without touching the UI.
 
 ## The pricing engine
 
