@@ -7,7 +7,7 @@ import type { RegionSelection } from "@/lib/design/types";
 import type { SegmentedRegion } from "@/lib/vision/types";
 import { REGION_KIND_LABELS } from "@/lib/vision/types";
 
-import { KIND_COLORS, SwatchDefs } from "./swatches";
+import { KIND_COLORS, SwatchFilters } from "./swatches";
 
 type Props = {
   photoUrl: string;
@@ -30,7 +30,9 @@ function centroid(polygon: [number, number][]): [number, number] {
 /**
  * The customer's photo with the segmentation overlay. Clicking a polygon
  * selects the region; regions with a surface selection render filled with
- * that material's pattern — the visual swap.
+ * a procedural texture of that material — the visual swap. The texture
+ * layer multiplies the photo's own shading back on top, so the photo's
+ * light and shadow carry through the new material.
  */
 export function PhotoCanvas({
   photoUrl,
@@ -64,7 +66,26 @@ export function PhotoCanvas({
         viewBox={`0 0 ${w} ${h}`}
         preserveAspectRatio="none"
       >
-        <SwatchDefs unit={w / 36} />
+        <SwatchFilters width={w} edgeBlur={w * 0.0035} />
+        <defs>
+          {/* Desaturated, brightened copy of the photo: multiplied over a
+              texture it re-applies the photo's shadows without its color. */}
+          <filter id="photo-shading">
+            <feColorMatrix type="saturate" values="0" />
+            <feComponentTransfer>
+              <feFuncR type="gamma" amplitude="1" exponent="0.5" offset="0.3" />
+              <feFuncG type="gamma" amplitude="1" exponent="0.5" offset="0.3" />
+              <feFuncB type="gamma" amplitude="1" exponent="0.5" offset="0.3" />
+            </feComponentTransfer>
+          </filter>
+          {regions.map((region) => (
+            <clipPath key={region.id} id={`clip-${region.id}`}>
+              <polygon
+                points={region.polygon.map(([x, y]) => `${x * w},${y * h}`).join(" ")}
+              />
+            </clipPath>
+          ))}
+        </defs>
         {regions.map((region) => {
           const points = region.polygon
             .map(([x, y]) => `${x * w},${y * h}`)
@@ -76,19 +97,62 @@ export function PhotoCanvas({
           const isHovered = region.id === hoveredId;
           const kindColor = KIND_COLORS[region.kind];
           return (
-            <polygon
-              key={region.id}
-              points={points}
-              fill={surfaceOption ? `url(#swatch-${surfaceOption.swatch})` : kindColor}
-              fillOpacity={surfaceOption ? 0.9 : isSelected || isHovered ? 0.35 : 0.18}
-              stroke={isSelected ? "#ffffff" : kindColor}
-              strokeWidth={isSelected ? w * 0.004 : w * 0.002}
-              strokeDasharray={surfaceOption ? undefined : `${w * 0.008} ${w * 0.005}`}
-              className="cursor-pointer transition-[fill-opacity]"
-              onClick={() => onSelectRegion(region.id)}
-              onMouseEnter={() => setHoveredId(region.id)}
-              onMouseLeave={() => setHoveredId(null)}
-            />
+            <g key={region.id}>
+              {surfaceOption ? (
+                <>
+                  {/* Textured material, feather-edged into the photo. */}
+                  <polygon
+                    points={points}
+                    fill="#ffffff"
+                    filter={`url(#tex-${surfaceOption.swatch})`}
+                    opacity={0.96}
+                  />
+                  {/* The photo's own shading, multiplied back on top so
+                      existing light and shadow read through the swap. */}
+                  <image
+                    href={photoUrl}
+                    x={0}
+                    y={0}
+                    width={w}
+                    height={h}
+                    preserveAspectRatio="none"
+                    clipPath={`url(#clip-${region.id})`}
+                    filter="url(#photo-shading)"
+                    opacity={0.75}
+                    style={{ mixBlendMode: "multiply" }}
+                  />
+                </>
+              ) : (
+                <polygon
+                  points={points}
+                  fill={kindColor}
+                  fillOpacity={isSelected || isHovered ? 0.32 : 0.14}
+                  stroke={kindColor}
+                  strokeWidth={w * 0.002}
+                  strokeDasharray={`${w * 0.008} ${w * 0.005}`}
+                />
+              )}
+              {/* Selection ring drawn separately so it never gets textured. */}
+              {(isSelected || isHovered) && (
+                <polygon
+                  points={points}
+                  fill="none"
+                  stroke="#ffffff"
+                  strokeOpacity={isSelected ? 0.95 : 0.55}
+                  strokeWidth={w * (isSelected ? 0.004 : 0.0025)}
+                  strokeLinejoin="round"
+                />
+              )}
+              {/* Hit target on top of everything for this region. */}
+              <polygon
+                points={points}
+                fill="transparent"
+                className="cursor-pointer"
+                onClick={() => onSelectRegion(region.id)}
+                onMouseEnter={() => setHoveredId(region.id)}
+                onMouseLeave={() => setHoveredId(null)}
+              />
+            </g>
           );
         })}
       </svg>
