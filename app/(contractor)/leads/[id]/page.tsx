@@ -21,6 +21,7 @@ import {
   submittedSnapshot,
   type SnapshotCustomerView,
 } from "@/lib/lead/snapshot";
+import { currentContractor } from "@/lib/auth/session";
 import { resolveOrg } from "@/lib/org/resolve";
 import { ProjectNotFoundError, getProject } from "@/lib/store/projects";
 
@@ -99,6 +100,9 @@ export default async function LeadPage({
     : null;
   const finalPayload =
     finalView && isFinalQuotePayload(finalView.estimate) ? finalView.estimate : null;
+  // The layout already refused anyone without a session; this is the same
+  // contractor, read again because the page needs their name.
+  const contractor = (await currentContractor())!;
   const org = await resolveOrg();
   const confirmRows: ConfirmRow[] = currentRegionQuantities(
     project,
@@ -374,6 +378,7 @@ export default async function LeadPage({
               projectId={project.id}
               rows={confirmRows}
               locked={project.status === "quoted"}
+              confirmedBy={contractor.name || contractor.email}
             />
             <div className="mt-5 border-t border-neutral-100 pt-4">
               {finalQuote ? (

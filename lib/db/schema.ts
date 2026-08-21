@@ -252,6 +252,39 @@ export const typologyRecipes = pgTable(
   ],
 );
 
+/**
+ * Contractor staff. Section 5 does not model a user — it models the tenant
+ * — but section 3 puts auth on the contractor side, and a login has to
+ * belong to someone. Customers stay anonymous: they are a `customerContact`
+ * on a project, never a row here.
+ *
+ * `passwordHash` is scrypt with its parameters and salt encoded inline
+ * (lib/auth/password.ts), so the cost can be raised later without a
+ * migration and old hashes keep verifying.
+ */
+export const users = pgTable(
+  "users",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    /** Stored lowercased; the login is case-insensitive. */
+    email: text("email").notNull(),
+    name: text("name").notNull(),
+    passwordHash: text("password_hash").notNull(),
+    /**
+     * "rep" confirms quantities on site and issues quotes. "admin" also
+     * edits the price book — the distinction exists for /pricebook, which
+     * is its own session.
+     */
+    role: text("role", { enum: ["rep", "admin"] }).notNull().default("rep"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    lastLoginAt: timestamp("last_login_at", { withTimezone: true }),
+  },
+  (t) => [unique("users_email_key").on(t.email)],
+);
+
 // ---------------------------------------------------------------------------
 // The property and the project on it
 // ---------------------------------------------------------------------------
@@ -536,6 +569,13 @@ export const projectRelations = relations(projects, ({ one, many }) => ({
   selections: many(selections),
   snapshots: many(estimateSnapshots),
   deltas: many(measurementDeltas),
+}));
+
+export const userRelations = relations(users, ({ one }) => ({
+  organization: one(organizations, {
+    fields: [users.orgId],
+    references: [organizations.id],
+  }),
 }));
 
 export const regionRelations = relations(regions, ({ one }) => ({

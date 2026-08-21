@@ -21,12 +21,13 @@ not negotiable.
 | 5 — Lead capture / dashboard | ✅ done — immutable snapshot, contractor inbox |
 | 6 — Confirmation gate | ✅ done — rep corrections, deltas, final quote |
 | Persistence — Postgres + Drizzle | ✅ done — migrations, `lib/db/queries.ts`, deltas are a table |
+| Contractor auth | ✅ done — Auth.js, console and contractor APIs gated |
 
-All six phases are in, and they run on Postgres. `npm test` runs 181 tests —
-with a database and without one.
+All six phases are in, they run on Postgres, and the contractor console is
+behind a login. `npm test` runs 192 tests — with a database and without one.
 
 Still open from sections 3 and 4, each its own session: `/pricebook`,
-`/api/imagery`, photo object storage, and contractor auth.
+`/api/imagery`, and photo object storage.
 
 ## Stack
 
@@ -38,7 +39,7 @@ store, so a clean checkout runs the demo with nothing to provision.
 ## Commands
 
 ```sh
-npm test          # Vitest — 181 tests across every phase
+npm test          # Vitest — 192 tests across every phase
 npm run typecheck
 npm run dev
 npm run build
@@ -47,6 +48,7 @@ npm run db:generate   # regenerate migrations from lib/db/schema.ts
 npm run db:migrate    # apply them
 npm run db:seed       # load the org's price book from seed/pricebook.seed.ts
 npm run db:setup      # migrate + seed
+npm run db:user -- --email sam@example.com --name "Sam Rep"   # a contractor login
 ```
 
 See `.env.example` for what is configurable. All of it is optional.
@@ -176,6 +178,64 @@ A quote is final — revising one would be a new revision, which the MVP
 does not model. Corrections cover region **area (SF) and edge run (LF)**;
 EA counts (plant quantities) stay typology-scaled, since they are
 per-assembly rather than per-region and need a line-item editor.
+
+## Contractor auth
+
+Auth.js (section 3), contractor side only. Customers never sign in — they
+are a contact on a lead, not an account — and every customer surface stays
+anonymous: `/start`, `/design/[id]`, `/api/price`, submitting, and reading
+back their own snapshot and quote.
+
+Everything under `app/(contractor)/` is gated, and so are the two API routes
+that act as the contractor:
+
+| Route | Before | Now |
+|---|---|---|
+| `/dashboard`, `/leads/[id]`, `/deltas` | open | session required |
+| `POST /api/projects/[id]/confirm` | open | session required |
+| `POST /api/projects/[id]/quote` | open | session required |
+| `GET /api/projects/[id]/quote`, `…/snapshot` | open | still open — the customer reading what they were given |
+
+That first row was the reason to do this before anything else: the console
+renders unit costs, direct cost, gross margin and every lead's name, email
+and phone, and none of it was behind anything.
+
+Two layers, deliberately:
+
+- `middleware.ts` checks only that a session cookie is **present** and
+  redirects to `/login` when it isn't. It does not verify the token —
+  middleware runs on every matched request and can't reach the database.
+  Treat it as UX.
+- `app/(contractor)/layout.tsx` and `requireContractor()` do the real
+  verification. A forged cookie gets past the middleware and no further;
+  there's a test for exactly that.
+
+**The rep is the session now.** `correctedBy` on a `MeasurementDelta` used
+to be a text field the client filled in — anyone could type any name onto a
+correction. It now comes from the signed-in contractor, and the confirm
+route ignores the body field entirely. The delta is the training corpus and
+`correctedBy` is its provenance; provenance the caller asserts for itself
+isn't provenance. The lead page shows the name read-only rather than asking
+for it.
+
+Passwords are scrypt from `node:crypto` — no dependency — with the cost
+parameters and salt encoded in the stored string, so the cost can be raised
+later without a migration and old hashes keep verifying. Sessions are JWTs
+in a cookie rather than rows: the only thing a session carries is an
+identity the database can re-check, so a session table would be one more
+thing to migrate for no authorization benefit at this size.
+
+```sh
+export AUTH_SECRET=$(openssl rand -base64 32)   # required in production
+npm run db:user -- --email sam@example.com --name "Sam Rep" --role admin
+```
+
+`db:user` prompts for the password rather than taking it as an argument, so
+it stays out of shell history. There is no self-service signup. Without a
+database there's no user table, so a single login can be configured with
+`CONTRACTOR_EMAIL` / `CONTRACTOR_PASSWORD`; leave those unset and nobody can
+sign in, which is the safe default rather than a broken one. **There is no
+default password anywhere in this repo.**
 
 ## The database
 

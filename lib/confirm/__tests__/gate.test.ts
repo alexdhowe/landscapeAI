@@ -19,6 +19,7 @@ process.env.PROJECTS_DATA_DIR = mkdtempSync(
 );
 
 const store = await import("../../store/projects");
+const { contractorHeaders } = await import("../../auth/__tests__/helpers");
 const { demoSegmentation } = await import("../../vision/demo");
 const { analyzeDeltas } = await import("../analytics");
 const { errorPct } = await import("../deltas");
@@ -51,6 +52,18 @@ const jsonRequest = (url: string, method: string, body?: unknown) =>
   new Request(`http://localhost${url}`, {
     method,
     headers: { "Content-Type": "application/json" },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  });
+
+/**
+ * The rep is signed in. Confirming quantities and issuing a quote are
+ * contractor actions, and the delta records the session's identity — which
+ * is why "Sam Rep" below is the contractor, not a field in the body.
+ */
+const repRequest = async (url: string, method: string, body?: unknown) =>
+  new Request(`http://localhost${url}`, {
+    method,
+    headers: await contractorHeaders({ name: "Sam Rep" }),
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
 
@@ -98,10 +111,9 @@ async function submittedLead(areaSf = 400, perimeterLf = 80) {
   return { projectId: project.id, customerSawBytes: await res.text() };
 }
 
-const confirm = (projectId: string, value: number, unit: "SF" | "LF" = "SF") =>
+const confirm = async (projectId: string, value: number, unit: "SF" | "LF" = "SF") =>
   confirmPOST(
-    jsonRequest(`/api/projects/${projectId}/confirm`, "POST", {
-      correctedBy: "Sam Rep",
+    await repRequest(`/api/projects/${projectId}/confirm`, "POST", {
       corrections: [{ photoRegionId: "demo_bed", unit, value }],
     }),
     params(projectId),
@@ -131,7 +143,7 @@ describe("the confirmation gate — the acceptance path", () => {
 
     // --- the final quote is priced from 470 ------------------------------
     const quoteRes = await quotePOST(
-      jsonRequest(`/api/projects/${projectId}/quote`, "POST"),
+      await repRequest(`/api/projects/${projectId}/quote`, "POST"),
       params(projectId),
     );
     expect(quoteRes.status).toBe(201);
@@ -192,7 +204,7 @@ describe("the confirmation gate — the acceptance path", () => {
     const before = submittedSnapshot(await store.getProject(projectId))!.internalTotal;
 
     await confirm(projectId, 470);
-    await quotePOST(jsonRequest(`/api/projects/${projectId}/quote`, "POST"), params(projectId));
+    await quotePOST(await repRequest(`/api/projects/${projectId}/quote`, "POST"), params(projectId));
 
     const final = finalQuoteSnapshot(await store.getProject(projectId))!;
     // 470 SF of stone costs more than 400 SF of it. If the confirmed
@@ -204,7 +216,7 @@ describe("the confirmation gate — the acceptance path", () => {
     const { projectId, customerSawBytes } = await submittedLead(400);
     await confirm(projectId, 410); // a small correction, well inside the band
     const res = await quotePOST(
-      jsonRequest(`/api/projects/${projectId}/quote`, "POST"),
+      await repRequest(`/api/projects/${projectId}/quote`, "POST"),
       params(projectId),
     );
     const finalView = JSON.parse(await res.text());
@@ -236,7 +248,7 @@ describe("the confirmation gate — the acceptance path", () => {
     expect(second.afterQty.supersedes).toBe(first.afterQty.id);
 
     // The quote prices the newest confirmation.
-    await quotePOST(jsonRequest(`/api/projects/${projectId}/quote`, "POST"), params(projectId));
+    await quotePOST(await repRequest(`/api/projects/${projectId}/quote`, "POST"), params(projectId));
     const final = finalQuoteSnapshot(await store.getProject(projectId))!;
     expect(final.lineItems.find((li) => li.quantity.unit === "SF")!.quantity.value).toBe(455);
   });
@@ -244,8 +256,7 @@ describe("the confirmation gate — the acceptance path", () => {
   it("chains two corrections to the same dimension inside one request", async () => {
     const { projectId } = await submittedLead(400);
     const res = await confirmPOST(
-      jsonRequest(`/api/projects/${projectId}/confirm`, "POST", {
-        correctedBy: "Sam Rep",
+      await repRequest(`/api/projects/${projectId}/confirm`, "POST", {
         corrections: [
           { photoRegionId: "demo_bed", unit: "SF", value: 470 },
           { photoRegionId: "demo_bed", unit: "SF", value: 455 },
@@ -288,14 +299,14 @@ describe("the confirmation gate — the acceptance path", () => {
     const { projectId } = await submittedLead(400);
 
     const early = await quotePOST(
-      jsonRequest(`/api/projects/${projectId}/quote`, "POST"),
+      await repRequest(`/api/projects/${projectId}/quote`, "POST"),
       params(projectId),
     );
     expect(early.status).toBe(409);
 
     await confirm(projectId, 470);
     expect(
-      (await quotePOST(jsonRequest(`/api/projects/${projectId}/quote`, "POST"), params(projectId)))
+      (await quotePOST(await repRequest(`/api/projects/${projectId}/quote`, "POST"), params(projectId)))
         .status,
     ).toBe(201);
 
@@ -303,7 +314,7 @@ describe("the confirmation gate — the acceptance path", () => {
     expect((await confirm(projectId, 500)).status).toBe(409);
     // And it cannot be issued twice.
     expect(
-      (await quotePOST(jsonRequest(`/api/projects/${projectId}/quote`, "POST"), params(projectId)))
+      (await quotePOST(await repRequest(`/api/projects/${projectId}/quote`, "POST"), params(projectId)))
         .status,
     ).toBe(409);
   });
@@ -321,15 +332,14 @@ describe("the confirmation gate — the acceptance path", () => {
   it("rejects malformed corrections and regions outside the design", async () => {
     const { projectId } = await submittedLead(400);
     const bad: unknown[] = [
-      { correctedBy: "", corrections: [{ photoRegionId: "demo_bed", unit: "SF", value: 1 }] },
-      { correctedBy: "Sam", corrections: [] },
-      { correctedBy: "Sam", corrections: [{ photoRegionId: "demo_bed", unit: "CY", value: 1 }] },
-      { correctedBy: "Sam", corrections: [{ photoRegionId: "demo_bed", unit: "SF", value: 0 }] },
-      { correctedBy: "Sam", corrections: [{ photoRegionId: "demo_bed", unit: "SF", value: "big" }] },
+      { corrections: [] },
+      { corrections: [{ photoRegionId: "demo_bed", unit: "CY", value: 1 }] },
+      { corrections: [{ photoRegionId: "demo_bed", unit: "SF", value: 0 }] },
+      { corrections: [{ photoRegionId: "demo_bed", unit: "SF", value: "big" }] },
     ];
     for (const body of bad) {
       const res = await confirmPOST(
-        jsonRequest(`/api/projects/${projectId}/confirm`, "POST", body),
+        await repRequest(`/api/projects/${projectId}/confirm`, "POST", body),
         params(projectId),
       );
       expect(res.status).toBe(400);
@@ -337,8 +347,7 @@ describe("the confirmation gate — the acceptance path", () => {
 
     // A region nobody designed has no quantity to supersede.
     const unknownRegion = await confirmPOST(
-      jsonRequest(`/api/projects/${projectId}/confirm`, "POST", {
-        correctedBy: "Sam Rep",
+      await repRequest(`/api/projects/${projectId}/confirm`, "POST", {
         corrections: [{ photoRegionId: "not_a_region", unit: "SF", value: 300 }],
       }),
       params(projectId),

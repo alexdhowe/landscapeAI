@@ -32,6 +32,7 @@ const { deltaErrorStatsByJobType, loadOrganization } = await import("../queries"
 const { SEED_ORG_SLUG } = await import("../seed");
 const { resolveOrg, resetOrgCache } = await import("../../org/resolve");
 const { demoSegmentation } = await import("../../vision/demo");
+const { contractorHeaders } = await import("../../auth/__tests__/helpers");
 const { analyzeDeltas } = await import("../../confirm/analytics");
 const { errorPct } = await import("../../confirm/deltas");
 const { submittedSnapshot, finalQuoteSnapshot, INTERNAL_ONLY_MARKERS } = await import(
@@ -68,6 +69,14 @@ const jsonRequest = (url: string, method: string, body?: unknown) =>
   new Request(`http://localhost${url}`, {
     method,
     headers: { "Content-Type": "application/json" },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  });
+
+/** Confirming and quoting are contractor actions — the rep is signed in. */
+const repRequest = async (url: string, method: string, body?: unknown) =>
+  new Request(`http://localhost${url}`, {
+    method,
+    headers: await contractorHeaders({ name: "Sam Rep" }),
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
 
@@ -110,10 +119,9 @@ async function submittedLead(areaSf = 400, perimeterLf = 80) {
   return { projectId: project.id, customerSawBytes: await res.text() };
 }
 
-const confirm = (projectId: string, value: number, unit: "SF" | "LF" = "SF") =>
+const confirm = async (projectId: string, value: number, unit: "SF" | "LF" = "SF") =>
   confirmPOST(
-    jsonRequest(`/api/projects/${projectId}/confirm`, "POST", {
-      correctedBy: "Sam Rep",
+    await repRequest(`/api/projects/${projectId}/confirm`, "POST", {
       corrections: [{ photoRegionId: "demo_bed", unit, value }],
     }),
     params(projectId),
@@ -282,7 +290,7 @@ describe("phase 6 acceptance, against the database", () => {
     expect(errorPct(delta)).toBeCloseTo(-14.894, 2);
 
     const quoteRes = await quotePOST(
-      jsonRequest(`/api/projects/${projectId}/quote`, "POST"),
+      await repRequest(`/api/projects/${projectId}/quote`, "POST"),
       params(projectId),
     );
     expect(quoteRes.status).toBe(201);
@@ -330,8 +338,7 @@ describe("phase 6 acceptance, against the database", () => {
   it("keeps a chained correction's lineage a line, not a fork", async () => {
     const { projectId } = await submittedLead(400);
     const res = await confirmPOST(
-      jsonRequest(`/api/projects/${projectId}/confirm`, "POST", {
-        correctedBy: "Sam Rep",
+      await repRequest(`/api/projects/${projectId}/confirm`, "POST", {
         corrections: [
           { photoRegionId: "demo_bed", unit: "SF", value: 470 },
           { photoRegionId: "demo_bed", unit: "SF", value: 455 },
@@ -350,12 +357,12 @@ describe("phase 6 acceptance, against the database", () => {
   it("refuses to quote before anything is confirmed, and to correct after quoting", async () => {
     const { projectId } = await submittedLead(400);
     expect(
-      (await quotePOST(jsonRequest(`/api/projects/${projectId}/quote`, "POST"), params(projectId)))
+      (await quotePOST(await repRequest(`/api/projects/${projectId}/quote`, "POST"), params(projectId)))
         .status,
     ).toBe(409);
     await confirm(projectId, 470);
     expect(
-      (await quotePOST(jsonRequest(`/api/projects/${projectId}/quote`, "POST"), params(projectId)))
+      (await quotePOST(await repRequest(`/api/projects/${projectId}/quote`, "POST"), params(projectId)))
         .status,
     ).toBe(201);
     expect((await confirm(projectId, 500)).status).toBe(409);

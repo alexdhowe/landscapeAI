@@ -40,11 +40,14 @@ export function ConfirmQuantities({
   projectId,
   rows,
   locked,
+  confirmedBy,
 }: {
   projectId: string;
   rows: ConfirmRow[];
   /** True once the final quote is issued — corrections would no longer reach it. */
   locked: boolean;
+  /** The signed-in contractor, for display. The server records its own copy. */
+  confirmedBy: string;
 }) {
   const router = useRouter();
   const initial = useMemo(
@@ -62,7 +65,6 @@ export function ConfirmQuantities({
   );
   const [drafts, setDrafts] = useState<Record<string, Draft>>(initial);
   const [checked, setChecked] = useState<Record<string, Checked>>({});
-  const [repName, setRepName] = useState("");
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -136,7 +138,6 @@ export function ConfirmQuantities({
   const submitCorrections = useCallback(async () => {
     if (corrections.length === 0) return;
     const ok = await post(`/api/projects/${projectId}/confirm`, {
-      correctedBy: repName.trim(),
       corrections: note.trim()
         ? corrections.map((c) => ({ ...c, note: note.trim() }))
         : corrections,
@@ -145,7 +146,7 @@ export function ConfirmQuantities({
       setNote("");
       setChecked({});
     }
-  }, [corrections, note, post, projectId, repName]);
+  }, [corrections, note, post, projectId]);
 
   if (rows.length === 0) {
     return (
@@ -235,16 +236,14 @@ export function ConfirmQuantities({
       ) : (
         <>
           <div className="grid gap-2 sm:grid-cols-2">
-            <label className="text-xs text-neutral-500">
+            <div className="text-xs text-neutral-500">
               Confirmed by
-              <input
-                value={repName}
-                onChange={(e) => setRepName(e.target.value)}
-                placeholder="Rep name"
-                disabled={busy}
-                className="mt-1 w-full rounded-lg border border-neutral-200 px-2.5 py-1.5 text-sm text-neutral-800 outline-none focus:border-neutral-400"
-              />
-            </label>
+              {/* Not editable: the server records the signed-in contractor,
+                  so a field here could only disagree with the delta. */}
+              <p className="mt-1 rounded-lg border border-neutral-200 bg-neutral-50 px-2.5 py-1.5 text-sm text-neutral-800">
+                {confirmedBy}
+              </p>
+            </div>
             <label className="text-xs text-neutral-500">
               Site note (optional)
               <input
@@ -261,7 +260,7 @@ export function ConfirmQuantities({
             <button
               type="button"
               onClick={submitCorrections}
-              disabled={busy || corrections.length === 0 || repName.trim().length === 0}
+              disabled={busy || corrections.length === 0}
               className="rounded-lg bg-neutral-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-neutral-700 disabled:bg-neutral-300"
             >
               {busy

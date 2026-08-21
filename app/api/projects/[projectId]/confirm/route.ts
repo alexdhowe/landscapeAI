@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { requireContractor } from "@/lib/auth/guard";
 import { InvalidCorrectionError, recordCorrection } from "@/lib/confirm/deltas";
 import { currentRegionQuantities, regionLabels } from "@/lib/confirm/quantities";
 import {
@@ -53,10 +54,12 @@ function parseCorrections(raw: unknown): Correction[] | null {
 }
 
 /**
- * POST { correctedBy, corrections: [{ photoRegionId, unit, value, note? }] }
+ * POST { corrections: [{ photoRegionId, unit, value, note? }] }
  * → the rep's on-site corrections.
  *
- * A CONTRACTOR surface. Each correction becomes a MeasurementDelta: the
+ * A CONTRACTOR surface, and an authenticated one: the rep is the signed-in
+ * contractor, not a name in the payload. Each correction becomes a
+ * MeasurementDelta: the
  * superseded estimate with the provenance that produced it, and a new
  * quantity with source 'rep_confirmed' pointing back at it. Nothing here
  * touches the customer's frozen snapshot — the final quote is a separate,
@@ -68,21 +71,22 @@ function parseCorrections(raw: unknown): Correction[] | null {
  */
 export async function POST(request: Request, { params }: Params) {
   const { projectId } = await params;
-  let body: { correctedBy?: unknown; corrections?: unknown };
+  // A CONTRACTOR surface: this mints rep_confirmed quantities and writes to
+  // the training corpus. Nobody reaches it with a project id alone.
+  const auth = await requireContractor(request);
+  if (auth.response) return auth.response;
+
+  let body: { corrections?: unknown };
   try {
     body = await request.json();
   } catch {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const correctedBy =
-    typeof body.correctedBy === "string" ? body.correctedBy.trim() : "";
-  if (correctedBy.length === 0 || correctedBy.length > 120) {
-    return NextResponse.json(
-      { error: "correctedBy must name the rep making the correction" },
-      { status: 400 },
-    );
-  }
+  // Who corrected this comes from the session, never from the body. The
+  // delta is the training corpus and correctedBy is its provenance;
+  // provenance the caller can assert for itself is not provenance.
+  const correctedBy = auth.contractor.name || auth.contractor.email;
   const corrections = parseCorrections(body.corrections);
   if (!corrections) {
     return NextResponse.json(

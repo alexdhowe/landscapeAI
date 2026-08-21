@@ -1,14 +1,24 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
+
+import { SignOut } from "@/components/auth/SignOut";
+import { currentContractor } from "@/lib/auth/session";
 
 /**
- * The contractor console chrome. Everything under this layout is an
- * INTERNAL surface: line items, unit economics, and margin are allowed
- * here and nowhere on the customer side. (Auth arrives with the contractor
- * onboarding work; the MVP console is unauthenticated.)
+ * The contractor console chrome, and the real gate on it.
+ *
+ * Everything under this layout is an INTERNAL surface: line items, unit
+ * economics, margin, and every lead's contact details. `middleware.ts`
+ * bounces anyone with no session cookie, but that check is UX — this is
+ * where the token is actually verified, and nothing below renders until it
+ * has been.
  */
-export default function ContractorLayout({
+export default async function ContractorLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
+  const contractor = await currentContractor();
+  if (!contractor) redirect("/login");
+
   return (
     <div className="min-h-screen bg-neutral-100">
       <header className="border-b border-neutral-200 bg-white">
@@ -26,9 +36,12 @@ export default function ContractorLayout({
               </Link>
             </nav>
           </div>
-          <span className="rounded-full bg-amber-100 px-2.5 py-1 text-[11px] font-medium text-amber-800">
-            Internal — full pricing visible
-          </span>
+          <div className="flex items-center gap-3">
+            <span className="rounded-full bg-amber-100 px-2.5 py-1 text-[11px] font-medium text-amber-800">
+              Internal — full pricing visible
+            </span>
+            <SignOut name={contractor.name || contractor.email} />
+          </div>
         </div>
       </header>
       <main className="mx-auto max-w-5xl px-6 py-8">{children}</main>

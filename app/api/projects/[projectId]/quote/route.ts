@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { requireContractor } from "@/lib/auth/guard";
 import {
   NoQuoteableDesignError,
   NotConfirmedError,
@@ -38,8 +39,14 @@ function submittedBand(project: Awaited<ReturnType<typeof getProject>>) {
  * rewritten, and still serves its own bytes at ../snapshot — that
  * separation is the confirmation gate.
  */
-export async function POST(_request: Request, { params }: Params) {
+export async function POST(request: Request, { params }: Params) {
   const { projectId } = await params;
+  // Issuing the quote is the contractor's act, not the customer's. The GET
+  // below stays open: that is the customer reading the quote they were
+  // given, and it serves only the frozen customer bytes.
+  const auth = await requireContractor(request);
+  if (auth.response) return auth.response;
+
   try {
     const [project, org] = await Promise.all([getProject(projectId), resolveOrg()]);
     const quote = confirmedQuote(project, org.typology, org.finalQuotePolicy, {
