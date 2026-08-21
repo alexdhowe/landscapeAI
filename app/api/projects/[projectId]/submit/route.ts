@@ -82,7 +82,9 @@ export async function POST(request: Request, { params }: Params) {
       );
     }
 
-    const snapshot = freezeSnapshot(project, quote);
+    const snapshot = freezeSnapshot(project, quote, {
+      priceBook: { revisionId: org.revisionId, revision: org.revision },
+    });
     await submitProject(projectId, contact, snapshot);
 
     return new NextResponse(snapshot.customerFacingPayload, {

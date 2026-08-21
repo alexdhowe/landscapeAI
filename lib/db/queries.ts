@@ -14,7 +14,7 @@
  *
  * Server-only.
  */
-import { and, asc, eq, isNotNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, isNotNull, lte, sql } from "drizzle-orm";
 
 import type { ErrorStats } from "../confirm/analytics";
 import type { MeasurementDelta } from "../confirm/types";
@@ -26,9 +26,16 @@ import type {
   SegmentationState,
 } from "../design/types";
 import type { EstimateSnapshot, LeadContact } from "../lead/types";
-import type { JobType, MarketContext, TypologyConfig } from "../pricing/typology";
 import type {
-  Assembly,
+  JobType,
+  MarketContext,
+  QuantityDistribution,
+  RecipeLine,
+  TypologyConfig,
+} from "../pricing/typology";
+import type { PricingConfig, RevisionMeta } from "../pricebook/types";
+import { toTypologyConfig } from "../pricebook/types";
+import type {
   AssemblyComponent,
   CostItem,
   DisclosurePolicy,
@@ -48,6 +55,7 @@ import {
   measurementDeltas,
   organizations,
   photos,
+  priceBookRevisions,
   projects,
   properties,
   regions,
@@ -148,6 +156,9 @@ function toSnapshot(row: SnapshotRow): EstimateSnapshot {
     customerFacingPayload: row.customerFacingPayload,
     disclosurePolicyUsed: row.disclosurePolicyUsed,
     reconciliation: row.reconciliation ?? null,
+    ...(row.priceBookRevisionId === null
+      ? {}
+      : { priceBookRevisionId: row.priceBookRevisionId }),
   };
 }
 
@@ -493,6 +504,11 @@ async function insertSnapshotRow(
     customerFacingPayload: snapshot.customerFacingPayload,
     disclosurePolicyUsed: snapshot.disclosurePolicyUsed,
     reconciliation: snapshot.reconciliation,
+    // "seed" is the no-database marker, not a row id.
+    priceBookRevisionId:
+      snapshot.priceBookRevisionId && snapshot.priceBookRevisionId !== "seed"
+        ? snapshot.priceBookRevisionId
+        : null,
   });
 }
 
@@ -610,18 +626,22 @@ export async function deltaErrorStatsByJobType(
 }
 
 // ---------------------------------------------------------------------------
-// The tenant (project-map section 5: the contractor org owns the price book)
+// The tenant and its price book (project-map section 5)
 // ---------------------------------------------------------------------------
 
 /**
- * Everything a route needs to price for one contractor. Assembled from the
- * org's own rows — the price book, its margin config, both disclosure
- * policies, and the bid distributions behind the opening band.
+ * Everything a route needs to price for one contractor, at one revision of
+ * their book. Carries the revision's identity as well as its contents, so a
+ * snapshot can record which prices produced it.
  */
 export type OrgPricing = {
   id: string;
   slug: string;
   name: string;
+  revisionId: string;
+  revision: number;
+  revisionLabel: string | null;
+  publishedAt: string | null;
   priceBook: PriceBook;
   margin: MarginConfig;
   bandPolicy: DisclosurePolicy;
@@ -638,6 +658,15 @@ export class OrganizationNotFoundError extends Error {
   }
 }
 
+export class NoPublishedRevisionError extends Error {
+  constructor(slug: string) {
+    super(
+      `Organization "${slug}" has no published price book revision — publish one at /pricebook`,
+    );
+    this.name = "NoPublishedRevisionError";
+  }
+}
+
 const emptyDistributions = (): TypologyConfig["distributions"] => ({
   bed_renovation: { residential: {}, hoa_commercial: {} },
   mulch_to_stone: { residential: {}, hoa_commercial: {} },
@@ -650,46 +679,43 @@ const emptyRecipes = (): TypologyConfig["recipes"] => ({
   foundation_planting_refresh: [],
 });
 
-/** The org and its price book, in one read. */
-export async function loadOrganization(
+function toRevisionMeta(row: typeof priceBookRevisions.$inferSelect): RevisionMeta {
+  return {
+    id: row.id,
+    revision: row.revision,
+    status: row.status,
+    label: row.label,
+    note: row.note,
+    createdBy: row.createdBy,
+    createdAt: iso(row.createdAt),
+    publishedBy: row.publishedBy,
+    publishedAt: row.publishedAt ? iso(row.publishedAt) : null,
+  };
+}
+
+/** The contents of one revision, in the shape lib/pricing consumes. */
+export async function readRevisionConfig(
   db: Database,
-  slug: string,
-): Promise<OrgPricing> {
-  const org = await db.query.organizations.findFirst({
-    where: eq(organizations.slug, slug),
-  });
-  if (!org) throw new OrganizationNotFoundError(slug);
-
-  const [
-    costItemRows,
-    assemblyRows,
-    componentRows,
-    marginRow,
-    policyRows,
-    distributionRows,
-    recipeRows,
-  ] = await Promise.all([
-    db.select().from(costItems).where(eq(costItems.orgId, org.id)).orderBy(asc(costItems.sku)),
-    db.select().from(assemblies).where(eq(assemblies.orgId, org.id)).orderBy(asc(assemblies.key)),
-    db
-      .select()
-      .from(assemblyComponents)
-      .where(eq(assemblyComponents.orgId, org.id))
-      .orderBy(asc(assemblyComponents.assemblyKey), asc(assemblyComponents.position)),
-    db.query.marginConfigs.findFirst({ where: eq(marginConfigs.orgId, org.id) }),
-    db.select().from(disclosurePolicies).where(eq(disclosurePolicies.orgId, org.id)),
-    db
-      .select()
-      .from(typologyDistributions)
-      .where(eq(typologyDistributions.orgId, org.id)),
-    db
-      .select()
-      .from(typologyRecipes)
-      .where(eq(typologyRecipes.orgId, org.id))
-      .orderBy(asc(typologyRecipes.jobType), asc(typologyRecipes.position)),
-  ]);
-
-  if (!marginRow) throw new OrganizationNotFoundError(slug);
+  revisionId: string,
+): Promise<PricingConfig> {
+  const [costItemRows, assemblyRows, componentRows, marginRow, policyRows, distributionRows, recipeRows] =
+    await Promise.all([
+      db.select().from(costItems).where(eq(costItems.revisionId, revisionId)).orderBy(asc(costItems.sku)),
+      db.select().from(assemblies).where(eq(assemblies.revisionId, revisionId)).orderBy(asc(assemblies.key)),
+      db
+        .select()
+        .from(assemblyComponents)
+        .where(eq(assemblyComponents.revisionId, revisionId))
+        .orderBy(asc(assemblyComponents.assemblyKey), asc(assemblyComponents.position)),
+      db.query.marginConfigs.findFirst({ where: eq(marginConfigs.revisionId, revisionId) }),
+      db.select().from(disclosurePolicies).where(eq(disclosurePolicies.revisionId, revisionId)),
+      db.select().from(typologyDistributions).where(eq(typologyDistributions.revisionId, revisionId)),
+      db
+        .select()
+        .from(typologyRecipes)
+        .where(eq(typologyRecipes.revisionId, revisionId))
+        .orderBy(asc(typologyRecipes.jobType), asc(typologyRecipes.position)),
+    ]);
 
   const componentsByAssembly = new Map<string, AssemblyComponent[]>();
   for (const row of componentRows) {
@@ -722,7 +748,11 @@ export async function loadOrganization(
 
   const policy = (role: "band" | "final_quote"): DisclosurePolicy => {
     const row = policyRows.find((p) => p.role === role);
-    if (!row) throw new OrganizationNotFoundError(slug);
+    if (!row) {
+      // A revision without both policies cannot price anything; the publish
+      // gate refuses to create one, so this is a corrupt row, not a state.
+      throw new Error(`Revision ${revisionId} has no "${role}" disclosure policy`);
+    }
     return {
       mode: row.mode,
       bandWidthPct: row.bandWidthPct,
@@ -751,29 +781,331 @@ export async function loadOrganization(
     });
   }
 
-  const margin: MarginConfig = {
-    targetGmPct: marginRow.targetGmPct,
-    minGmPct: marginRow.minGmPct,
-    contingencyPct: marginRow.contingencyPct,
-  };
-  const bandPolicy = policy("band");
+  if (!marginRow) throw new Error(`Revision ${revisionId} has no margin config`);
 
+  return {
+    priceBook,
+    plantMeta: Object.fromEntries(
+      costItemRows
+        .filter((row) => row.plantMeta !== null)
+        .map((row) => [row.sku, row.plantMeta!]),
+    ),
+    margin: {
+      targetGmPct: marginRow.targetGmPct,
+      minGmPct: marginRow.minGmPct,
+      contingencyPct: marginRow.contingencyPct,
+    },
+    bandPolicy: policy("band"),
+    finalQuotePolicy: policy("final_quote"),
+    recipes,
+    distributions,
+  };
+}
+
+/**
+ * Replace a revision's contents wholesale, in one transaction.
+ *
+ * Delete-then-insert rather than a row-level diff: a revision is a
+ * document, the whole thing is a few hundred rows, and the intermediate
+ * state never escapes the transaction. Callers hand in a config that has
+ * already been checked — lib/pricebook/mutate.ts refuses the edits that
+ * would leave a dangling reference, and the foreign keys are the backstop.
+ *
+ * Refuses to touch a published revision. Published revisions are immutable;
+ * that is the entire value of having them.
+ */
+export async function writeRevisionConfig(
+  db: Database,
+  revisionId: string,
+  config: PricingConfig,
+): Promise<void> {
+  await db.transaction(async (tx) => {
+    const revision = await tx.query.priceBookRevisions.findFirst({
+      where: eq(priceBookRevisions.id, revisionId),
+    });
+    if (!revision) throw new Error(`No price book revision ${revisionId}`);
+    if (revision.status === "published") {
+      throw new Error(
+        `Revision ${revision.revision} is published and cannot be edited — start a new draft`,
+      );
+    }
+
+    // Order matters on the way out: components and recipes reference
+    // assemblies and cost items.
+    await tx.delete(assemblyComponents).where(eq(assemblyComponents.revisionId, revisionId));
+    await tx.delete(typologyRecipes).where(eq(typologyRecipes.revisionId, revisionId));
+    await tx.delete(assemblies).where(eq(assemblies.revisionId, revisionId));
+    await tx.delete(costItems).where(eq(costItems.revisionId, revisionId));
+    await tx.delete(typologyDistributions).where(eq(typologyDistributions.revisionId, revisionId));
+    await tx.delete(disclosurePolicies).where(eq(disclosurePolicies.revisionId, revisionId));
+    await tx.delete(marginConfigs).where(eq(marginConfigs.revisionId, revisionId));
+
+    if (config.priceBook.costItems.length > 0) {
+      await tx.insert(costItems).values(
+        config.priceBook.costItems.map((item) => ({
+          revisionId,
+          sku: item.id,
+          name: item.name,
+          kind: item.kind,
+          unit: item.unit,
+          unitCost: item.unitCost,
+          burdenPct: item.burdenPct ?? null,
+          wasteFactorPct: item.wasteFactorPct ?? null,
+          plantMeta: config.plantMeta[item.id] ?? null,
+        })),
+      );
+    }
+    if (config.priceBook.assemblies.length > 0) {
+      await tx.insert(assemblies).values(
+        config.priceBook.assemblies.map((assembly) => ({
+          revisionId,
+          key: assembly.id,
+          name: assembly.name,
+          unit: assembly.unit,
+        })),
+      );
+      const componentRows = config.priceBook.assemblies.flatMap((assembly) =>
+        assembly.components.map((component, position) => ({
+          revisionId,
+          assemblyKey: assembly.id,
+          position,
+          costItemSku: component.costItemId,
+          qtyPerUnit: component.qtyPerUnit ?? null,
+          productionRate: component.productionRate ?? null,
+        })),
+      );
+      if (componentRows.length > 0) await tx.insert(assemblyComponents).values(componentRows);
+    }
+
+    await tx.insert(marginConfigs).values({ revisionId, ...config.margin });
+
+    await tx.insert(disclosurePolicies).values(
+      ([["band", config.bandPolicy], ["final_quote", config.finalQuotePolicy]] as const).map(
+        ([role, p]) => ({
+          revisionId,
+          role,
+          mode: p.mode,
+          bandWidthPct: p.bandWidthPct,
+          showUnitRates: false,
+          roundTo: p.roundTo,
+          tierMultipliers: p.tierMultipliers ?? null,
+        }),
+      ),
+    );
+
+    const distributionRows = (
+      Object.entries(config.distributions) as [JobType, Record<MarketContext, Record<string, QuantityDistribution>>][]
+    ).flatMap(([jobType, byContext]) =>
+      (Object.entries(byContext) as [MarketContext, Record<string, QuantityDistribution>][]).flatMap(
+        ([marketContext, byKey]) =>
+          Object.entries(byKey).map(([distributionKey, d]) => ({
+            revisionId,
+            jobType,
+            marketContext,
+            distributionKey,
+            unit: d.unit,
+            p25: d.p25,
+            p50: d.p50,
+            p75: d.p75,
+          })),
+      ),
+    );
+    if (distributionRows.length > 0) {
+      await tx.insert(typologyDistributions).values(distributionRows);
+    }
+
+    const recipeRows = (Object.entries(config.recipes) as [JobType, RecipeLine[]][]).flatMap(
+      ([jobType, lines]) =>
+        lines.map((line, position) => ({
+          revisionId,
+          jobType,
+          position,
+          assemblyKey: line.assemblyId,
+          distributionKey: line.distributionKey,
+        })),
+    );
+    if (recipeRows.length > 0) await tx.insert(typologyRecipes).values(recipeRows);
+  });
+}
+
+async function findOrg(db: Database, slug: string) {
+  const org = await db.query.organizations.findFirst({
+    where: eq(organizations.slug, slug),
+  });
+  if (!org) throw new OrganizationNotFoundError(slug);
+  return org;
+}
+
+function assemble(
+  org: { id: string; slug: string; name: string },
+  meta: RevisionMeta,
+  config: PricingConfig,
+): OrgPricing {
   return {
     id: org.id,
     slug: org.slug,
     name: org.name,
-    priceBook,
-    margin,
-    bandPolicy,
-    finalQuotePolicy: policy("final_quote"),
-    typology: {
-      priceBook,
-      margin,
-      // The band's display increment is the band policy's — one setting,
-      // not two that can disagree on the same screen.
-      roundTo: bandPolicy.roundTo,
-      recipes,
-      distributions,
-    },
+    revisionId: meta.id,
+    revision: meta.revision,
+    revisionLabel: meta.label,
+    publishedAt: meta.publishedAt,
+    priceBook: config.priceBook,
+    margin: config.margin,
+    bandPolicy: config.bandPolicy,
+    finalQuotePolicy: config.finalQuotePolicy,
+    typology: toTypologyConfig(config),
   };
+}
+
+/** The org priced at its current book: the newest published revision. */
+export async function loadOrganization(db: Database, slug: string): Promise<OrgPricing> {
+  const org = await findOrg(db, slug);
+  const revision = await db.query.priceBookRevisions.findFirst({
+    where: and(
+      eq(priceBookRevisions.orgId, org.id),
+      eq(priceBookRevisions.status, "published"),
+    ),
+    orderBy: [desc(priceBookRevisions.revision)],
+  });
+  if (!revision) throw new NoPublishedRevisionError(slug);
+  return assemble(org, toRevisionMeta(revision), await readRevisionConfig(db, revision.id));
+}
+
+/**
+ * The org priced at the book in force on a date.
+ *
+ * This is the question a delta from March asks: not "what do we charge for
+ * stone" but "what did we charge when this estimate was made".
+ */
+export async function loadOrganizationAt(
+  db: Database,
+  slug: string,
+  at: Date,
+): Promise<OrgPricing> {
+  const org = await findOrg(db, slug);
+  const revision = await db.query.priceBookRevisions.findFirst({
+    where: and(
+      eq(priceBookRevisions.orgId, org.id),
+      eq(priceBookRevisions.status, "published"),
+      lte(priceBookRevisions.publishedAt, at),
+    ),
+    orderBy: [desc(priceBookRevisions.publishedAt)],
+  });
+  if (!revision) throw new NoPublishedRevisionError(slug);
+  return assemble(org, toRevisionMeta(revision), await readRevisionConfig(db, revision.id));
+}
+
+/** Every revision, newest first. The history. */
+export async function listRevisions(
+  db: Database,
+  orgId: string,
+): Promise<RevisionMeta[]> {
+  const rows = await db
+    .select()
+    .from(priceBookRevisions)
+    .where(eq(priceBookRevisions.orgId, orgId))
+    .orderBy(desc(priceBookRevisions.revision));
+  return rows.map(toRevisionMeta);
+}
+
+export async function findRevision(
+  db: Database,
+  revisionId: string,
+): Promise<RevisionMeta | null> {
+  const row = await db.query.priceBookRevisions.findFirst({
+    where: eq(priceBookRevisions.id, revisionId),
+  });
+  return row ? toRevisionMeta(row) : null;
+}
+
+/** The org's open draft, if it has one. At most one exists — see the schema. */
+export async function findDraft(
+  db: Database,
+  orgId: string,
+): Promise<RevisionMeta | null> {
+  const row = await db.query.priceBookRevisions.findFirst({
+    where: and(eq(priceBookRevisions.orgId, orgId), eq(priceBookRevisions.status, "draft")),
+  });
+  return row ? toRevisionMeta(row) : null;
+}
+
+/**
+ * Open a draft by copying the current published book.
+ *
+ * Copy-on-write: the published revision is untouched, and the draft starts
+ * as an exact copy so an admin edits from where the book actually is rather
+ * than from a blank page.
+ */
+export async function createDraft(
+  db: Database,
+  orgId: string,
+  createdBy: string,
+): Promise<RevisionMeta> {
+  const existing = await findDraft(db, orgId);
+  if (existing) return existing;
+
+  const latest = await db.query.priceBookRevisions.findFirst({
+    where: eq(priceBookRevisions.orgId, orgId),
+    orderBy: [desc(priceBookRevisions.revision)],
+  });
+  const published = await db.query.priceBookRevisions.findFirst({
+    where: and(
+      eq(priceBookRevisions.orgId, orgId),
+      eq(priceBookRevisions.status, "published"),
+    ),
+    orderBy: [desc(priceBookRevisions.revision)],
+  });
+
+  const [draft] = await db
+    .insert(priceBookRevisions)
+    .values({
+      orgId,
+      revision: (latest?.revision ?? 0) + 1,
+      status: "draft",
+      createdBy,
+    })
+    .returning();
+
+  if (published) {
+    await writeRevisionConfig(db, draft.id, await readRevisionConfig(db, published.id));
+  }
+  return toRevisionMeta(draft);
+}
+
+/** Throw the draft away. The published book is untouched by definition. */
+export async function discardDraft(db: Database, orgId: string): Promise<boolean> {
+  const draft = await findDraft(db, orgId);
+  if (!draft) return false;
+  await db.delete(priceBookRevisions).where(eq(priceBookRevisions.id, draft.id));
+  return true;
+}
+
+/**
+ * Publish the draft. From here its rows are frozen: nothing in this module
+ * updates a published revision, and `writeRevisionConfig` refuses to.
+ *
+ * The caller validates first — publishing is the gate, and
+ * lib/pricebook/validate.ts is what it checks.
+ */
+export async function publishDraft(
+  db: Database,
+  orgId: string,
+  by: string,
+  label?: string,
+  note?: string,
+): Promise<RevisionMeta> {
+  const draft = await findDraft(db, orgId);
+  if (!draft) throw new Error("There is no draft to publish");
+  const [row] = await db
+    .update(priceBookRevisions)
+    .set({
+      status: "published",
+      publishedBy: by,
+      publishedAt: new Date(),
+      ...(label === undefined ? {} : { label }),
+      ...(note === undefined ? {} : { note }),
+    })
+    .where(eq(priceBookRevisions.id, draft.id))
+    .returning();
+  return toRevisionMeta(row);
 }

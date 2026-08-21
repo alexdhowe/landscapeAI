@@ -52,4 +52,15 @@ export type EstimateSnapshot = {
   disclosurePolicyUsed: DisclosurePolicy;
   /** Frozen photo/aerial arbitration; null when only one sensor had reported. INTERNAL. */
   reconciliation: ReconciliationReport | null;
+  /**
+   * The price book revision this was priced from.
+   *
+   * The line items are already frozen, so this is not how the numbers are
+   * recovered — it is how they are EXPLAINED. A measurement delta saying an
+   * estimate missed by 15% is only interpretable against the prices that
+   * produced it. Absent on snapshots frozen before revisions existed, and
+   * when the app is running on the seed file with no database.
+   */
+  priceBookRevisionId?: string;
+  priceBookRevision?: number;
 };

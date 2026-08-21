@@ -87,13 +87,68 @@ export const organizations = pgTable("organizations", {
   name: text("name").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
+/**
+ * A revision of everything that turns quantities into a price: the price
+ * book, the margin config, both disclosure policies, and the bid
+ * distributions and recipes behind the opening band.
+ *
+ * Revisions are the price book's answer to the invariant the rest of the
+ * system already lives by. Estimates are immutable snapshots; a snapshot is
+ * only interpretable against the prices that produced it; so the prices
+ * have to stop changing underneath it. A published revision is frozen —
+ * nothing in lib/db/queries.ts updates a row belonging to one.
+ *
+ * Editing works by copy-on-write:
+ *
+ *   draft       exactly one per org at a time, freely editable, priced by
+ *               nobody. Created by copying the current published revision.
+ *   published   immutable, numbered, timestamped, attributed. The current
+ *               book is the newest published revision; the book "as of"
+ *               a date is the newest one published at or before it.
+ *
+ * That makes "what did we charge for stone in March" one query, and it
+ * makes a delta from March interpretable, because its estimate names the
+ * revision it was priced from.
+ */
+export const priceBookRevisions = pgTable(
+  "price_book_revisions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    /** Monotonic per org, assigned when the revision is created. */
+    revision: integer("revision").notNull(),
+    status: text("status", { enum: ["draft", "published"] })
+      .notNull()
+      .default("draft"),
+    /** What this change was, in the contractor's words: "Spring 2026 mulch increase". */
+    label: text("label"),
+    note: text("note"),
+    createdBy: text("created_by").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    publishedBy: text("published_by"),
+    /** Null while a draft. Point-in-time lookups order by this. */
+    publishedAt: timestamp("published_at", { withTimezone: true }),
+  },
+  (t) => [
+    unique("price_book_revisions_org_revision_key").on(t.orgId, t.revision),
+    index("price_book_revisions_published_idx").on(t.orgId, t.publishedAt),
+    /**
+     * At most one draft per org. Two drafts would be two answers to "what
+     * am I editing", and publishing either would silently discard the
+     * other. Enforced as a partial unique index — see the migration.
+     */
+    index("price_book_revisions_status_idx").on(t.orgId, t.status),
+  ],
+);
 
 export const costItems = pgTable(
   "cost_items",
   {
-    orgId: uuid("org_id")
+    revisionId: uuid("revision_id")
       .notNull()
-      .references(() => organizations.id, { onDelete: "cascade" }),
+      .references(() => priceBookRevisions.id, { onDelete: "cascade" }),
     /** The id the pricing engine resolves components by, e.g. "mulch_hardwood". */
     sku: text("sku").notNull(),
     name: text("name").notNull(),
@@ -113,27 +168,27 @@ export const costItems = pgTable(
      */
     plantMeta: jsonb("plant_meta").$type<PlantMeta>(),
   },
-  (t) => [primaryKey({ columns: [t.orgId, t.sku] })],
+  (t) => [primaryKey({ columns: [t.revisionId, t.sku] })],
 );
 
 export const assemblies = pgTable(
   "assemblies",
   {
-    orgId: uuid("org_id")
+    revisionId: uuid("revision_id")
       .notNull()
-      .references(() => organizations.id, { onDelete: "cascade" }),
+      .references(() => priceBookRevisions.id, { onDelete: "cascade" }),
     /** The id a selection and a recipe line reference, e.g. "stone_bed_conversion". */
     key: text("key").notNull(),
     name: text("name").notNull(),
     unit: text("unit", { enum: ["SF", "LF", "EA", "CY"] }).notNull(),
   },
-  (t) => [primaryKey({ columns: [t.orgId, t.key] })],
+  (t) => [primaryKey({ columns: [t.revisionId, t.key] })],
 );
 
 export const assemblyComponents = pgTable(
   "assembly_components",
   {
-    orgId: uuid("org_id").notNull(),
+    revisionId: uuid("revision_id").notNull(),
     assemblyKey: text("assembly_key").notNull(),
     /** Component order within the assembly — line order is part of the bid. */
     position: integer("position").notNull(),
@@ -144,27 +199,27 @@ export const assemblyComponents = pgTable(
     productionRate: doublePrecision("production_rate"),
   },
   (t) => [
-    primaryKey({ columns: [t.orgId, t.assemblyKey, t.position] }),
-    index("assembly_components_assembly_idx").on(t.orgId, t.assemblyKey),
+    primaryKey({ columns: [t.revisionId, t.assemblyKey, t.position] }),
+    index("assembly_components_assembly_idx").on(t.revisionId, t.assemblyKey),
     foreignKey({
-      columns: [t.orgId, t.assemblyKey],
-      foreignColumns: [assemblies.orgId, assemblies.key],
+      columns: [t.revisionId, t.assemblyKey],
+      foreignColumns: [assemblies.revisionId, assemblies.key],
       name: "assembly_components_assembly_fk",
     }).onDelete("cascade"),
     /** The catalog is the guardrail: a component cannot name a SKU you do not stock. */
     foreignKey({
-      columns: [t.orgId, t.costItemSku],
-      foreignColumns: [costItems.orgId, costItems.sku],
+      columns: [t.revisionId, t.costItemSku],
+      foreignColumns: [costItems.revisionId, costItems.sku],
       name: "assembly_components_cost_item_fk",
     }).onDelete("restrict"),
   ],
 );
 
-/** One per org for the MVP — hence org_id as the primary key. */
+/** One per revision — hence revision_id as the primary key. */
 export const marginConfigs = pgTable("margin_configs", {
-  orgId: uuid("org_id")
+  revisionId: uuid("revision_id")
     .primaryKey()
-    .references(() => organizations.id, { onDelete: "cascade" }),
+    .references(() => priceBookRevisions.id, { onDelete: "cascade" }),
   targetGmPct: doublePrecision("target_gm_pct").notNull(),
   minGmPct: doublePrecision("min_gm_pct").notNull(),
   contingencyPct: doublePrecision("contingency_pct").notNull(),
@@ -183,9 +238,9 @@ export const marginConfigs = pgTable("margin_configs", {
 export const disclosurePolicies = pgTable(
   "disclosure_policies",
   {
-    orgId: uuid("org_id")
+    revisionId: uuid("revision_id")
       .notNull()
-      .references(() => organizations.id, { onDelete: "cascade" }),
+      .references(() => priceBookRevisions.id, { onDelete: "cascade" }),
     role: text("role", { enum: ["band", "final_quote"] }).notNull(),
     mode: text("mode", { enum: ["band", "tiers", "figure"] }).notNull(),
     bandWidthPct: doublePrecision("band_width_pct").notNull(),
@@ -194,7 +249,7 @@ export const disclosurePolicies = pgTable(
     roundTo: integer("round_to").notNull(),
     tierMultipliers: jsonb("tier_multipliers").$type<TierMultiplier[]>(),
   },
-  (t) => [primaryKey({ columns: [t.orgId, t.role] })],
+  (t) => [primaryKey({ columns: [t.revisionId, t.role] })],
 );
 
 /**
@@ -205,9 +260,9 @@ export const disclosurePolicies = pgTable(
 export const typologyDistributions = pgTable(
   "typology_distributions",
   {
-    orgId: uuid("org_id")
+    revisionId: uuid("revision_id")
       .notNull()
-      .references(() => organizations.id, { onDelete: "cascade" }),
+      .references(() => priceBookRevisions.id, { onDelete: "cascade" }),
     jobType: text("job_type", {
       enum: ["bed_renovation", "mulch_to_stone", "foundation_planting_refresh"],
     }).notNull(),
@@ -223,7 +278,7 @@ export const typologyDistributions = pgTable(
   },
   (t) => [
     primaryKey({
-      columns: [t.orgId, t.jobType, t.marketContext, t.distributionKey],
+      columns: [t.revisionId, t.jobType, t.marketContext, t.distributionKey],
     }),
   ],
 );
@@ -232,9 +287,9 @@ export const typologyDistributions = pgTable(
 export const typologyRecipes = pgTable(
   "typology_recipes",
   {
-    orgId: uuid("org_id")
+    revisionId: uuid("revision_id")
       .notNull()
-      .references(() => organizations.id, { onDelete: "cascade" }),
+      .references(() => priceBookRevisions.id, { onDelete: "cascade" }),
     jobType: text("job_type", {
       enum: ["bed_renovation", "mulch_to_stone", "foundation_planting_refresh"],
     }).notNull(),
@@ -243,10 +298,10 @@ export const typologyRecipes = pgTable(
     distributionKey: text("distribution_key").notNull(),
   },
   (t) => [
-    primaryKey({ columns: [t.orgId, t.jobType, t.position] }),
+    primaryKey({ columns: [t.revisionId, t.jobType, t.position] }),
     foreignKey({
-      columns: [t.orgId, t.assemblyKey],
-      foreignColumns: [assemblies.orgId, assemblies.key],
+      columns: [t.revisionId, t.assemblyKey],
+      foreignColumns: [assemblies.revisionId, assemblies.key],
       name: "typology_recipes_assembly_fk",
     }).onDelete("restrict"),
   ],
@@ -488,6 +543,18 @@ export const estimateSnapshots = pgTable(
       .notNull(),
     /** Frozen photo/aerial arbitration; null when only one sensor reported. INTERNAL. */
     reconciliation: jsonb("reconciliation").$type<ReconciliationReport>(),
+    /**
+     * The price book revision this was priced from.
+     *
+     * The line items above are already frozen, so this is not how the
+     * numbers are recovered — it is how they are EXPLAINED. A delta saying
+     * an estimate missed by 15% is only interpretable against the prices
+     * that produced it, and this is the pointer that says which those were.
+     * Null on snapshots frozen before revisions existed.
+     */
+    priceBookRevisionId: uuid("price_book_revision_id").references(
+      () => priceBookRevisions.id,
+    ),
   },
   (t) => [
     index("estimate_snapshots_project_idx").on(t.projectId, t.seq),
@@ -601,7 +668,23 @@ export const snapshotRelations = relations(estimateSnapshots, ({ one }) => ({
     fields: [estimateSnapshots.projectId],
     references: [projects.id],
   }),
+  priceBookRevision: one(priceBookRevisions, {
+    fields: [estimateSnapshots.priceBookRevisionId],
+    references: [priceBookRevisions.id],
+  }),
 }));
+
+export const priceBookRevisionRelations = relations(
+  priceBookRevisions,
+  ({ one, many }) => ({
+    organization: one(organizations, {
+      fields: [priceBookRevisions.orgId],
+      references: [organizations.id],
+    }),
+    costItems: many(costItems),
+    assemblies: many(assemblies),
+  }),
+);
 
 export const deltaRelations = relations(measurementDeltas, ({ one }) => ({
   project: one(projects, {

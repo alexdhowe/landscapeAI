@@ -22,12 +22,15 @@ not negotiable.
 | 6 — Confirmation gate | ✅ done — rep corrections, deltas, final quote |
 | Persistence — Postgres + Drizzle | ✅ done — migrations, `lib/db/queries.ts`, deltas are a table |
 | Contractor auth | ✅ done — Auth.js, console and contractor APIs gated |
+| `/pricebook` | ✅ done — full CRUD on immutable, published revisions |
 
-All six phases are in, they run on Postgres, and the contractor console is
-behind a login. `npm test` runs 192 tests — with a database and without one.
+All six phases are in, they run on Postgres, the contractor console is behind
+a login, and the price book is editable. `npm test` runs 240 tests — with a
+database and without one.
 
-Still open from sections 3 and 4, each its own session: `/pricebook`,
-`/api/imagery`, and photo object storage.
+Still open from sections 3 and 4, each its own session: `/api/imagery` and
+photo object storage. The imagery provider decision (section 3) is the real
+blocker on the first of those.
 
 ## Stack
 
@@ -39,7 +42,7 @@ store, so a clean checkout runs the demo with nothing to provision.
 ## Commands
 
 ```sh
-npm test          # Vitest — 192 tests across every phase
+npm test          # Vitest — 240 tests across every phase
 npm run typecheck
 npm run dev
 npm run build
@@ -178,6 +181,63 @@ A quote is final — revising one would be a new revision, which the MVP
 does not model. Corrections cover region **area (SF) and edge run (LF)**;
 EA counts (plant quantities) stay typology-scaled, since they are
 per-assembly rather than per-region and need a line-item editor.
+
+## The price book
+
+`/pricebook` (project-map section 4), admin only. Full CRUD on cost items,
+assemblies and their component lines, margin, both disclosure policies, and
+the job-type recipes behind the opening band.
+
+**Editing is copy-on-write.** A published revision is frozen — nothing in
+`lib/db/queries.ts` updates a row belonging to one, and `writeRevisionConfig`
+refuses outright. Editing anything opens a **draft** (at most one per org,
+enforced by a partial unique index), which copies the current book. The draft
+prices nobody. Publishing is a separate, validated act that numbers the
+revision, stamps who did it, and becomes the book every new estimate is built
+from.
+
+This is the same rule the rest of the system already lives by. Estimates are
+immutable snapshots; a snapshot is only interpretable against the prices that
+produced it; so the prices have to stop changing underneath it. Every
+`EstimateSnapshot` records its `priceBookRevisionId`, so a measurement delta
+from March stays readable against the book that was in force in March —
+`resolveOrgAt(date)` returns it.
+
+There is no separate audit log. Revisions are immutable, so the **diff
+between two of them is what happened**, and unlike an audit table it cannot
+drift from the rows it describes. `/pricebook` renders that as the history:
+"Revision 2 · Spring 2026 mulch increase · Sam Rep · Cost item
+mulch_hardwood: unitCost 38 → 46".
+
+### The publish gate
+
+A draft may be broken — that is what a draft is for. Publishing may not be,
+and `lib/pricebook/validate.ts` is the gate. The rule it exists for is
+section 1's:
+
+> **The catalog is the guardrail.** Every option a customer can click must
+> map to assemblies and SKUs that exist.
+
+Delete an assembly the configurator offers and the publish is refused with
+the option named. It also refuses a component pointing at an unstocked SKU, a
+margin floor above the target, a rounding increment of zero, tier mode with
+fewer than two tiers, unordered percentiles, and any policy that would show
+unit rates. Warnings — a SKU nothing uses yet — do not block: that is a
+contractor mid-thought, not a mistake.
+
+Deletes refuse rather than cascade. Removing a SKU two assemblies price with
+returns 409 naming both, because a cascade would carry the mistake across the
+book silently.
+
+`lib/pricebook/` is pure and carries most of the tests: `validate.ts`,
+`diff.ts`, `mutate.ts` (every edit is a pure function from one config to the
+next) and `parse.ts` (strict — a silently-coerced NaN here is a wrong price
+in front of a customer). `service.ts` is the only part that touches a
+database.
+
+Without a `DATABASE_URL` the book is `seed/pricebook.seed.ts` served as
+"revision 0" and the page says so rather than offering an edit with nowhere
+to go.
 
 ## Contractor auth
 
@@ -350,10 +410,15 @@ file — when real bids arrive, replace its contents and keep the exported
 names; the typology tests validate structure and self-consistency rather
 than pinned dollar values, so they survive the swap.
 
-With a database, that file is **seed input**: `npm run db:seed` writes it
-onto the org and the routes read the rows, so a contractor editing their
-price book edits data rather than source. Re-seeding never overwrites an
-existing org, precisely because it may have been edited since.
+With a database, that file is **seed input**: `npm run db:seed` writes it onto
+the org as **revision 1, published**, and the routes read the rows. From then
+on the book is edited at `/pricebook`, which is why re-seeding never
+overwrites an existing org — its book has almost certainly moved on.
+
+`lib/catalog/__tests__/options.test.ts` still checks the catalog against this
+file, which stays correct: the seed has to satisfy the guardrail. What the
+publish validator adds is the same check against a book a contractor has
+since edited.
 
 Current WI-average opening bands (sell price):
 

@@ -34,6 +34,11 @@ export default async function ContractorLayout({
               <Link href="/deltas" className="hover:text-neutral-900">
                 Estimation error
               </Link>
+              {contractor.role === "admin" && (
+                <Link href="/pricebook" className="hover:text-neutral-900">
+                  Price book
+                </Link>
+              )}
             </nav>
           </div>
           <div className="flex items-center gap-3">

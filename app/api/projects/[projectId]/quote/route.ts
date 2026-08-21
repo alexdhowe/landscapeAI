@@ -52,7 +52,9 @@ export async function POST(request: Request, { params }: Params) {
     const quote = confirmedQuote(project, org.typology, org.finalQuotePolicy, {
       supersededBand: submittedBand(project),
     });
-    const snapshot = freezeSnapshot(project, quote);
+    const snapshot = freezeSnapshot(project, quote, {
+      priceBook: { revisionId: org.revisionId, revision: org.revision },
+    });
     await issueFinalQuote(projectId, snapshot);
 
     return new NextResponse(snapshot.customerFacingPayload, {

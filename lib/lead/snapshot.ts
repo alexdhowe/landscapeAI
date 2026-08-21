@@ -71,7 +71,12 @@ export class QuoteNotFreezableError extends Error {
 export function freezeSnapshot(
   project: DesignProject,
   quote: ProjectQuote,
-  options?: { id?: string; now?: () => string },
+  options?: {
+    id?: string;
+    now?: () => string;
+    /** Which revision of the price book produced this. */
+    priceBook?: { revisionId: string; revision: number };
+  },
 ): EstimateSnapshot {
   if (!quote.estimate) {
     throw new QuoteNotFreezableError();
@@ -103,6 +108,12 @@ export function freezeSnapshot(
     customerFacingPayload,
     disclosurePolicyUsed: quote.policyUsed,
     reconciliation: quote.reconciliation,
+    ...(options?.priceBook
+      ? {
+          priceBookRevisionId: options.priceBook.revisionId,
+          priceBookRevision: options.priceBook.revision,
+        }
+      : {}),
   };
 }
 
