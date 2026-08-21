@@ -8,8 +8,10 @@ import type {
   RegionKind,
   SegmentationResult,
   SegmentedRegion,
+  VerticalElement,
+  VerticalElementKind,
 } from "./types";
-import { REGION_KINDS } from "./types";
+import { REGION_KINDS, VERTICAL_ELEMENT_KINDS } from "./types";
 
 const clamp01 = (n: number) => Math.min(1, Math.max(0, n));
 
@@ -78,6 +80,51 @@ function parseKind(raw: unknown): RegionKind | null {
   return null;
 }
 
+/** Sanity ceiling on the photo's footprint guess — a yard, not a ranch. */
+const MAX_ESTIMATED_AREA_SF = 100_000;
+
+function parseEstimatedAreaSf(raw: unknown): number | undefined {
+  if (typeof raw !== "number" || !Number.isFinite(raw) || raw <= 0) return undefined;
+  return Math.round(Math.min(raw, MAX_ESTIMATED_AREA_SF));
+}
+
+function parseVerticalKind(raw: unknown): VerticalElementKind | null {
+  if (typeof raw !== "string") return null;
+  const normalized = raw.trim().toLowerCase().replace(/[\s-]+/g, "_");
+  if ((VERTICAL_ELEMENT_KINDS as string[]).includes(normalized)) {
+    return normalized as VerticalElementKind;
+  }
+  // Common synonyms the model may emit.
+  if (normalized === "wall" || normalized === "seat_wall") return "retaining_wall";
+  if (normalized === "stairs" || normalized === "step") return "steps";
+  if (normalized === "slope" || normalized === "grade" || normalized === "berm") {
+    return "grade_change";
+  }
+  if (normalized === "planter" || normalized === "planter_box") return "raised_bed";
+  return null;
+}
+
+function parseVerticalElements(raw: unknown): VerticalElement[] {
+  if (!Array.isArray(raw)) return [];
+  const elements: VerticalElement[] = [];
+  for (const item of raw) {
+    if (item === null || typeof item !== "object") continue;
+    const e = item as Record<string, unknown>;
+    const kind = parseVerticalKind(e.kind);
+    const description = asString(e.description);
+    if (!kind || !description) continue;
+    elements.push({
+      kind,
+      description,
+      confidence:
+        typeof e.confidence === "number" && Number.isFinite(e.confidence)
+          ? clamp01(e.confidence)
+          : 0.5,
+    });
+  }
+  return elements;
+}
+
 /**
  * Parse model text into a SegmentationResult. Invalid regions are dropped
  * rather than failing the whole response; throws only when no JSON object
@@ -97,7 +144,13 @@ export function parseSegmentation(
     throw new Error("Vision response JSON was not an object");
   }
 
-  const obj = data as { regions?: unknown; cannot_see?: unknown; cannotSee?: unknown };
+  const obj = data as {
+    regions?: unknown;
+    vertical_elements?: unknown;
+    verticalElements?: unknown;
+    cannot_see?: unknown;
+    cannotSee?: unknown;
+  };
   const rawRegions = Array.isArray(obj.regions) ? obj.regions : [];
 
   const regions: SegmentedRegion[] = [];
@@ -117,6 +170,10 @@ export function parseSegmentation(
       label: asString(r.label) ?? `Region ${i + 1}`,
       polygon,
       existingMaterial: asString(r.existing_material) ?? asString(r.existingMaterial),
+      condition: asString(r.condition),
+      estimatedAreaSf:
+        parseEstimatedAreaSf(r.estimated_area_sf) ??
+        parseEstimatedAreaSf(r.estimatedAreaSf),
       confidence,
     });
   });
@@ -126,5 +183,10 @@ export function parseSegmentation(
     ? rawCannotSee.filter((s): s is string => typeof s === "string" && s.trim() !== "")
     : [];
 
-  return { regions, cannotSee, source };
+  return {
+    regions,
+    verticalElements: parseVerticalElements(obj.vertical_elements ?? obj.verticalElements),
+    cannotSee,
+    source,
+  };
 }

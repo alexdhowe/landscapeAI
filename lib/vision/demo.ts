@@ -19,6 +19,8 @@ export function demoSegmentation(): SegmentationResult {
           [0.02, 0.98],
         ],
         existingMaterial: "turf grass",
+        condition: "healthy with some thin patches",
+        estimatedAreaSf: 1100,
         confidence: 0.9,
       },
       {
@@ -32,6 +34,8 @@ export function demoSegmentation(): SegmentationResult {
           [0.04, 0.73],
         ],
         existingMaterial: "hardwood mulch",
+        condition: "faded, weeds coming through",
+        estimatedAreaSf: 300,
         confidence: 0.85,
       },
       {
@@ -45,6 +49,8 @@ export function demoSegmentation(): SegmentationResult {
           [0.51, 0.66],
         ],
         existingMaterial: "overgrown shrubs in mulch",
+        condition: "overgrown, crowding the siding",
+        estimatedAreaSf: 250,
         confidence: 0.8,
       },
       {
@@ -58,7 +64,21 @@ export function demoSegmentation(): SegmentationResult {
           [0.4, 0.98],
         ],
         existingMaterial: "concrete",
+        condition: "sound, minor surface cracking",
+        estimatedAreaSf: 180,
         confidence: 0.9,
+      },
+    ],
+    verticalElements: [
+      {
+        kind: "steps",
+        description: "two concrete steps at the front door",
+        confidence: 0.85,
+      },
+      {
+        kind: "grade_change",
+        description: "lawn slopes gently down toward the street",
+        confidence: 0.6,
       },
     ],
     cannotSee: [

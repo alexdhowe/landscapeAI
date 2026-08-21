@@ -24,6 +24,14 @@ export type BandPayload = {
     unmeasuredRegions: number;
     totalAreaSf: number;
   };
+  /** Phase 4: photo/aerial arbitration summary. Present when both sensors reported. */
+  reconciliation?: {
+    outcome: "tighten" | "hold" | "review";
+    flagged: boolean;
+    comparedRegions: number;
+    flaggedRegions: { id: string; label: string }[];
+    verticalElements: { kind: string; description: string }[];
+  } | null;
 };
 
 const JOB_TYPE_LABELS: Record<string, string> = {
@@ -123,6 +131,43 @@ export function PriceRail({
                   yet — still estimated from typical projects.
                 </p>
               )}
+              {payload?.reconciliation?.outcome === "review" && (
+                <div className="mt-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                  <p className="font-medium">
+                    Your photo doesn&apos;t match what was measured at this address
+                    {payload.reconciliation.flaggedRegions.length > 0 && (
+                      <>
+                        {" "}
+                        ({payload.reconciliation.flaggedRegions
+                          .map((r) => r.label)
+                          .join(", ")})
+                      </>
+                    )}
+                    .
+                  </p>
+                  <p className="mt-1">
+                    We&apos;ve widened the range to be safe. Double-check the address and
+                    the drawn areas, or upload another photo — a rep will verify
+                    everything before anything is final.
+                  </p>
+                </div>
+              )}
+              {payload?.reconciliation?.outcome === "tighten" && (
+                <p className="mt-2 text-xs text-emerald-700">
+                  Your photo and the aerial measurements agree — we&apos;ve tightened
+                  this range.
+                </p>
+              )}
+              {payload?.reconciliation &&
+                payload.reconciliation.verticalElements.length > 0 && (
+                  <p className="mt-2 text-xs text-neutral-500">
+                    Also seen in your photo (confirmed at the site visit):{" "}
+                    {payload.reconciliation.verticalElements
+                      .map((v) => v.description)
+                      .join("; ")}
+                    .
+                  </p>
+                )}
             </>
           ) : (
             <p className="mt-1 text-sm text-neutral-600">

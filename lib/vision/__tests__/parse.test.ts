@@ -28,8 +28,13 @@ const validResponse = JSON.stringify({
         [0.1, 0.55],
       ],
       existing_material: "hardwood mulch",
+      condition: "faded, weeds coming through",
+      estimated_area_sf: 280.6,
       confidence: 0.8,
     },
+  ],
+  vertical_elements: [
+    { kind: "retaining_wall", description: "timber wall along driveway", confidence: 0.7 },
   ],
   cannot_see: ["back yard"],
 });
@@ -59,8 +64,46 @@ describe("parseSegmentation", () => {
       existingMaterial: "turf grass",
       confidence: 0.9,
     });
+    expect(result.regions[1]).toMatchObject({
+      condition: "faded, weeds coming through",
+      estimatedAreaSf: 281, // rounded to whole SF
+    });
+    expect(result.verticalElements).toEqual([
+      { kind: "retaining_wall", description: "timber wall along driveway", confidence: 0.7 },
+    ]);
     expect(result.cannotSee).toEqual(["back yard"]);
     expect(result.source).toBe("claude");
+  });
+
+  it("drops invalid area estimates and defaults vertical elements to empty", () => {
+    const result = parseSegmentation(
+      JSON.stringify({
+        regions: [
+          { kind: "bed", polygon: [[0, 0], [1, 0], [1, 1]], estimated_area_sf: -50 },
+          { kind: "turf", polygon: [[0, 0], [1, 0], [1, 1]], estimated_area_sf: "big" },
+        ],
+      }),
+    );
+    expect(result.regions.map((r) => r.estimatedAreaSf)).toEqual([undefined, undefined]);
+    expect(result.verticalElements).toEqual([]);
+  });
+
+  it("normalizes vertical element kinds and drops malformed entries", () => {
+    const result = parseSegmentation(
+      JSON.stringify({
+        regions: [],
+        vertical_elements: [
+          { kind: "Stairs", description: "front stoop steps", confidence: 0.9 },
+          { kind: "slope", description: "yard falls toward street" },
+          { kind: "retaining_wall" }, // no description → dropped
+          { kind: "chimney", description: "brick chimney" }, // unknown kind → dropped
+        ],
+      }),
+    );
+    expect(result.verticalElements).toEqual([
+      { kind: "steps", description: "front stoop steps", confidence: 0.9 },
+      { kind: "grade_change", description: "yard falls toward street", confidence: 0.5 },
+    ]);
   });
 
   it("clamps out-of-range coordinates and confidence into [0, 1]", () => {

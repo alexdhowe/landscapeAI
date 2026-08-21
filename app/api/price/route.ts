@@ -5,6 +5,11 @@ import {
   measuredBandForSelections,
   type RegionMeasurement,
 } from "@/lib/design/measured";
+import {
+  reconcileDesign,
+  type ReconciliationReport,
+} from "@/lib/measure/reconcile";
+import type { Quantity } from "@/lib/pricing/types";
 import { ProjectNotFoundError, getProject } from "@/lib/store/projects";
 import { wiBandPolicy, wiTypologyConfig } from "@/seed/pricebook.seed";
 
@@ -15,6 +20,12 @@ import { wiBandPolicy, wiTypologyConfig } from "@/seed/pricebook.seed";
  * the aerial; then basis "measured": the Phase 1 engine run on the drawn
  * quantities, projected through the disclosure policy. The typology band
  * rides along so the UI can show the range visibly narrowing.
+ *
+ * Phase 4: once both sensors have reported — photo segmentation and aerial
+ * measurements — they are reconciled. Agreement tightens the disclosure
+ * band; disagreement (e.g. a photo paired with the wrong address) widens
+ * it and flags the design for review. The response carries a customer-safe
+ * summary of that arbitration.
  *
  * The pricing engine runs only here, server-side. The response is the
  * customer-facing projection — never line items, unit rates, costs, or
@@ -43,18 +54,45 @@ export async function POST(request: Request) {
     }
 
     const measurements: Record<string, RegionMeasurement> = {};
+    const aerialAreaByRegionId: Record<string, Quantity> = {};
     for (const region of project.aerialRegions ?? []) {
       measurements[region.photoRegionId] = {
         areaSf: region.areaSf,
         perimeterLf: region.perimeterLf,
       };
+      aerialAreaByRegionId[region.photoRegionId] = region.areaSf;
     }
+
+    // Both sensors present → arbitrate. (Projects segmented before Phase 4
+    // have no verticalElements field; treat that as none reported.)
+    let reconciliation: ReconciliationReport | null = null;
+    if (
+      project.segmentation.status === "ready" &&
+      Object.keys(aerialAreaByRegionId).length > 0
+    ) {
+      reconciliation = reconcileDesign(
+        {
+          regions: project.segmentation.regions,
+          verticalElements: project.segmentation.verticalElements ?? [],
+          cannotSee: project.segmentation.cannotSee,
+        },
+        aerialAreaByRegionId,
+      );
+    }
+
+    const policy = reconciliation
+      ? {
+          ...wiBandPolicy,
+          bandWidthPct: wiBandPolicy.bandWidthPct * reconciliation.bandWidthFactor,
+        }
+      : wiBandPolicy;
+
     const measured = measuredBandForSelections(
       project.selections,
       measurements,
       project.marketContext,
       wiTypologyConfig,
-      wiBandPolicy,
+      policy,
     );
 
     if (measured) {
@@ -74,6 +112,22 @@ export async function POST(request: Request) {
           unmeasuredRegions: measured.unmeasuredRegionIds.length,
           totalAreaSf: measured.totalMeasuredAreaSf,
         },
+        // Customer-safe arbitration summary: verdicts and photo scope notes
+        // only — no internal pricing data.
+        reconciliation: reconciliation
+          ? {
+              outcome: reconciliation.outcome,
+              flagged: reconciliation.flagged,
+              comparedRegions: reconciliation.comparedRegionIds.length,
+              flaggedRegions: reconciliation.regions
+                .filter((r) => r.verdict === "disagreement")
+                .map((r) => ({ id: r.photoRegionId, label: r.label })),
+              verticalElements: reconciliation.verticalElements.map((v) => ({
+                kind: v.kind,
+                description: v.description,
+              })),
+            }
+          : null,
       });
     }
 

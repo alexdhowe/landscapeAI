@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { renderModeForProject } from "@/lib/design/render";
 import type { DesignProject, RegionSelection } from "@/lib/design/types";
 import type { MarketContext } from "@/lib/pricing/typology";
 
@@ -120,6 +121,10 @@ export function Configurator({ projectId }: { projectId: string }) {
   const seg = project.segmentation;
   const regions = seg.status === "ready" ? seg.regions : [];
   const selectedRegion = regions.find((r) => r.id === selectedRegionId) ?? null;
+  // Rendering is gated by confidence (architectural invariant): once a
+  // quantity has been measured, only deterministic rendering — generated
+  // from the design graph — may sit next to the numbers.
+  const deterministic = renderModeForProject(project) === "deterministic";
 
   return (
     <div className="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(280px,1fr)]">
@@ -147,6 +152,20 @@ export function Configurator({ projectId }: { projectId: string }) {
           selectedRegionId={selectedRegionId}
           onSelectRegion={setSelectedRegionId}
         />
+        {deterministic && (
+          <p className="text-xs text-neutral-400">
+            <span className="mr-1.5 inline-block rounded-full bg-emerald-100 px-2 py-0.5 font-medium text-emerald-800">
+              Measured view
+            </span>
+            Your yard has been measured, so this preview is drawn exactly from your
+            design — nothing is AI-imagined from here on.
+          </p>
+        )}
+        {seg.status === "ready" && (seg.verticalElements ?? []).length > 0 && (
+          <p className="text-xs text-neutral-400">
+            Also noticed: {seg.verticalElements.map((v) => v.description).join("; ")}.
+          </p>
+        )}
         {seg.status === "ready" && seg.cannotSee.length > 0 && (
           <p className="text-xs text-neutral-400">
             Not visible in this photo: {seg.cannotSee.join(", ")}.

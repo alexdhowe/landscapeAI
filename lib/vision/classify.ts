@@ -32,6 +32,10 @@ Allowed region kinds (use exactly these strings):
 - "hardscape" — patios, walkways, driveways, steps
 - "foundation_planting" — planted strips directly against the house foundation
 
+Also report vertical elements — things visible in the photo that an aerial view cannot show. Allowed kinds (use exactly these strings): "retaining_wall", "steps", "fence", "grade_change", "raised_bed", "other".
+
+For each region, estimate its visible ground footprint in square feet ("estimated_area_sf"). This is a rough cross-check against a separate aerial measurement, not a billable quantity — give your honest best guess from context clues (door widths, siding courses, walkway widths) and reflect the uncertainty in the region's confidence.
+
 Respond with ONLY a JSON object, no other text:
 {
   "regions": [
@@ -41,13 +45,22 @@ Respond with ONLY a JSON object, no other text:
       "label": "Short human label, e.g. 'Bed along front walk'",
       "polygon": [[x, y], [x, y], ...],
       "existing_material": "what is there now, e.g. 'hardwood mulch', 'concrete'",
+      "condition": "observed condition, e.g. 'faded mulch, weeds coming through'",
+      "estimated_area_sf": rough visible ground area in square feet,
+      "confidence": 0.0-1.0
+    }
+  ],
+  "vertical_elements": [
+    {
+      "kind": "retaining_wall" | "steps" | "fence" | "grade_change" | "raised_bed" | "other",
+      "description": "short description, e.g. 'timber retaining wall along driveway'",
       "confidence": 0.0-1.0
     }
   ],
   "cannot_see": ["things you cannot determine from this photo, e.g. 'back yard', 'drainage'"]
 }
 
-If the photo shows no yard at all, return {"regions": [], "cannot_see": ["no landscape visible in photo"]}.`;
+If the photo shows no yard at all, return {"regions": [], "vertical_elements": [], "cannot_see": ["no landscape visible in photo"]}.`;
 
 export function hasVisionCredentials(): boolean {
   return Boolean(process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN);
