@@ -33,6 +33,21 @@ import type {
 } from "../lib/pricing/typology";
 
 // ---------------------------------------------------------------------------
+// The tenant this price book belongs to
+// ---------------------------------------------------------------------------
+
+/**
+ * The one contractor org for now (project-map section 5: Organization is
+ * the tenant that owns the price book). Everything below is seeded onto it
+ * by `npm run db:seed`, and routes resolve it by slug rather than importing
+ * these constants.
+ */
+export const wiOrganization = {
+  slug: "wi-reference",
+  name: "Wisconsin Reference Contractor (placeholder data)",
+};
+
+// ---------------------------------------------------------------------------
 // Hard goods, labor, equipment, disposal
 // ---------------------------------------------------------------------------
 

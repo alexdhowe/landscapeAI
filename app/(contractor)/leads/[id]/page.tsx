@@ -21,10 +21,10 @@ import {
   submittedSnapshot,
   type SnapshotCustomerView,
 } from "@/lib/lead/snapshot";
+import { resolveOrg } from "@/lib/org/resolve";
 import { ProjectNotFoundError, getProject } from "@/lib/store/projects";
-import { wiTypologyConfig } from "@/seed/pricebook.seed";
 
-/** Leads live in the file store — always render from the current state. */
+/** A lead moves through the gate while the page is open — never cache it. */
 export const dynamic = "force-dynamic";
 
 const JOB_TYPE_LABELS: Record<string, string> = {
@@ -99,9 +99,10 @@ export default async function LeadPage({
     : null;
   const finalPayload =
     finalView && isFinalQuotePayload(finalView.estimate) ? finalView.estimate : null;
+  const org = await resolveOrg();
   const confirmRows: ConfirmRow[] = currentRegionQuantities(
     project,
-    wiTypologyConfig,
+    org.typology,
   ).map((q) => ({
     regionId: q.regionId,
     label: q.label,

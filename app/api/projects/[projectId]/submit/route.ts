@@ -3,13 +3,13 @@ import { NextResponse } from "next/server";
 import { quoteProject } from "@/lib/design/quote";
 import { freezeSnapshot } from "@/lib/lead/snapshot";
 import type { LeadContact } from "@/lib/lead/types";
+import { resolveOrg } from "@/lib/org/resolve";
 import {
   ProjectLockedError,
   ProjectNotFoundError,
   getProject,
   submitProject,
 } from "@/lib/store/projects";
-import { wiBandPolicy, wiTypologyConfig } from "@/seed/pricebook.seed";
 
 type Params = { params: Promise<{ projectId: string }> };
 
@@ -73,7 +73,8 @@ export async function POST(request: Request, { params }: Params) {
       );
     }
 
-    const quote = quoteProject(project, wiTypologyConfig, wiBandPolicy);
+    const org = await resolveOrg();
+    const quote = quoteProject(project, org.typology, org.bandPolicy);
     if (!quote || !quote.estimate) {
       return NextResponse.json(
         { error: "Pick at least one option before sending your design" },

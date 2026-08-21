@@ -20,23 +20,36 @@ not negotiable.
 | 4 — Reconciliation | ✅ done — photo/aerial arbitration, disagreement flags |
 | 5 — Lead capture / dashboard | ✅ done — immutable snapshot, contractor inbox |
 | 6 — Confirmation gate | ✅ done — rep corrections, deltas, final quote |
+| Persistence — Postgres + Drizzle | ✅ done — migrations, `lib/db/queries.ts`, deltas are a table |
 
-All six phases are in. `npm test` runs 163 tests.
+All six phases are in, and they run on Postgres. `npm test` runs 181 tests —
+with a database and without one.
+
+Still open from sections 3 and 4, each its own session: `/pricebook`,
+`/api/imagery`, photo object storage, and contractor auth.
 
 ## Stack
 
-Next.js 15 (App Router) + TypeScript + Tailwind. Drizzle against Postgres
-(schema scaffolded in `lib/db/schema.ts`, no migrations run yet — Phase 1 is
-pure logic with no DB).
+Next.js 15 (App Router) + TypeScript + Tailwind. Drizzle against Postgres —
+schema in `lib/db/schema.ts`, migrations in `drizzle/`, every query in
+`lib/db/queries.ts`. With no `DATABASE_URL` the app falls back to the file
+store, so a clean checkout runs the demo with nothing to provision.
 
 ## Commands
 
 ```sh
-npm test          # Vitest — 163 tests across every phase
+npm test          # Vitest — 181 tests across every phase
 npm run typecheck
 npm run dev
 npm run build
+
+npm run db:generate   # regenerate migrations from lib/db/schema.ts
+npm run db:migrate    # apply them
+npm run db:seed       # load the org's price book from seed/pricebook.seed.ts
+npm run db:setup      # migrate + seed
 ```
+
+See `.env.example` for what is configurable. All of it is optional.
 
 ## The photo experience (Phase 2)
 
@@ -59,9 +72,8 @@ picker filtered to the clicked region's kind, and a budget band that reads
 - Visual swap is deterministic: the region polygon fills with an SVG
   material pattern generated from the selection. The image stays a view of
   the object graph, never the artifact.
-- Projects live in a file-backed store under `.data/` (gitignored) behind
-  `lib/store/projects.ts` — the only module that knows storage; Postgres
-  replaces it at the lead-capture phase without touching the UI.
+- Projects live behind `lib/store/projects.ts` — the only module that knows
+  storage. See [the database](#the-database) below.
 
 ## The aerial measurement layer (Phase 3)
 
@@ -165,6 +177,89 @@ does not model. Corrections cover region **area (SF) and edge run (LF)**;
 EA counts (plant quantities) stay typology-scaled, since they are
 per-assembly rather than per-region and need a line-item editor.
 
+## The database
+
+Postgres via Drizzle, per project-map section 3. `DATABASE_URL` is the
+switch: set it and `lib/store/projects.ts` runs on the database; leave it
+unset and the same exports run on JSON files under `.data/`. Nothing above
+the store knows which, and the acceptance suite runs against both.
+
+```sh
+export DATABASE_URL=postgres://…
+npm run db:setup      # migrate, then seed the org
+npm run dev
+```
+
+- `lib/db/schema.ts` — the tables, reconciled against what phases 5 and 6
+  actually persist. Every quantity is JSONB and stored **whole**, so
+  `source`, `confidence` and `supersedes` survive the round trip; there is
+  no bare numeric column standing in for a measurement anywhere.
+  `estimate_snapshots.customer_facing_payload` is **TEXT**, deliberately —
+  a JSONB round trip would re-serialize the customer's bytes, and a
+  re-serialized snapshot is not a snapshot.
+- `lib/db/queries.ts` — every query, and the only place rows become domain
+  objects.
+- `lib/db/client.ts` — the only module that opens a connection.
+- `drizzle/` — generated migrations, committed. `npm run db:generate` after
+  a schema change.
+
+**`measurement_deltas` is a table now.** The corpus was JSON inside project
+files, and the query section 6 calls "the whole business" answered it by
+reading every project on disk. It is one indexed statement:
+
+```sql
+with errors as (
+  select job_type,
+         ((before_qty ->> 'value')::double precision
+          - (after_qty  ->> 'value')::double precision)
+         / (after_qty ->> 'value')::double precision * 100 as error_pct
+  from measurement_deltas
+)
+select job_type,
+       count(*),
+       round(avg(error_pct)::numeric, 1)                     as mean_error_pct,
+       round(avg(abs(error_pct))::numeric, 1)                as mean_abs_error_pct,
+       round((percentile_disc(0.9)
+              within group (order by abs(error_pct)))::numeric, 1) as p90_abs_error_pct
+from errors
+group by job_type;
+```
+
+Same numbers `/deltas` renders (`lib/confirm/analytics.ts`); a test asserts
+the two agree to the digit. `percentile_disc` is nearest-rank, matching the
+analytics module's deliberate refusal to interpolate a percentile out of a
+contractor's double-digit sample.
+
+**Organization is real.** Section 5 makes it the contractor tenant that owns
+the price book, and it does: cost items, assemblies, margin config, both
+disclosure policies, and the bid distributions behind the opening band are
+per-org rows. Routes call `resolveOrg()` instead of importing constants.
+`seed/pricebook.seed.ts` is unchanged in what it holds and changed in what
+it is — seed input (`npm run db:seed`) rather than a runtime import. Without
+a database `resolveOrg()` reads it directly, which is what keeps the
+no-database demo honest rather than a different product. One org for now.
+
+`lib/pricing` still imports none of this. A test reads its source and fails
+if a `lib/db`, `lib/store`, drizzle, `next`, `react` or `fetch` import ever
+appears there — the engine takes a price book as an argument, as it always
+has.
+
+### Tests need no server
+
+`npm test` runs the whole suite twice over, in effect:
+
+- With no `DATABASE_URL`, the store tests use throwaway temp directories and
+  the database acceptance test brings up **PGlite** — Postgres compiled to
+  wasm, in-process, disposable.
+- With `DATABASE_URL` set, the entire suite runs against that server inside a
+  **disposable schema** created and dropped per run
+  (`vitest.globalSetup.ts`), so a run never touches your data.
+
+Either way `lib/db/__tests__/store.test.ts` drives the phase 5 and phase 6
+acceptance paths through the real route handlers — submit a lead, correct a
+bed 400 → 470 SF, issue the final quote — and asserts the customer's frozen
+bytes come back byte-identical after a database round trip.
+
 ## The pricing engine
 
 `lib/pricing` is pure TypeScript: no imports from `app/`, `lib/db/`, or
@@ -194,6 +289,11 @@ quantity distributions per job type. Everything is centralized in that one
 file — when real bids arrive, replace its contents and keep the exported
 names; the typology tests validate structure and self-consistency rather
 than pinned dollar values, so they survive the swap.
+
+With a database, that file is **seed input**: `npm run db:seed` writes it
+onto the org and the routes read the rows, so a contractor editing their
+price book edits data rather than source. Re-seeding never overwrites an
+existing org, precisely because it may have been edited since.
 
 Current WI-average opening bands (sell price):
 

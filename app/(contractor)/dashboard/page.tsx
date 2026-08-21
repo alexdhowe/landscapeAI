@@ -8,7 +8,7 @@ import {
 } from "@/lib/lead/snapshot";
 import { listLeads } from "@/lib/store/projects";
 
-/** Leads live in the file store — always render from the current state. */
+/** The inbox changes with every submit — always render current state. */
 export const dynamic = "force-dynamic";
 
 const JOB_TYPE_LABELS: Record<string, string> = {

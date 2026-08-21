@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 
 import { quoteProject } from "@/lib/design/quote";
+import { resolveOrg } from "@/lib/org/resolve";
 import { ProjectNotFoundError, getProject } from "@/lib/store/projects";
-import { wiBandPolicy, wiTypologyConfig } from "@/seed/pricebook.seed";
 
 /**
  * POST { projectId } → the customer-facing band for the current design.
@@ -28,8 +28,11 @@ export async function POST(request: Request) {
   }
 
   try {
-    const project = await getProject(body.projectId);
-    const quote = quoteProject(project, wiTypologyConfig, wiBandPolicy);
+    const [project, org] = await Promise.all([
+      getProject(body.projectId),
+      resolveOrg(),
+    ]);
+    const quote = quoteProject(project, org.typology, org.bandPolicy);
     if (!quote) {
       return NextResponse.json({ band: null });
     }

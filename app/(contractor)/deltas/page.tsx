@@ -6,7 +6,7 @@ import type { MeasurementDelta } from "@/lib/confirm/types";
 import type { QuantitySource } from "@/lib/pricing/types";
 import { listMeasurementDeltas } from "@/lib/store/projects";
 
-/** Deltas live in the file store — always render from the current state. */
+/** The corpus changes whenever a rep confirms — always render current state. */
 export const dynamic = "force-dynamic";
 
 const JOB_TYPE_LABELS: Record<string, string> = {

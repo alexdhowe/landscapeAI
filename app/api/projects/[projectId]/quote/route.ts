@@ -12,13 +12,13 @@ import {
   submittedSnapshot,
   type SnapshotCustomerView,
 } from "@/lib/lead/snapshot";
+import { resolveOrg } from "@/lib/org/resolve";
 import {
   ProjectNotFoundError,
   ProjectStageError,
   getProject,
   issueFinalQuote,
 } from "@/lib/store/projects";
-import { wiFinalQuotePolicy, wiTypologyConfig } from "@/seed/pricebook.seed";
 
 type Params = { params: Promise<{ projectId: string }> };
 
@@ -41,8 +41,8 @@ function submittedBand(project: Awaited<ReturnType<typeof getProject>>) {
 export async function POST(_request: Request, { params }: Params) {
   const { projectId } = await params;
   try {
-    const project = await getProject(projectId);
-    const quote = confirmedQuote(project, wiTypologyConfig, wiFinalQuotePolicy, {
+    const [project, org] = await Promise.all([getProject(projectId), resolveOrg()]);
+    const quote = confirmedQuote(project, org.typology, org.finalQuotePolicy, {
       supersededBand: submittedBand(project),
     });
     const snapshot = freezeSnapshot(project, quote);

@@ -9,13 +9,13 @@ import {
 } from "@/lib/confirm/types";
 import type { Quantity } from "@/lib/pricing/types";
 import { inferJobType } from "@/lib/design/band";
+import { resolveOrg } from "@/lib/org/resolve";
 import {
   ProjectNotFoundError,
   ProjectStageError,
   appendDeltas,
   getProject,
 } from "@/lib/store/projects";
-import { wiTypologyConfig } from "@/seed/pricebook.seed";
 
 type Params = { params: Promise<{ projectId: string }> };
 
@@ -108,8 +108,9 @@ export async function POST(request: Request, { params }: Params) {
     // hierarchy: rep-confirmed (an earlier correction) > drawn aerial >
     // typology. A region the customer never designed has nothing to
     // correct, so it is rejected rather than invented.
+    const org = await resolveOrg();
     const current = new Map<string, Quantity>();
-    for (const q of currentRegionQuantities(project, wiTypologyConfig)) {
+    for (const q of currentRegionQuantities(project, org.typology)) {
       current.set(`${q.regionId}:SF`, q.areaSf);
       current.set(`${q.regionId}:LF`, q.perimeterLf);
     }
