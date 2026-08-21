@@ -45,7 +45,36 @@ export type CustomerReconciliationSummary = {
  * frozen for the customer at submit time. Display prices and scope only;
  * no line items, unit rates, costs, or margin.
  */
+/**
+ * The final quote, issued after a rep confirms quantities on site. It is a
+ * FIGURE, not a band: the band existed to be honest about what had not
+ * been measured, and once a person has measured it, the uncertainty it
+ * expressed is gone. Carries the band it replaced so the customer can see
+ * where the number landed inside what they were promised.
+ */
+export type FinalQuotePayload = {
+  quote: {
+    price: number;
+    currency: "USD";
+    basis: "rep_confirmed";
+  };
+  /** The band this supersedes, from the customer's submitted snapshot. */
+  supersededBand: { low: number; high: number } | null;
+  jobType: JobType;
+  context: MarketContext;
+  scope: string[];
+  confirmation: {
+    /** Regions a rep measured on site. */
+    confirmedRegions: number;
+    /** Total confirmed area across those regions, whole SF. */
+    confirmedAreaSf: number;
+    confirmedBy: string;
+    confirmedAt: string;
+  };
+};
+
 export type CustomerQuotePayload =
+  | FinalQuotePayload
   | {
       band: {
         low: number;
@@ -77,8 +106,31 @@ export type CustomerQuotePayload =
       scope: string[];
     };
 
+/**
+ * The displayed band, or null once a final quote has replaced it with a
+ * figure. Every surface that renders a customer payload goes through this
+ * or through isFinalQuotePayload — there is no third shape.
+ */
+export function customerBand(
+  payload: CustomerQuotePayload,
+): { low: number; high: number } | null {
+  // Just the endpoints, rebuilt — the band object also carries basis and
+  // currency, and a caller that stores this (the final quote's
+  // supersededBand) must not silently inherit them.
+  return isFinalQuotePayload(payload)
+    ? null
+    : { low: payload.band.low, high: payload.band.high };
+}
+
+/** True for the post-confirmation figure; the other variants carry a band. */
+export function isFinalQuotePayload(
+  payload: CustomerQuotePayload,
+): payload is FinalQuotePayload {
+  return "quote" in payload;
+}
+
 export type ProjectQuote = {
-  basis: "typology" | "measured";
+  basis: "typology" | "measured" | "rep_confirmed";
   jobType: JobType;
   /**
    * The engine estimate behind the customer band. INTERNAL — contractor

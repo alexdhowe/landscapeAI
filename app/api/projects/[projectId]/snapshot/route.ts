@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { latestSnapshot } from "@/lib/lead/snapshot";
+import { submittedSnapshot } from "@/lib/lead/snapshot";
 import { ProjectNotFoundError, getProject } from "@/lib/store/projects";
 
 type Params = { params: Promise<{ projectId: string }> };
@@ -11,12 +11,17 @@ type Params = { params: Promise<{ projectId: string }> };
  * customerFacingPayload, never the snapshot's internal fields, and it
  * never re-serializes — byte-identity with what was shown at submit time
  * is the whole point.
+ *
+ * Specifically the SUBMITTED snapshot, not the latest one: a Phase 6 final
+ * quote appends a newer record, and this endpoint's bytes must not change
+ * because a rep visited the site. The final quote has its own endpoint
+ * (../quote).
  */
 export async function GET(_request: Request, { params }: Params) {
   const { projectId } = await params;
   try {
     const project = await getProject(projectId);
-    const snapshot = latestSnapshot(project);
+    const snapshot = submittedSnapshot(project);
     if (!snapshot) {
       return NextResponse.json(
         { error: "This design has not been submitted" },

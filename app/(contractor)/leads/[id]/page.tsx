@@ -1,15 +1,28 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
+import {
+  ConfirmQuantities,
+  IssueFinalQuote,
+  type ConfirmRow,
+} from "@/components/leads/ConfirmQuantities";
 import { LeadPhoto } from "@/components/leads/LeadPhoto";
 import {
   ConfidenceMeter,
   ProvenanceBadge,
   VerdictBadge,
 } from "@/components/leads/badges";
+import { errorPct } from "@/lib/confirm/deltas";
+import { currentRegionQuantities } from "@/lib/confirm/quantities";
+import { customerBand, isFinalQuotePayload } from "@/lib/design/quote";
 import type { DesignProject } from "@/lib/design/types";
-import { latestSnapshot, type SnapshotCustomerView } from "@/lib/lead/snapshot";
+import {
+  finalQuoteSnapshot,
+  submittedSnapshot,
+  type SnapshotCustomerView,
+} from "@/lib/lead/snapshot";
 import { ProjectNotFoundError, getProject } from "@/lib/store/projects";
+import { wiTypologyConfig } from "@/seed/pricebook.seed";
 
 /** Leads live in the file store — always render from the current state. */
 export const dynamic = "force-dynamic";
@@ -69,11 +82,41 @@ export default async function LeadPage({
     if (error instanceof ProjectNotFoundError) notFound();
     throw error;
   }
-  const snapshot = latestSnapshot(project);
-  if (!snapshot || project.status !== "submitted") notFound();
+  // Always the SUBMITTED snapshot: a final quote appends a newer record,
+  // and this panel means "what the customer saw", which never changes.
+  const snapshot = submittedSnapshot(project);
+  if (!snapshot || project.status === "playing") notFound();
 
   const view = JSON.parse(snapshot.customerFacingPayload) as SnapshotCustomerView;
-  const band = view.estimate.band;
+  const band = customerBand(view.estimate);
+  const scope = view.estimate.scope;
+
+  // Phase 6 — the confirmation gate.
+  const deltas = project.deltas ?? [];
+  const finalQuote = finalQuoteSnapshot(project);
+  const finalView = finalQuote
+    ? (JSON.parse(finalQuote.customerFacingPayload) as SnapshotCustomerView)
+    : null;
+  const finalPayload =
+    finalView && isFinalQuotePayload(finalView.estimate) ? finalView.estimate : null;
+  const confirmRows: ConfirmRow[] = currentRegionQuantities(
+    project,
+    wiTypologyConfig,
+  ).map((q) => ({
+    regionId: q.regionId,
+    label: q.label,
+    areaSf: {
+      value: q.areaSf.value,
+      source: q.areaSf.source,
+      confidence: q.areaSf.confidence,
+    },
+    perimeterLf: {
+      value: q.perimeterLf.value,
+      source: q.perimeterLf.source,
+      confidence: q.perimeterLf.confidence,
+    },
+  }));
+
   const regions =
     project.segmentation.status === "ready" ? project.segmentation.regions : [];
   const reconciliation = snapshot.reconciliation;
@@ -305,6 +348,135 @@ export default async function LeadPage({
               </ul>
             )}
           </Section>
+
+          <Section
+            title="Site visit — confirm quantities"
+            badge={
+              <span
+                className={`rounded-full px-2.5 py-1 text-[11px] font-medium ${
+                  project.status === "quoted"
+                    ? "bg-emerald-100 text-emerald-800"
+                    : project.status === "confirmed"
+                      ? "bg-sky-100 text-sky-800"
+                      : "bg-neutral-200 text-neutral-600"
+                }`}
+              >
+                {project.status === "quoted"
+                  ? "Quoted"
+                  : project.status === "confirmed"
+                    ? `${deltas.length} correction${deltas.length === 1 ? "" : "s"} on record`
+                    : "Awaiting site visit"}
+              </span>
+            }
+          >
+            <ConfirmQuantities
+              projectId={project.id}
+              rows={confirmRows}
+              locked={project.status === "quoted"}
+            />
+            <div className="mt-5 border-t border-neutral-100 pt-4">
+              {finalQuote ? (
+                <p className="text-sm text-neutral-600">
+                  Final quote issued{" "}
+                  {new Date(finalQuote.issuedAt).toLocaleString("en-US", {
+                    dateStyle: "medium",
+                    timeStyle: "short",
+                  })}
+                  {" — "}
+                  {usd(finalPayload?.quote.price ?? finalQuote.internalTotal)}.
+                </p>
+              ) : (
+                <IssueFinalQuote
+                  projectId={project.id}
+                  disabled={deltas.length === 0}
+                  reason={
+                    deltas.length === 0
+                      ? "Record at least one on-site correction first — a final quote with nothing confirmed is the customer's estimate wearing a firmer number."
+                      : "Prices the job from the confirmed quantities and freezes it as a new snapshot. The customer's original stays exactly as submitted."
+                  }
+                />
+              )}
+            </div>
+          </Section>
+
+          {deltas.length > 0 && (
+            <Section
+              title="Measurement deltas"
+              badge={
+                <Link
+                  href="/deltas"
+                  className="rounded-full bg-neutral-200 px-2.5 py-1 text-[11px] font-medium text-neutral-700 hover:bg-neutral-300"
+                >
+                  Fleet-wide error →
+                </Link>
+              }
+            >
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[560px] text-left text-sm">
+                  <thead>
+                    <tr className="border-b border-neutral-200 text-xs uppercase tracking-wide text-neutral-400">
+                      <th className="py-2 pr-3 font-medium">Region</th>
+                      <th className="py-2 pr-3 font-medium">Estimated</th>
+                      <th className="py-2 pr-3 font-medium">Confirmed</th>
+                      <th className="py-2 pr-3 font-medium">Error</th>
+                      <th className="py-2 font-medium">By</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {deltas.map((delta) => {
+                      const error = errorPct(delta);
+                      return (
+                        <tr key={delta.id} className="border-b border-neutral-100">
+                          <td className="py-2 pr-3 text-neutral-800">
+                            {delta.regionLabel}
+                            {delta.note && (
+                              <span className="block text-xs text-neutral-400">
+                                {delta.note}
+                              </span>
+                            )}
+                          </td>
+                          <td className="py-2 pr-3 tabular-nums text-neutral-500">
+                            {qty(delta.beforeQty.value)} {delta.unit}
+                            <span className="ml-1.5 align-middle">
+                              <ProvenanceBadge source={delta.beforeQty.source} />
+                            </span>
+                          </td>
+                          <td className="py-2 pr-3 tabular-nums font-medium text-neutral-900">
+                            {qty(delta.afterQty.value)} {delta.unit}
+                          </td>
+                          <td
+                            className={`py-2 pr-3 tabular-nums ${
+                              Math.abs(error) >= 25
+                                ? "text-red-700"
+                                : Math.abs(error) >= 10
+                                  ? "text-amber-700"
+                                  : "text-emerald-700"
+                            }`}
+                          >
+                            {error > 0 ? "+" : ""}
+                            {error.toFixed(1)}%
+                          </td>
+                          <td className="py-2 text-xs text-neutral-500">
+                            {delta.correctedBy}
+                            <span className="block text-neutral-400">
+                              {new Date(delta.correctedAt).toLocaleDateString("en-US", {
+                                dateStyle: "medium",
+                              })}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              <p className="mt-3 text-xs text-neutral-500">
+                Error is the superseded estimate against the confirmed truth —
+                positive means we estimated high. Each row supersedes a
+                quantity; none of them overwrote one.
+              </p>
+            </Section>
+          )}
         </div>
 
         <div className="space-y-5">
@@ -317,10 +489,10 @@ export default async function LeadPage({
             }
           >
             <p className="text-2xl font-semibold tracking-tight text-neutral-900">
-              {usd(band.low)} – {usd(band.high)}
+              {band ? `${usd(band.low)} – ${usd(band.high)}` : "—"}
             </p>
             <p className="mt-1 text-xs text-neutral-500">
-              {band.basis === "measured"
+              {snapshot.basis === "measured"
                 ? "Measured band"
                 : "Typology band (nothing measured)"}
               {" · issued "}
@@ -329,9 +501,9 @@ export default async function LeadPage({
                 timeStyle: "short",
               })}
             </p>
-            {view.estimate.scope.length > 0 && (
+            {scope.length > 0 && (
               <ul className="mt-3 flex flex-wrap gap-1.5">
-                {view.estimate.scope.map((item) => (
+                {scope.map((item) => (
                   <li
                     key={item}
                     className="rounded-full bg-neutral-100 px-2.5 py-1 text-xs text-neutral-700"
@@ -342,10 +514,43 @@ export default async function LeadPage({
               </ul>
             )}
             <p className="mt-3 text-[11px] text-neutral-400">
-              Snapshot {snapshot.id.slice(0, 8)} — immutable; rep corrections
-              (Phase 6) create a new record.
+              Snapshot {snapshot.id.slice(0, 8)} — immutable. The rep&apos;s
+              corrections below create new records; these bytes never change.
             </p>
           </Section>
+
+          {finalPayload && finalQuote && (
+            <Section
+              title="Final quote"
+              badge={
+                <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-[11px] font-medium text-emerald-800">
+                  Rep confirmed
+                </span>
+              }
+            >
+              <p className="text-2xl font-semibold tracking-tight text-neutral-900">
+                {usd(finalPayload.quote.price)}
+              </p>
+              <p className="mt-1 text-xs text-neutral-500">
+                {finalPayload.supersededBand
+                  ? `Supersedes the ${usd(finalPayload.supersededBand.low)} – ${usd(
+                      finalPayload.supersededBand.high,
+                    )} band the customer was shown.`
+                  : "No prior band on record."}
+              </p>
+              <p className="mt-2 text-xs text-neutral-500">
+                {finalPayload.confirmation.confirmedRegions} region
+                {finalPayload.confirmation.confirmedRegions === 1 ? "" : "s"}{" "}
+                confirmed ({qty(finalPayload.confirmation.confirmedAreaSf)} SF) by{" "}
+                {finalPayload.confirmation.confirmedBy}.
+              </p>
+              <p className="mt-3 border-t border-neutral-100 pt-3 text-[11px] text-neutral-400">
+                Snapshot {finalQuote.id.slice(0, 8)} · a figure, not a band:
+                the uncertainty the band expressed was measured away on site.
+                Internal total {usd2(finalQuote.internalTotal)}.
+              </p>
+            </Section>
+          )}
 
           <Section
             title="Internal estimate"

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 
+import { customerBand, isFinalQuotePayload } from "@/lib/design/quote";
 import type { SnapshotCustomerView } from "@/lib/lead/snapshot";
 
 const usd = (n: number) => `$${n.toLocaleString("en-US")}`;
@@ -82,7 +83,13 @@ export function SubmitLead({
   );
 
   if (submitted || snapshot) {
-    const band = snapshot?.estimate.band;
+    // The snapshot endpoint always serves the SUBMITTED estimate, so this
+    // is always a band — a rep's final quote lands on its own endpoint and
+    // never rewrites what the customer was shown here.
+    const band = snapshot ? customerBand(snapshot.estimate) : null;
+    const measured = band && !isFinalQuotePayload(snapshot!.estimate)
+      ? snapshot!.estimate.band.basis === "measured"
+      : false;
     return (
       <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
         <p className="text-sm font-semibold text-emerald-900">
@@ -91,7 +98,7 @@ export function SubmitLead({
         {band && (
           <p className="mt-1 text-sm text-emerald-800">
             Your locked estimate: <strong>{usd(band.low)} – {usd(band.high)}</strong>
-            {band.basis === "measured"
+            {measured
               ? ", measured from your yard."
               : ", based on typical projects like yours."}
           </p>

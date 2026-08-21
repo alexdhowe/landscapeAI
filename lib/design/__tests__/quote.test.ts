@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { wiBandPolicy, wiTypologyConfig } from "../../../seed/pricebook.seed";
 import { demoSegmentation } from "../../vision/demo";
-import { quoteProject } from "../quote";
+import { isFinalQuotePayload, quoteProject } from "../quote";
 import type { AerialRegion, DesignProject } from "../types";
 
 const NOW = "2026-08-21T12:00:00.000Z";
@@ -89,11 +89,11 @@ describe("quoteProject", () => {
     expect(quote).not.toBeNull();
     expect(quote!.basis).toBe("typology");
     expect(quote!.jobType).toBe("mulch_to_stone");
-    expect(quote!.customerPayload.band.basis).toBe("typology");
-    expect(quote!.customerPayload.band.low).toBeGreaterThan(0);
-    expect(quote!.customerPayload.band.high).toBeGreaterThan(
-      quote!.customerPayload.band.low,
-    );
+    const payload = quote!.customerPayload;
+    if (isFinalQuotePayload(payload)) throw new Error("expected a band payload");
+    expect(payload.band.basis).toBe("typology");
+    expect(payload.band.low).toBeGreaterThan(0);
+    expect(payload.band.high).toBeGreaterThan(payload.band.low);
     // The internal side exists even though nothing was measured — the rep
     // needs line items with honest typology provenance.
     expect(quote!.estimate).not.toBeNull();

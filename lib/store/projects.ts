@@ -12,6 +12,7 @@ import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 
+import type { MeasurementDelta } from "../confirm/types";
 import type {
   AerialRegion,
   DesignProject,
@@ -51,6 +52,14 @@ export class ProjectLockedError extends Error {
   constructor(id: string) {
     super(`Project ${id} has been submitted and can no longer be edited`);
     this.name = "ProjectLockedError";
+  }
+}
+
+/** Thrown when a rep action targets a project that isn't at that stage. */
+export class ProjectStageError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ProjectStageError";
   }
 }
 
@@ -219,6 +228,62 @@ export async function submitProject(
   return project;
 }
 
+/**
+ * Phase 6 — record a rep's on-site corrections.
+ *
+ * Append-only, and the project's design is already frozen, so this cannot
+ * disturb the customer's snapshot: it adds deltas and nothing else. The
+ * gate opens only after submit (there is no estimate to correct before
+ * one exists) and closes once the final quote is issued (a quote is
+ * final; revising one is a new revision, which the MVP does not model).
+ */
+export async function appendDeltas(
+  id: string,
+  deltas: MeasurementDelta[],
+): Promise<DesignProject> {
+  const project = await getProject(id);
+  if (project.status === "playing") {
+    throw new ProjectStageError(
+      `Project ${id} has not been submitted — there is no estimate to confirm`,
+    );
+  }
+  if (project.status === "quoted") {
+    throw new ProjectStageError(
+      `Project ${id} has already been quoted — corrections would not reach the quote`,
+    );
+  }
+  project.deltas = [...(project.deltas ?? []), ...deltas];
+  project.status = "confirmed";
+  await writeProject(project);
+  return project;
+}
+
+/**
+ * Phase 6 — issue the final quote.
+ *
+ * Appends the rep-confirmed snapshot beside the customer's original. The
+ * snapshots list is append-only here as everywhere: the customer's frozen
+ * bytes are never read, rewritten, or reordered by this call.
+ */
+export async function issueFinalQuote(
+  id: string,
+  snapshot: EstimateSnapshot,
+): Promise<DesignProject> {
+  const project = await getProject(id);
+  if (project.status !== "confirmed") {
+    throw new ProjectStageError(
+      project.status === "quoted"
+        ? `Project ${id} has already been quoted`
+        : `Project ${id} has no confirmed quantities to quote from`,
+    );
+  }
+  project.status = "quoted";
+  project.quotedAt = snapshot.issuedAt;
+  project.snapshots = [...(project.snapshots ?? []), snapshot];
+  await writeProject(project);
+  return project;
+}
+
 /** Every stored project, newest first. Unreadable entries are skipped. */
 export async function listProjects(): Promise<DesignProject[]> {
   let entries: string[];
@@ -239,10 +304,30 @@ export async function listProjects(): Promise<DesignProject[]> {
   return projects.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
-/** Submitted leads for the contractor inbox, newest submission first. */
+/**
+ * Submitted leads for the contractor inbox, newest submission first —
+ * including the ones a rep has since confirmed or quoted. They are the
+ * same lead at a later stage, and dropping them from the inbox would hide
+ * the work in progress.
+ */
 export async function listLeads(): Promise<DesignProject[]> {
   const projects = await listProjects();
   return projects
-    .filter((p) => p.status === "submitted")
+    .filter((p) => p.status !== "playing")
     .sort((a, b) => (b.submittedAt ?? "").localeCompare(a.submittedAt ?? ""));
+}
+
+/**
+ * Every measurement delta across every project, oldest first — the
+ * training corpus, read whole.
+ *
+ * Fanning across project files is exactly the kind of query Postgres
+ * exists for; when the DB lands, this becomes one indexed SELECT on
+ * measurement_deltas and nothing above it changes.
+ */
+export async function listMeasurementDeltas(): Promise<MeasurementDelta[]> {
+  const projects = await listProjects();
+  return projects
+    .flatMap((p) => p.deltas ?? [])
+    .sort((a, b) => a.correctedAt.localeCompare(b.correctedAt));
 }

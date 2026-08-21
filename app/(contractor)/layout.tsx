@@ -17,9 +17,12 @@ export default function ContractorLayout({
             <Link href="/dashboard" className="font-semibold tracking-tight text-neutral-900">
               LandscapeAI <span className="font-normal text-neutral-400">· Contractor</span>
             </Link>
-            <nav className="text-sm text-neutral-500">
+            <nav className="flex items-center gap-4 text-sm text-neutral-500">
               <Link href="/dashboard" className="hover:text-neutral-900">
                 Lead inbox
+              </Link>
+              <Link href="/deltas" className="hover:text-neutral-900">
+                Estimation error
               </Link>
             </nav>
           </div>

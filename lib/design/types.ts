@@ -5,6 +5,7 @@
  * geocoded location and user-drawn polygons over satellite imagery, each
  * measured into provenance-carrying quantities.
  */
+import type { MeasurementDelta } from "../confirm/types";
 import type { EstimateSnapshot, LeadContact } from "../lead/types";
 import type { LngLat } from "../measure/area";
 import type { Quantity } from "../pricing/types";
@@ -56,11 +57,18 @@ export type DesignProject = {
   id: string;
   createdAt: string;
   /**
-   * "playing" until the customer submits as a lead; "submitted" locks the
-   * design (the frozen snapshot must keep describing what the dashboard
-   * shows). Phase 6 adds the rep-confirmation statuses.
+   * The lifecycle of one design:
+   *
+   *   playing    the customer is still configuring
+   *   submitted  sent as a lead; the design is frozen alongside its
+   *              snapshot (the frozen record must keep describing what the
+   *              dashboard shows)
+   *   confirmed  a rep has corrected quantities on site (Phase 6)
+   *   quoted     the final quote has been issued from those quantities
+   *
+   * Everything past "playing" locks the customer-side mutators.
    */
-  status: "playing" | "submitted";
+  status: "playing" | "submitted" | "confirmed" | "quoted";
   photo: ProjectPhoto;
   segmentation: SegmentationState;
   /** regionId → selection. */
@@ -85,4 +93,13 @@ export type DesignProject = {
    * append NEW records; the customer's original stays untouched.
    */
   snapshots?: EstimateSnapshot[];
+  /**
+   * Phase 6 — the rep's on-site corrections, oldest first. Append-only,
+   * and the single record of them: the current confirmed quantity for a
+   * region is the newest matching delta's afterQty, so there is no second
+   * copy that can drift. Also the training corpus (project-map §5).
+   */
+  deltas?: MeasurementDelta[];
+  /** When the final quote was issued from confirmed quantities. */
+  quotedAt?: string;
 };

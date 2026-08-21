@@ -16,10 +16,12 @@ not negotiable.
 | 1.5 — Typology bands | ✅ done — WI-average seed data, 8 tests passing |
 | 2 — Photo experience | ✅ done — upload → segmentation → click-to-swap → band |
 | 3 — Aerial measurement | ✅ done — address → aerial → draw → band narrows |
-| 3.5 — Time slider | not started |
-| 4 — Reconciliation | not started |
-| 5 — Lead capture / dashboard | not started |
-| 6 — Confirmation gate | not started |
+| 3.5 — Time slider | ✅ done — growth curves, spacing validation, year 1/3/5 |
+| 4 — Reconciliation | ✅ done — photo/aerial arbitration, disagreement flags |
+| 5 — Lead capture / dashboard | ✅ done — immutable snapshot, contractor inbox |
+| 6 — Confirmation gate | ✅ done — rep corrections, deltas, final quote |
+
+All six phases are in. `npm test` runs 163 tests.
 
 ## Stack
 
@@ -30,7 +32,7 @@ pure logic with no DB).
 ## Commands
 
 ```sh
-npm test          # Vitest — the Phase 1 golden tests
+npm test          # Vitest — 163 tests across every phase
 npm run typecheck
 npm run dev
 npm run build
@@ -92,6 +94,76 @@ engine run on real quantities, projected through the disclosure policy
   with `NEXT_PUBLIC_SATELLITE_TILE_URL` / `NEXT_PUBLIC_SATELLITE_ATTRIBUTION`.
   **Before production**: derivative-measurement licensing (Nearmap/Vexcel)
   is the real decision — see project-map §3.
+
+## The time slider (Phase 3.5)
+
+`lib/growth/` turns plant metadata into a rendering parameter. `curve.ts`
+holds the per-growth-rate-class approach to mature size (sigmoid, from
+published nursery figures — not a botany simulator); `spacing.ts` compares
+placed spacing against mature spread and flags crowding at year 5 with a
+corrected count. Bed geometry, hardscape, and house are identical across
+year 1/3/5 — only plant scale changes. Demo at `/design/demo`.
+
+## Reconciliation — the second sensor (Phase 4)
+
+`lib/measure/reconcile.ts` arbitrates, it does not average: aerial wins
+horizontal area, the photo wins material identity, condition, and anything
+vertical. Agreement inside 15% tightens the disclosure band (×0.6);
+disagreement beyond 25% flags for review and widens it (×1.5). The photo's
+`estimatedAreaSf` exists only as this QA signal — it is never priced.
+
+## Lead capture and the dashboard (Phase 5)
+
+Submitting freezes an `EstimateSnapshot`: the customer-facing payload is
+serialized once and stored as that exact string, and every surface serves
+those bytes verbatim, so byte-identity holds by construction. `lib/design/quote.ts`
+is the single quote computation behind both `/api/price` and the freeze,
+so the two cannot drift. `/dashboard` is the lead inbox; `/leads/[id]` shows
+the design, quantities with provenance badges, confidence per region,
+reconciliation verdicts, and the internal estimate — internal pricing
+renders only on contractor surfaces.
+
+## The confirmation gate (Phase 6)
+
+A rep visits the site, measures for real, and corrects the quantities the
+customer was priced on. Every correction is a `MeasurementDelta` — the
+estimate that was wrong, the confirmed truth that replaced it, and the
+provenance of each. Nothing overwrites anything.
+
+- `lib/confirm/deltas.ts` — the correction primitive and the only place a
+  `rep_confirmed` quantity is minted. The new quantity carries
+  `supersedes` pointing at the one it replaced; quantities created before
+  a correction existed (a drawn ring, a typology percentile) carry no id,
+  so they are identified at the moment they are superseded and that
+  identified copy is stored in the delta. The delta is self-contained: the
+  lineage resolves from the record alone.
+- `lib/confirm/quantities.ts` — the sensor hierarchy, closest observation
+  first: `rep_confirmed` › `user_drawn` › `typology`. Confirming a
+  typology quantity is supported and is the most valuable delta of all —
+  it is how the opening band learns.
+- `lib/confirm/quote.ts` — the final quote, priced from confirmed
+  quantities and disclosed as a **figure, not a band** (`wiFinalQuotePolicy`).
+  The band expressed uncertainty about quantities nobody had measured;
+  the site visit is what removes it.
+- `lib/confirm/analytics.ts` — mean, median, and P90 error by job type, by
+  provenance of the corrected estimate, and by dimension. Bias (signed) is
+  reported separately from magnitude (absolute), because a fleet that
+  misses by ±20% every time has a mean signed error of zero. Rendered at
+  `/deltas`.
+
+**What is immutable stays immutable.** The final quote is a *new*
+`EstimateSnapshot` (`kind: 'rep_confirmed'`) appended beside the
+customer's original. `GET /api/projects/[id]/snapshot` keeps serving the
+submitted bytes forever; the final quote lives at
+`GET /api/projects/[id]/quote`. The acceptance test drives the map's
+scenario through the real routes: a bed corrected 400 → 470 SF, the delta
+queryable, the quote priced at 470, the customer's snapshot still 400.
+
+Project lifecycle: `playing` → `submitted` → `confirmed` → `quoted`.
+A quote is final — revising one would be a new revision, which the MVP
+does not model. Corrections cover region **area (SF) and edge run (LF)**;
+EA counts (plant quantities) stay typology-scaled, since they are
+per-assembly rather than per-region and need a line-item editor.
 
 ## The pricing engine
 

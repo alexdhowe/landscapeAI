@@ -28,6 +28,13 @@ export type Quantity = {
   source: QuantitySource;
   confidence: number; // 0-1
   capturedAt: string; // ISO
+  /**
+   * Identity within a correction lineage. Assigned when a quantity enters
+   * one (Phase 6): the rep's confirmed quantity gets a fresh id, and the
+   * quantity it replaced is identified at the same moment if it did not
+   * already carry one. Quantities that are never corrected never need it.
+   */
+  id?: string;
   supersedes?: string; // id of the quantity this replaced
 };
 

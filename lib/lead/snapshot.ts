@@ -46,9 +46,14 @@ export function assertNoInternalLeak(customerBytes: string): void {
   }
 }
 
-/** The document the customer sees at (and after) submit — parsed from the frozen bytes. */
+/**
+ * The document the customer sees at (and after) submit — parsed from the
+ * frozen bytes. "final_quote" marks the Phase 6 record: same document
+ * shape, but the estimate inside it is a confirmed figure rather than a
+ * band.
+ */
 export type SnapshotCustomerView = {
-  kind: "estimate_snapshot";
+  kind: "estimate_snapshot" | "final_quote";
   snapshotId: string;
   projectId: string;
   issuedAt: string;
@@ -75,8 +80,9 @@ export function freezeSnapshot(
   const id = options?.id ?? randomUUID();
   const issuedAt = (options?.now ?? (() => new Date().toISOString()))();
 
+  const isFinalQuote = quote.basis === "rep_confirmed";
   const customerView: SnapshotCustomerView = {
-    kind: "estimate_snapshot",
+    kind: isFinalQuote ? "final_quote" : "estimate_snapshot",
     snapshotId: id,
     projectId: project.id,
     issuedAt,
@@ -89,6 +95,7 @@ export function freezeSnapshot(
     id,
     projectId: project.id,
     issuedAt,
+    kind: isFinalQuote ? "rep_confirmed" : "customer_submitted",
     basis: quote.basis,
     jobType: quote.jobType,
     lineItems: quote.estimate.lineItems,
@@ -99,8 +106,31 @@ export function freezeSnapshot(
   };
 }
 
-/** The customer's most recent snapshot, or null before any submit. */
+/** The most recent snapshot of any kind, or null before any submit. */
 export function latestSnapshot(project: DesignProject): EstimateSnapshot | null {
   const snapshots = project.snapshots ?? [];
   return snapshots.length > 0 ? snapshots[snapshots.length - 1] : null;
+}
+
+/**
+ * What the customer submitted — the record the confirmation gate exists to
+ * protect. Rep corrections append new snapshots, so "latest" drifts;
+ * this one never does. Every surface that means "what the customer saw"
+ * must read it rather than the latest.
+ */
+export function submittedSnapshot(project: DesignProject): EstimateSnapshot | null {
+  const snapshots = project.snapshots ?? [];
+  return (
+    snapshots.find((s) => (s.kind ?? "customer_submitted") === "customer_submitted") ??
+    null
+  );
+}
+
+/** The final quote issued from rep-confirmed quantities, or null before the site visit. */
+export function finalQuoteSnapshot(project: DesignProject): EstimateSnapshot | null {
+  const snapshots = project.snapshots ?? [];
+  for (let i = snapshots.length - 1; i >= 0; i--) {
+    if (snapshots[i].kind === "rep_confirmed") return snapshots[i];
+  }
+  return null;
 }

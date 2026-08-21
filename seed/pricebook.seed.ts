@@ -297,6 +297,20 @@ export const wiBandPolicy: DisclosurePolicy = {
   roundTo: 100,
 };
 
+/**
+ * The disclosure used for the final quote, after a rep has confirmed
+ * quantities on site (Phase 6). A figure rather than a band — the band
+ * expressed uncertainty about quantities nobody had measured, and the site
+ * visit is what removes it. Rounded finer than the band ($25 vs $100)
+ * because a quote is a number the customer signs, not a range they browse.
+ */
+export const wiFinalQuotePolicy: DisclosurePolicy = {
+  mode: "figure",
+  bandWidthPct: 0,
+  showUnitRates: false,
+  roundTo: 25,
+};
+
 // ---------------------------------------------------------------------------
 // Quantity distributions by job type — ESTIMATED, not from real bids.
 // P25/P50/P75 for typical WI suburban residential lots and small HOA/

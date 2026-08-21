@@ -1,6 +1,11 @@
 import Link from "next/link";
 
-import { latestSnapshot, type SnapshotCustomerView } from "@/lib/lead/snapshot";
+import { isFinalQuotePayload } from "@/lib/design/quote";
+import {
+  finalQuoteSnapshot,
+  submittedSnapshot,
+  type SnapshotCustomerView,
+} from "@/lib/lead/snapshot";
 import { listLeads } from "@/lib/store/projects";
 
 /** Leads live in the file store — always render from the current state. */
@@ -35,10 +40,22 @@ export default async function DashboardPage() {
 
       <ul className="mt-6 space-y-3">
         {leads.map((lead) => {
-          const snapshot = latestSnapshot(lead);
+          // The submitted snapshot, always — the inbox reports what the
+          // customer was told, and a rep's final quote sits beside it
+          // rather than replacing it.
+          const snapshot = submittedSnapshot(lead);
           if (!snapshot) return null;
           const view = JSON.parse(snapshot.customerFacingPayload) as SnapshotCustomerView;
-          const band = view.estimate.band;
+          const band = isFinalQuotePayload(view.estimate) ? null : view.estimate.band;
+          const finalQuote = finalQuoteSnapshot(lead);
+          const finalView = finalQuote
+            ? (JSON.parse(finalQuote.customerFacingPayload) as SnapshotCustomerView)
+            : null;
+          const finalPrice =
+            finalView && isFinalQuotePayload(finalView.estimate)
+              ? finalView.estimate.quote.price
+              : null;
+          const deltaCount = (lead.deltas ?? []).length;
           return (
             <li key={lead.id}>
               <Link
@@ -77,6 +94,19 @@ export default async function DashboardPage() {
                   >
                     {snapshot.basis === "measured" ? "Measured" : "Typology band"}
                   </span>
+                  {lead.status !== "submitted" && (
+                    <span
+                      className={`rounded-full px-2.5 py-1 font-medium ${
+                        lead.status === "quoted"
+                          ? "bg-emerald-100 text-emerald-800"
+                          : "bg-sky-100 text-sky-800"
+                      }`}
+                    >
+                      {lead.status === "quoted"
+                        ? "Quoted"
+                        : `Site-confirmed · ${deltaCount} delta${deltaCount === 1 ? "" : "s"}`}
+                    </span>
+                  )}
                   {lead.addressDeclined && (
                     <span className="rounded-full bg-neutral-200 px-2.5 py-1 font-medium text-neutral-600">
                       No address shared
@@ -93,9 +123,14 @@ export default async function DashboardPage() {
                   <span className="text-neutral-700">
                     Customer saw{" "}
                     <strong>
-                      {usd(band.low)} – {usd(band.high)}
+                      {band ? `${usd(band.low)} – ${usd(band.high)}` : "—"}
                     </strong>
                   </span>
+                  {finalPrice !== null && (
+                    <span className="text-emerald-700">
+                      Final quote: <strong>{usd(finalPrice)}</strong>
+                    </span>
+                  )}
                   <span className="text-neutral-500">
                     Internal: {usd(snapshot.internalTotal)}
                   </span>

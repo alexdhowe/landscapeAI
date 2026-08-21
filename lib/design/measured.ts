@@ -31,7 +31,7 @@ export type RegionMeasurement = {
 /** Confidence on counts scaled from a measured area by typology density. */
 const SCALED_COUNT_CONFIDENCE = 0.4;
 /** Confidence on straight typology-P50 fallbacks for unmeasured regions. */
-const TYPOLOGY_CONFIDENCE = 0.3;
+export const TYPOLOGY_CONFIDENCE = 0.3;
 
 function hasChoice(selection: RegionSelection): boolean {
   return Boolean(selection.surfaceOptionId) || selection.addonOptionIds.length > 0;

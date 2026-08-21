@@ -27,8 +27,21 @@ export type EstimateSnapshot = {
   id: string;
   projectId: string;
   issuedAt: string;
+  /**
+   * Which side of the confirmation gate this record sits on.
+   *
+   *   customer_submitted  what the customer saw and sent (Phase 5)
+   *   rep_confirmed       the final quote, priced from the rep's on-site
+   *                       measurements (Phase 6)
+   *
+   * Both live in the same append-only list, and neither ever edits the
+   * other: a final quote is a NEW record, which is the entire point of the
+   * gate. Absent on snapshots written before Phase 6 — read those as
+   * customer_submitted.
+   */
+  kind?: "customer_submitted" | "rep_confirmed";
   /** What the frozen customer band was derived from. */
-  basis: "typology" | "measured";
+  basis: "typology" | "measured" | "rep_confirmed";
   jobType: JobType;
   /** Frozen internal line items, provenance-carrying quantities included. INTERNAL. */
   lineItems: LineItem[];
