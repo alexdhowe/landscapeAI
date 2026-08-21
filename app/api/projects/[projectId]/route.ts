@@ -4,7 +4,9 @@ import { getOption } from "@/lib/catalog/options";
 import type { RegionSelection } from "@/lib/design/types";
 import {
   ProjectNotFoundError,
+  declineAddress,
   getProject,
+  setLocation,
   setMarketContext,
   setSelection,
 } from "@/lib/store/projects";
@@ -27,6 +29,8 @@ export async function GET(_request: Request, { params }: Params) {
  * PATCH body is one of:
  *   { regionId, selection: { surfaceOptionId?, addonOptionIds } }
  *   { marketContext: "residential" | "hoa_commercial" }
+ *   { location: { address, lat, lng, source } }   — confirmed geocode pick
+ *   { addressDeclined: true }                     — the no-address path
  */
 export async function PATCH(request: Request, { params }: Params) {
   const { projectId } = await params;
@@ -40,9 +44,55 @@ export async function PATCH(request: Request, { params }: Params) {
     regionId?: unknown;
     selection?: unknown;
     marketContext?: unknown;
+    location?: unknown;
+    addressDeclined?: unknown;
   };
 
   try {
+    if (patch.addressDeclined !== undefined) {
+      if (patch.addressDeclined !== true) {
+        return NextResponse.json({ error: "addressDeclined must be true" }, { status: 400 });
+      }
+      return NextResponse.json(await declineAddress(projectId));
+    }
+
+    if (patch.location !== undefined) {
+      const loc = patch.location as {
+        address?: unknown;
+        lat?: unknown;
+        lng?: unknown;
+        source?: unknown;
+      } | null;
+      if (
+        loc === null ||
+        typeof loc !== "object" ||
+        typeof loc.address !== "string" ||
+        loc.address.trim().length < 3 ||
+        loc.address.length > 300 ||
+        typeof loc.lat !== "number" ||
+        typeof loc.lng !== "number" ||
+        !Number.isFinite(loc.lat) ||
+        !Number.isFinite(loc.lng) ||
+        Math.abs(loc.lat) > 90 ||
+        Math.abs(loc.lng) > 180 ||
+        (loc.source !== "nominatim" && loc.source !== "demo")
+      ) {
+        return NextResponse.json(
+          { error: "location must be { address, lat, lng, source }" },
+          { status: 400 },
+        );
+      }
+      return NextResponse.json(
+        await setLocation(projectId, {
+          address: loc.address.trim(),
+          lat: loc.lat,
+          lng: loc.lng,
+          source: loc.source,
+          capturedAt: new Date().toISOString(),
+        }),
+      );
+    }
+
     if (patch.marketContext !== undefined) {
       if (patch.marketContext !== "residential" && patch.marketContext !== "hoa_commercial") {
         return NextResponse.json({ error: "Invalid marketContext" }, { status: 400 });

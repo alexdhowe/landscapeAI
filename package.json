@@ -15,11 +15,17 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.120.0",
+    "@turf/area": "^7.4.0",
+    "@turf/helpers": "^7.4.0",
+    "@turf/length": "^7.4.0",
     "drizzle-orm": "^0.44.0",
+    "maplibre-gl": "^6.4.1",
     "next": "^15.4.0",
     "postgres": "^3.4.5",
     "react": "^19.1.0",
-    "react-dom": "^19.1.0"
+    "react-dom": "^19.1.0",
+    "terra-draw": "^1.32.3",
+    "terra-draw-maplibre-gl-adapter": "^1.4.1"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.1.0",

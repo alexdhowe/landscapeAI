@@ -1,16 +1,24 @@
 import { NextResponse } from "next/server";
 
 import { bandForSelections } from "@/lib/design/band";
+import {
+  measuredBandForSelections,
+  type RegionMeasurement,
+} from "@/lib/design/measured";
 import { ProjectNotFoundError, getProject } from "@/lib/store/projects";
-import { wiTypologyConfig } from "@/seed/pricebook.seed";
+import { wiBandPolicy, wiTypologyConfig } from "@/seed/pricebook.seed";
 
 /**
- * POST { projectId } → the typology band the current design implies, or
- * { band: null } when nothing is selected yet.
+ * POST { projectId } → the customer-facing band for the current design.
+ *
+ * Basis "typology" until at least one selected region has been measured on
+ * the aerial; then basis "measured": the Phase 1 engine run on the drawn
+ * quantities, projected through the disclosure policy. The typology band
+ * rides along so the UI can show the range visibly narrowing.
  *
  * The pricing engine runs only here, server-side. The response is the
- * customer-facing projection: band endpoints and scope labels — never
- * line items, unit rates, costs, or margin.
+ * customer-facing projection — never line items, unit rates, costs, or
+ * margin.
  */
 export async function POST(request: Request) {
   let body: { projectId?: unknown };
@@ -25,25 +33,61 @@ export async function POST(request: Request) {
 
   try {
     const project = await getProject(body.projectId);
-    const result = bandForSelections(
+    const typology = bandForSelections(
       project.selections,
       project.marketContext,
       wiTypologyConfig,
     );
-    if (!result) {
+    if (!typology) {
       return NextResponse.json({ band: null });
     }
+
+    const measurements: Record<string, RegionMeasurement> = {};
+    for (const region of project.aerialRegions ?? []) {
+      measurements[region.photoRegionId] = {
+        areaSf: region.areaSf,
+        perimeterLf: region.perimeterLf,
+      };
+    }
+    const measured = measuredBandForSelections(
+      project.selections,
+      measurements,
+      project.marketContext,
+      wiTypologyConfig,
+      wiBandPolicy,
+    );
+
+    if (measured) {
+      return NextResponse.json({
+        band: {
+          low: measured.low,
+          high: measured.high,
+          currency: measured.currency,
+          basis: measured.basis,
+        },
+        typologyBand: { low: typology.band.low, high: typology.band.high },
+        jobType: measured.jobType,
+        context: project.marketContext,
+        scope: measured.scope,
+        measurement: {
+          measuredRegions: measured.measuredRegionIds.length,
+          unmeasuredRegions: measured.unmeasuredRegionIds.length,
+          totalAreaSf: measured.totalMeasuredAreaSf,
+        },
+      });
+    }
+
     return NextResponse.json({
       band: {
-        low: result.band.low,
-        high: result.band.high,
-        typical: result.band.typical,
-        currency: result.band.currency,
-        basis: result.band.basis,
+        low: typology.band.low,
+        high: typology.band.high,
+        typical: typology.band.typical,
+        currency: typology.band.currency,
+        basis: typology.band.basis,
       },
-      jobType: result.jobType,
+      jobType: typology.jobType,
       context: project.marketContext,
-      scope: result.scope,
+      scope: typology.scope,
     });
   } catch (error) {
     if (error instanceof ProjectNotFoundError) {

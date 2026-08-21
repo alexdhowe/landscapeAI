@@ -1,8 +1,12 @@
 /**
- * Design-state types for the Phase 2 configurator. A project at the "play"
- * stage: a photo, its segmentation, and the customer's catalog selections.
- * No quantities exist yet — the band shown is typology-based by definition.
+ * Design-state types for the customer flow. Phase 2: a photo, its
+ * segmentation, and the customer's catalog selections — no quantities, the
+ * band is typology-based by definition. Phase 3 adds the aerial leg: a
+ * geocoded location and user-drawn polygons over satellite imagery, each
+ * measured into provenance-carrying quantities.
  */
+import type { LngLat } from "../measure/area";
+import type { Quantity } from "../pricing/types";
 import type { MarketContext } from "../pricing/typology";
 import type { SegmentationResult } from "../vision/types";
 
@@ -23,6 +27,30 @@ export type SegmentationState =
   | { status: "failed"; error: string }
   | ({ status: "ready" } & SegmentationResult);
 
+export type GeocodeSource = "nominatim" | "demo";
+
+export type ProjectLocation = {
+  /** The address as the customer confirmed it (geocoder display name). */
+  address: string;
+  lat: number;
+  lng: number;
+  source: GeocodeSource;
+  capturedAt: string;
+};
+
+/**
+ * One measured polygon drawn over the aerial, mapped to the photo region it
+ * measures. At most one per photo region — re-drawing replaces it.
+ */
+export type AerialRegion = {
+  id: string;
+  photoRegionId: string;
+  /** Open ring in [lng, lat]; first point not repeated. */
+  ring: LngLat[];
+  areaSf: Quantity;
+  perimeterLf: Quantity;
+};
+
 export type DesignProject = {
   id: string;
   createdAt: string;
@@ -32,4 +60,13 @@ export type DesignProject = {
   /** regionId → selection. */
   selections: Record<string, RegionSelection>;
   marketContext: MarketContext;
+  /** Set once the customer shares and confirms an address. */
+  location?: ProjectLocation;
+  /**
+   * The customer explicitly chose not to share an address. They keep their
+   * design and typology band, and the lead is still capturable (Phase 5).
+   */
+  addressDeclined?: boolean;
+  /** Absent on projects created before the aerial phase. */
+  aerialRegions?: AerialRegion[];
 };

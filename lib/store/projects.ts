@@ -10,7 +10,12 @@ import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 
-import type { DesignProject, RegionSelection } from "../design/types";
+import type {
+  AerialRegion,
+  DesignProject,
+  ProjectLocation,
+  RegionSelection,
+} from "../design/types";
 import type { MarketContext } from "../pricing/typology";
 import type { SegmentationState } from "../design/types";
 
@@ -97,6 +102,57 @@ export async function setSelection(
 ): Promise<DesignProject> {
   const project = await getProject(id);
   project.selections[regionId] = selection;
+  await writeProject(project);
+  return project;
+}
+
+/** Sharing an address supersedes any earlier decline. */
+export async function setLocation(
+  id: string,
+  location: ProjectLocation,
+): Promise<DesignProject> {
+  const project = await getProject(id);
+  project.location = location;
+  delete project.addressDeclined;
+  await writeProject(project);
+  return project;
+}
+
+/**
+ * The customer chose not to share an address. Their design and typology
+ * band survive untouched — this only records the choice so the UI stops
+ * asking and the lead (Phase 5) carries the flag.
+ */
+export async function declineAddress(id: string): Promise<DesignProject> {
+  const project = await getProject(id);
+  project.addressDeclined = true;
+  await writeProject(project);
+  return project;
+}
+
+/** One aerial polygon per photo region: re-drawing replaces the old one. */
+export async function upsertAerialRegion(
+  id: string,
+  region: AerialRegion,
+): Promise<DesignProject> {
+  const project = await getProject(id);
+  const regions = (project.aerialRegions ?? []).filter(
+    (r) => r.photoRegionId !== region.photoRegionId,
+  );
+  regions.push(region);
+  project.aerialRegions = regions;
+  await writeProject(project);
+  return project;
+}
+
+export async function removeAerialRegion(
+  id: string,
+  photoRegionId: string,
+): Promise<DesignProject> {
+  const project = await getProject(id);
+  project.aerialRegions = (project.aerialRegions ?? []).filter(
+    (r) => r.photoRegionId !== photoRegionId,
+  );
   await writeProject(project);
   return project;
 }

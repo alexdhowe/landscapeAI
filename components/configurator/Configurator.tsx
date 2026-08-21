@@ -160,6 +160,8 @@ export function Configurator({ projectId }: { projectId: string }) {
           context={project.marketContext}
           busy={busy}
           onContextChange={changeContext}
+          projectId={project.id}
+          addressDeclined={project.addressDeclined}
         />
         {selectedRegion ? (
           <CatalogPicker
