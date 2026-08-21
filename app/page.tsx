@@ -16,6 +16,12 @@ export default function Home() {
       >
         Start with a photo
       </Link>
+      <Link
+        href="/design/demo"
+        className="text-sm text-emerald-700 underline underline-offset-2"
+      >
+        See a planting grow over time →
+      </Link>
     </main>
   );
 }
