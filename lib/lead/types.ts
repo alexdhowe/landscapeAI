@@ -1,0 +1,42 @@
+/**
+ * Phase 5 — lead capture types.
+ *
+ * When a customer submits, what they saw is frozen into an EstimateSnapshot
+ * (architectural invariant: estimates are immutable snapshots). The snapshot
+ * carries BOTH sides of the disclosure boundary:
+ *
+ *   - customerFacingPayload: the exact bytes the customer saw, stored as the
+ *     serialized string so byte-identity survives every re-serialization of
+ *     the surrounding project JSON. Serve it verbatim; never re-stringify.
+ *   - lineItems / internalTotal / disclosurePolicyUsed / reconciliation:
+ *     the internal estimate behind those bytes. Contractor surfaces only —
+ *     never rendered to, or serialized for, a customer.
+ */
+import type { ReconciliationReport } from "../measure/reconcile";
+import type { DisclosurePolicy, LineItem } from "../pricing/types";
+import type { JobType } from "../pricing/typology";
+
+export type LeadContact = {
+  name: string;
+  email: string;
+  phone?: string;
+  notes?: string;
+};
+
+export type EstimateSnapshot = {
+  id: string;
+  projectId: string;
+  issuedAt: string;
+  /** What the frozen customer band was derived from. */
+  basis: "typology" | "measured";
+  jobType: JobType;
+  /** Frozen internal line items, provenance-carrying quantities included. INTERNAL. */
+  lineItems: LineItem[];
+  /** The engine's sell price at freeze time. INTERNAL. */
+  internalTotal: number;
+  /** The exact serialized payload the customer saw at submit time. */
+  customerFacingPayload: string;
+  disclosurePolicyUsed: DisclosurePolicy;
+  /** Frozen photo/aerial arbitration; null when only one sensor had reported. INTERNAL. */
+  reconciliation: ReconciliationReport | null;
+};

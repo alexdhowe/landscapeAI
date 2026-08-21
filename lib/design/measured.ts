@@ -12,7 +12,12 @@
 import { getOption } from "../catalog/options";
 import { applyDisclosure } from "../pricing/disclosure";
 import { buildEstimate } from "../pricing/engine";
-import type { DisclosurePolicy, Quantity, Selection } from "../pricing/types";
+import type {
+  DisclosurePolicy,
+  InternalEstimate,
+  Quantity,
+  Selection,
+} from "../pricing/types";
 import type { JobType, MarketContext, TypologyConfig } from "../pricing/typology";
 import { inferJobType } from "./band";
 import type { RegionSelection } from "./types";
@@ -126,34 +131,46 @@ export type MeasuredDesignBand = {
   unmeasuredRegionIds: string[];
   /** Sum of measured areas across selected regions, whole SF. */
   totalMeasuredAreaSf: number;
+  /**
+   * The engine estimate behind the band. INTERNAL — the lead snapshot
+   * freezes it; API routes must project it through the disclosure policy
+   * and never serialize it toward a customer.
+   */
+  estimate: InternalEstimate;
+};
+
+/** What the pricing engine needs for one design, measured or not. */
+export type DesignEngineInput = {
+  engineSelections: Selection[];
+  /** Labels of the chosen options, for scope lists. */
+  scope: string[];
+  /** Photo region ids with a choice made. */
+  selectedRegionIds: string[];
+  measuredRegionIds: string[];
+  unmeasuredRegionIds: string[];
 };
 
 /**
- * The measured band for the current design, or null when it does not apply
- * yet — nothing selected, or no selected region has been measured (the
- * caller shows the typology band instead).
+ * Turn the customer's per-region selections into engine selections, using
+ * measured quantities where a region has been drawn on the aerial and
+ * typology fallbacks where it hasn't. Shared by the measured band and the
+ * lead snapshot (which needs an internal estimate even when nothing has
+ * been measured).
  */
-export function measuredBandForSelections(
+export function designEngineInput(
   selections: Record<string, RegionSelection>,
   measurements: Record<string, RegionMeasurement>,
   context: MarketContext,
   config: TypologyConfig,
-  policy: DisclosurePolicy,
-  now: () => string = () => new Date().toISOString(),
-): MeasuredDesignBand | null {
-  const jobType = inferJobType(selections);
-  if (!jobType) return null;
-
-  const selectedIds = Object.keys(selections).filter((id) => hasChoice(selections[id]));
-  const measuredRegionIds = selectedIds.filter((id) => measurements[id]);
-  if (measuredRegionIds.length === 0) return null;
-  const unmeasuredRegionIds = selectedIds.filter((id) => !measurements[id]);
-
-  const capturedAt = now();
+  capturedAt: string,
+): DesignEngineInput {
+  const selectedRegionIds = Object.keys(selections).filter((id) =>
+    hasChoice(selections[id]),
+  );
   const engineSelections: Selection[] = [];
   const scope = new Set<string>();
 
-  for (const regionId of selectedIds) {
+  for (const regionId of selectedRegionIds) {
     const selection = selections[regionId];
     const optionIds = [
       ...(selection.surfaceOptionId ? [selection.surfaceOptionId] : []),
@@ -181,6 +198,35 @@ export function measuredBandForSelections(
       }
     }
   }
+
+  return {
+    engineSelections,
+    scope: [...scope],
+    selectedRegionIds,
+    measuredRegionIds: selectedRegionIds.filter((id) => measurements[id]),
+    unmeasuredRegionIds: selectedRegionIds.filter((id) => !measurements[id]),
+  };
+}
+
+/**
+ * The measured band for the current design, or null when it does not apply
+ * yet — nothing selected, or no selected region has been measured (the
+ * caller shows the typology band instead).
+ */
+export function measuredBandForSelections(
+  selections: Record<string, RegionSelection>,
+  measurements: Record<string, RegionMeasurement>,
+  context: MarketContext,
+  config: TypologyConfig,
+  policy: DisclosurePolicy,
+  now: () => string = () => new Date().toISOString(),
+): MeasuredDesignBand | null {
+  const jobType = inferJobType(selections);
+  if (!jobType) return null;
+
+  const input = designEngineInput(selections, measurements, context, config, now());
+  const { engineSelections, scope, measuredRegionIds, unmeasuredRegionIds } = input;
+  if (measuredRegionIds.length === 0) return null;
   if (engineSelections.length === 0) return null;
 
   const estimate = buildEstimate(engineSelections, config.priceBook, config.margin);
@@ -195,11 +241,12 @@ export function measuredBandForSelections(
     low: payload.low,
     high: payload.high,
     jobType,
-    scope: [...scope],
+    scope,
     measuredRegionIds,
     unmeasuredRegionIds,
     totalMeasuredAreaSf: Math.round(
       measuredRegionIds.reduce((sum, id) => sum + measurements[id].areaSf.value, 0),
     ),
+    estimate,
   };
 }

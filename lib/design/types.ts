@@ -5,6 +5,7 @@
  * geocoded location and user-drawn polygons over satellite imagery, each
  * measured into provenance-carrying quantities.
  */
+import type { EstimateSnapshot, LeadContact } from "../lead/types";
 import type { LngLat } from "../measure/area";
 import type { Quantity } from "../pricing/types";
 import type { MarketContext } from "../pricing/typology";
@@ -54,7 +55,12 @@ export type AerialRegion = {
 export type DesignProject = {
   id: string;
   createdAt: string;
-  status: "playing";
+  /**
+   * "playing" until the customer submits as a lead; "submitted" locks the
+   * design (the frozen snapshot must keep describing what the dashboard
+   * shows). Phase 6 adds the rep-confirmation statuses.
+   */
+  status: "playing" | "submitted";
   photo: ProjectPhoto;
   segmentation: SegmentationState;
   /** regionId → selection. */
@@ -69,4 +75,14 @@ export type DesignProject = {
   addressDeclined?: boolean;
   /** Absent on projects created before the aerial phase. */
   aerialRegions?: AerialRegion[];
+  /** Who to reach about this lead. Set at submit. */
+  contact?: LeadContact;
+  /** When the customer submitted (equals the latest snapshot's issuedAt). */
+  submittedAt?: string;
+  /**
+   * Immutable estimate snapshots, oldest first. Append-only: nothing in
+   * the store mutates an entry once written. Phase 6 rep corrections
+   * append NEW records; the customer's original stays untouched.
+   */
+  snapshots?: EstimateSnapshot[];
 };

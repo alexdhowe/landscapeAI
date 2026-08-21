@@ -87,14 +87,19 @@ describe("measuredBandForSelections", () => {
     expect(partial.low).toBeGreaterThan(onlyMeasured.low);
   });
 
-  it("never leaks internal pricing fields to the customer payload", () => {
+  it("carries the internal estimate in exactly one field, so callers can strip it", () => {
     const measured = measuredBandForSelections(
       stoneSelection, { bed_1: measurement(300, 80) }, "residential", wiTypologyConfig, wiBandPolicy, NOW,
     )!;
+    // Since Phase 5 the result includes the engine estimate (frozen into the
+    // lead snapshot). It is the ONLY internal field: everything else remains
+    // customer-safe, and routes must serve only the customerPayload built in
+    // lib/design/quote.ts — never this object whole.
     expect(Object.keys(measured).sort()).toEqual(
       [
         "basis",
         "currency",
+        "estimate",
         "high",
         "jobType",
         "low",
@@ -104,7 +109,9 @@ describe("measuredBandForSelections", () => {
         "unmeasuredRegionIds",
       ].sort(),
     );
-    const json = JSON.stringify(measured);
+    const { estimate, ...customerSafe } = measured;
+    expect(estimate.sellPrice).toBeGreaterThan(0);
+    const json = JSON.stringify(customerSafe);
     for (const forbidden of ["unitCost", "burden", "margin", "directCost", "totalCost", "sellPrice"]) {
       expect(json).not.toContain(forbidden);
     }

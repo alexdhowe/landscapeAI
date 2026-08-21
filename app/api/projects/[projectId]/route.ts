@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { getOption } from "@/lib/catalog/options";
 import type { RegionSelection } from "@/lib/design/types";
 import {
+  ProjectLockedError,
   ProjectNotFoundError,
   declineAddress,
   getProject,
@@ -152,6 +153,12 @@ export async function PATCH(request: Request, { params }: Params) {
   } catch (error) {
     if (error instanceof ProjectNotFoundError) {
       return NextResponse.json({ error: "Project not found" }, { status: 404 });
+    }
+    if (error instanceof ProjectLockedError) {
+      return NextResponse.json(
+        { error: "This design has been submitted and is locked" },
+        { status: 409 },
+      );
     }
     throw error;
   }

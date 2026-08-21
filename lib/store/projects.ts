@@ -1,8 +1,10 @@
 /**
- * File-backed project store for the play stage. Postgres arrives with the
- * lead-capture phase; until then projects live as JSON + photo bytes under
- * .data/ (gitignored). This module is the only place that knows that, so
- * swapping in Drizzle later touches nothing else.
+ * File-backed project store — the single persistence seam. Projects (and,
+ * since Phase 5, their lead contacts and immutable estimate snapshots) live
+ * as JSON + photo bytes under .data/ (gitignored). No DATABASE_URL is
+ * configured yet; when Postgres arrives, this module's exports are the
+ * contract to reimplement over the Drizzle schema in lib/db — nothing else
+ * in the app knows how storage works.
  *
  * Server-only.
  */
@@ -16,10 +18,13 @@ import type {
   ProjectLocation,
   RegionSelection,
 } from "../design/types";
+import type { EstimateSnapshot, LeadContact } from "../lead/types";
 import type { MarketContext } from "../pricing/typology";
 import type { SegmentationState } from "../design/types";
 
-const DATA_DIR = path.join(process.cwd(), ".data", "projects");
+/** Overridable so tests can point the store at a throwaway directory. */
+const DATA_DIR =
+  process.env.PROJECTS_DATA_DIR ?? path.join(process.cwd(), ".data", "projects");
 
 const projectDir = (id: string) => path.join(DATA_DIR, id);
 const projectFile = (id: string) => path.join(projectDir(id), "project.json");
@@ -38,6 +43,25 @@ export class ProjectNotFoundError extends Error {
   constructor(id: string) {
     super(`Project not found: ${id}`);
     this.name = "ProjectNotFoundError";
+  }
+}
+
+/** Thrown when a mutation targets a submitted (locked) project. */
+export class ProjectLockedError extends Error {
+  constructor(id: string) {
+    super(`Project ${id} has been submitted and can no longer be edited`);
+    this.name = "ProjectLockedError";
+  }
+}
+
+/**
+ * Once submitted, the design is frozen alongside its snapshot — every
+ * mutator goes through this gate so the dashboard always describes the
+ * design the customer actually submitted.
+ */
+function assertEditable(project: DesignProject): void {
+  if (project.status !== "playing") {
+    throw new ProjectLockedError(project.id);
   }
 }
 
@@ -90,6 +114,7 @@ export async function setSegmentation(
   segmentation: SegmentationState,
 ): Promise<DesignProject> {
   const project = await getProject(id);
+  assertEditable(project);
   project.segmentation = segmentation;
   await writeProject(project);
   return project;
@@ -101,6 +126,7 @@ export async function setSelection(
   selection: RegionSelection,
 ): Promise<DesignProject> {
   const project = await getProject(id);
+  assertEditable(project);
   project.selections[regionId] = selection;
   await writeProject(project);
   return project;
@@ -112,6 +138,7 @@ export async function setLocation(
   location: ProjectLocation,
 ): Promise<DesignProject> {
   const project = await getProject(id);
+  assertEditable(project);
   project.location = location;
   delete project.addressDeclined;
   await writeProject(project);
@@ -125,6 +152,7 @@ export async function setLocation(
  */
 export async function declineAddress(id: string): Promise<DesignProject> {
   const project = await getProject(id);
+  assertEditable(project);
   project.addressDeclined = true;
   await writeProject(project);
   return project;
@@ -136,6 +164,7 @@ export async function upsertAerialRegion(
   region: AerialRegion,
 ): Promise<DesignProject> {
   const project = await getProject(id);
+  assertEditable(project);
   const regions = (project.aerialRegions ?? []).filter(
     (r) => r.photoRegionId !== region.photoRegionId,
   );
@@ -150,6 +179,7 @@ export async function removeAerialRegion(
   photoRegionId: string,
 ): Promise<DesignProject> {
   const project = await getProject(id);
+  assertEditable(project);
   project.aerialRegions = (project.aerialRegions ?? []).filter(
     (r) => r.photoRegionId !== photoRegionId,
   );
@@ -162,7 +192,57 @@ export async function setMarketContext(
   marketContext: MarketContext,
 ): Promise<DesignProject> {
   const project = await getProject(id);
+  assertEditable(project);
   project.marketContext = marketContext;
   await writeProject(project);
   return project;
+}
+
+/**
+ * Phase 5 — submit the project as a lead. Appends the frozen snapshot,
+ * records the contact, and flips the status to "submitted", which locks
+ * every mutator above. Snapshots are append-only: no function in this
+ * module ever modifies one after this write.
+ */
+export async function submitProject(
+  id: string,
+  contact: LeadContact,
+  snapshot: EstimateSnapshot,
+): Promise<DesignProject> {
+  const project = await getProject(id);
+  assertEditable(project);
+  project.status = "submitted";
+  project.contact = contact;
+  project.submittedAt = snapshot.issuedAt;
+  project.snapshots = [...(project.snapshots ?? []), snapshot];
+  await writeProject(project);
+  return project;
+}
+
+/** Every stored project, newest first. Unreadable entries are skipped. */
+export async function listProjects(): Promise<DesignProject[]> {
+  let entries: string[];
+  try {
+    entries = await fs.readdir(DATA_DIR);
+  } catch {
+    return [];
+  }
+  const projects: DesignProject[] = [];
+  for (const id of entries) {
+    if (!UUID_RE.test(id)) continue;
+    try {
+      projects.push(await getProject(id));
+    } catch {
+      // A partially written or foreign directory must not take down the inbox.
+    }
+  }
+  return projects.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}
+
+/** Submitted leads for the contractor inbox, newest submission first. */
+export async function listLeads(): Promise<DesignProject[]> {
+  const projects = await listProjects();
+  return projects
+    .filter((p) => p.status === "submitted")
+    .sort((a, b) => (b.submittedAt ?? "").localeCompare(a.submittedAt ?? ""));
 }

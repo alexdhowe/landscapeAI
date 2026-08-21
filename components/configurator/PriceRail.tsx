@@ -55,6 +55,7 @@ export function PriceRail({
   onContextChange,
   projectId,
   addressDeclined,
+  locked,
 }: {
   payload: BandPayload | null;
   context: MarketContext;
@@ -62,6 +63,8 @@ export function PriceRail({
   onContextChange: (context: MarketContext) => void;
   projectId: string;
   addressDeclined?: boolean;
+  /** Submitted designs are frozen — hide the measure/adjust calls to action. */
+  locked?: boolean;
 }) {
   const band = payload?.band ?? null;
   const measured = band?.basis === "measured";
@@ -191,7 +194,7 @@ export function PriceRail({
             </ul>
           )}
 
-          {measured ? (
+          {locked ? null : measured ? (
             <Link
               href={`/design/${projectId}/locate`}
               className="mt-3 inline-block text-xs font-medium text-sky-700 hover:text-sky-900"

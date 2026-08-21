@@ -22,6 +22,12 @@ export default function Home() {
       >
         See a planting grow over time →
       </Link>
+      <Link
+        href="/dashboard"
+        className="text-xs text-neutral-400 underline underline-offset-2 hover:text-neutral-600"
+      >
+        Contractor lead inbox
+      </Link>
     </main>
   );
 }

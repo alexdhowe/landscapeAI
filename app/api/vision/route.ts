@@ -6,6 +6,7 @@ import {
   type SupportedImageMediaType,
 } from "@/lib/vision/classify";
 import {
+  ProjectLockedError,
   ProjectNotFoundError,
   getProject,
   getProjectPhoto,
@@ -52,6 +53,12 @@ export async function POST(request: Request) {
   } catch (error) {
     if (error instanceof ProjectNotFoundError) {
       return NextResponse.json({ error: "Project not found" }, { status: 404 });
+    }
+    if (error instanceof ProjectLockedError) {
+      return NextResponse.json(
+        { error: "This design has been submitted and is locked" },
+        { status: 409 },
+      );
     }
     throw error;
   }

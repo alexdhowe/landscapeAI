@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 
 import { assertValidRing, measureRing, ringAreaSf } from "@/lib/measure/area";
 import {
+  ProjectLockedError,
   ProjectNotFoundError,
   getProject,
   removeAerialRegion,
@@ -82,6 +83,12 @@ export async function POST(request: Request, { params }: Params) {
     if (error instanceof ProjectNotFoundError) {
       return NextResponse.json({ error: "Project not found" }, { status: 404 });
     }
+    if (error instanceof ProjectLockedError) {
+      return NextResponse.json(
+        { error: "This design has been submitted and is locked" },
+        { status: 409 },
+      );
+    }
     throw error;
   }
 }
@@ -98,6 +105,12 @@ export async function DELETE(request: Request, { params }: Params) {
   } catch (error) {
     if (error instanceof ProjectNotFoundError) {
       return NextResponse.json({ error: "Project not found" }, { status: 404 });
+    }
+    if (error instanceof ProjectLockedError) {
+      return NextResponse.json(
+        { error: "This design has been submitted and is locked" },
+        { status: 409 },
+      );
     }
     throw error;
   }

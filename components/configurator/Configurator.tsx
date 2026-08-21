@@ -9,6 +9,7 @@ import type { MarketContext } from "@/lib/pricing/typology";
 import { CatalogPicker } from "./CatalogPicker";
 import { PhotoCanvas } from "./PhotoCanvas";
 import { PriceRail, type BandPayload } from "./PriceRail";
+import { SubmitLead } from "./SubmitLead";
 
 /**
  * The Phase 2 configurator: photo + segmentation overlay on the left,
@@ -87,6 +88,14 @@ export function Configurator({ projectId }: { projectId: string }) {
     [projectId, refreshBand],
   );
 
+  // After submit the server has locked the project — reload so the UI
+  // reflects the submitted status everywhere.
+  const reloadProject = useCallback(async () => {
+    const res = await fetch(`/api/projects/${projectId}`);
+    if (res.ok) setProject((await res.json()) as DesignProject);
+    await refreshBand();
+  }, [projectId, refreshBand]);
+
   const changeContext = useCallback(
     async (marketContext: MarketContext) => {
       setBusy(true);
@@ -119,6 +128,7 @@ export function Configurator({ projectId }: { projectId: string }) {
   }
 
   const seg = project.segmentation;
+  const locked = project.status === "submitted";
   const regions = seg.status === "ready" ? seg.regions : [];
   const selectedRegion = regions.find((r) => r.id === selectedRegionId) ?? null;
   // Rendering is gated by confidence (architectural invariant): once a
@@ -129,6 +139,15 @@ export function Configurator({ projectId }: { projectId: string }) {
   return (
     <div className="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(280px,1fr)]">
       <div className="space-y-3">
+        {locked && (
+          <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-sm text-emerald-800">
+            This design was sent to the contractor
+            {project.submittedAt
+              ? ` on ${new Date(project.submittedAt).toLocaleDateString("en-US")}`
+              : null}{" "}
+            — it&apos;s locked while a rep reviews it.
+          </div>
+        )}
         {seg.status === "pending" && (
           <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-800">
             Analyzing your yard photo…
@@ -177,25 +196,33 @@ export function Configurator({ projectId }: { projectId: string }) {
         <PriceRail
           payload={band}
           context={project.marketContext}
-          busy={busy}
+          busy={busy || locked}
           onContextChange={changeContext}
           projectId={project.id}
           addressDeclined={project.addressDeclined}
+          locked={locked}
         />
-        {selectedRegion ? (
-          <CatalogPicker
-            region={selectedRegion}
-            selection={project.selections[selectedRegion.id]}
-            busy={busy}
-            onChange={(selection) => applySelection(selectedRegion.id, selection)}
-          />
-        ) : (
-          regions.length > 0 && (
-            <div className="rounded-lg border border-dashed border-neutral-300 bg-white p-4 text-sm text-neutral-500">
-              Click a labeled area on your photo to see what you can do with it.
-            </div>
-          )
-        )}
+        <SubmitLead
+          projectId={project.id}
+          submitted={locked}
+          canSubmit={Boolean(band?.band)}
+          onSubmitted={() => void reloadProject()}
+        />
+        {!locked &&
+          (selectedRegion ? (
+            <CatalogPicker
+              region={selectedRegion}
+              selection={project.selections[selectedRegion.id]}
+              busy={busy}
+              onChange={(selection) => applySelection(selectedRegion.id, selection)}
+            />
+          ) : (
+            regions.length > 0 && (
+              <div className="rounded-lg border border-dashed border-neutral-300 bg-white p-4 text-sm text-neutral-500">
+                Click a labeled area on your photo to see what you can do with it.
+              </div>
+            )
+          ))}
       </div>
     </div>
   );
