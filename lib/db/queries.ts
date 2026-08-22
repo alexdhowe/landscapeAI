@@ -54,6 +54,7 @@ import {
   marginConfigs,
   measurementDeltas,
   organizations,
+  photoObjects,
   photos,
   priceBookRevisions,
   projects,
@@ -243,13 +244,50 @@ export async function findProject(
   return row ? toDesignProject(row as ProjectBundle) : null;
 }
 
+/**
+ * Where a project's photo lives, and what it is. The bytes are lib/storage's
+ * business; this row only points at them.
+ */
 export async function findProjectPhoto(
   db: Database,
   id: string,
-): Promise<{ bytes: Buffer; mediaType: string } | null> {
+): Promise<{ locator: string; mediaType: string } | null> {
   const row = await db.query.photos.findFirst({ where: eq(photos.projectId, id) });
   if (!row) return null;
-  return { bytes: Buffer.from(row.bytes), mediaType: row.mediaType };
+  return { locator: row.url, mediaType: row.mediaType };
+}
+
+// ---------------------------------------------------------------------------
+// The local object store (lib/storage/databaseBackend.ts)
+// ---------------------------------------------------------------------------
+
+/**
+ * Write bytes at a key. Idempotent by key, because re-putting the same
+ * object must not be an error — an object store is a map, not a log.
+ */
+export async function putPhotoObject(
+  db: Database,
+  key: string,
+  bytes: Buffer,
+  mediaType: string,
+): Promise<void> {
+  await db
+    .insert(photoObjects)
+    .values({ key, bytes, mediaType })
+    .onConflictDoUpdate({
+      target: photoObjects.key,
+      set: { bytes, mediaType },
+    });
+}
+
+export async function findPhotoObject(
+  db: Database,
+  key: string,
+): Promise<Buffer | null> {
+  const row = await db.query.photoObjects.findFirst({
+    where: eq(photoObjects.key, key),
+  });
+  return row ? Buffer.from(row.bytes) : null;
 }
 
 /** Every project, newest first. */
@@ -291,7 +329,8 @@ export type NewProject = {
   id: string;
   orgId: string;
   createdAt: string;
-  photo: { fileName: string; mediaType: string; bytes: Buffer };
+  /** `locator` is lib/storage's, already written; this only records it. */
+  photo: { fileName: string; mediaType: string; locator: string };
 };
 
 export async function insertProject(db: Database, input: NewProject): Promise<void> {
@@ -305,7 +344,7 @@ export async function insertProject(db: Database, input: NewProject): Promise<vo
       projectId: input.id,
       fileName: input.photo.fileName,
       mediaType: input.photo.mediaType,
-      bytes: input.photo.bytes,
+      url: input.photo.locator,
     });
   });
 }

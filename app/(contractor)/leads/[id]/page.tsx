@@ -185,8 +185,10 @@ export default async function LeadPage({
       <div className="grid gap-5 lg:grid-cols-[minmax(0,3fr)_minmax(280px,2fr)]">
         <div className="space-y-5">
           <Section title="The design">
+            {/* The guarded read: the console never borrows the customer's
+                open photo route. */}
             <LeadPhoto
-              photoUrl={`/api/projects/${project.id}/photo`}
+              photoUrl={`/api/leads/${project.id}/photo`}
               regions={regions}
               selections={project.selections}
             />

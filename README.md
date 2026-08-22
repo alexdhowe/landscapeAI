@@ -23,14 +23,19 @@ not negotiable.
 | Persistence — Postgres + Drizzle | ✅ done — migrations, `lib/db/queries.ts`, deltas are a table |
 | Contractor auth | ✅ done — Auth.js, console and contractor APIs gated |
 | `/pricebook` | ✅ done — full CRUD on immutable, published revisions |
+| Photo storage — S3-compatible | ✅ done — `lib/storage`, bucket or local, migration 0004 |
 
 All six phases are in, they run on Postgres, the contractor console is behind
-a login, and the price book is editable. `npm test` runs 240 tests — with a
-database and without one.
+a login, the price book is editable, and photos live in object storage when a
+bucket is configured. `npm test` runs 277 tests — with a database and without
+one.
 
-Still open from sections 3 and 4, each its own session: `/api/imagery` and
-photo object storage. The imagery provider decision (section 3) is the real
-blocker on the first of those.
+One gap is left from section 3 and it is not a coding gap: `/api/imagery`
+waits on the **imagery provider decision**, which is a licensing question —
+some tile licences prohibit deriving and reselling measurements, which is
+exactly this product. `lib/imagery/provider.ts` is the shape that decision
+will land in; the current Esri demo tiles sit behind it, flagged
+`unreviewed`.
 
 ## Stack
 
@@ -42,7 +47,7 @@ store, so a clean checkout runs the demo with nothing to provision.
 ## Commands
 
 ```sh
-npm test          # Vitest — 240 tests across every phase
+npm test          # Vitest — 277 tests across every phase
 npm run typecheck
 npm run dev
 npm run build
@@ -77,8 +82,9 @@ picker filtered to the clicked region's kind, and a budget band that reads
 - Visual swap is deterministic: the region polygon fills with an SVG
   material pattern generated from the selection. The image stays a view of
   the object graph, never the artifact.
-- Projects live behind `lib/store/projects.ts` — the only module that knows
-  storage. See [the database](#the-database) below.
+- Projects live behind `lib/store/projects.ts` and photo bytes behind
+  `lib/storage` — the only modules that know where anything is kept. See
+  [photo storage](#photo-storage) and [the database](#the-database) below.
 
 ## The aerial measurement layer (Phase 3)
 
@@ -107,10 +113,11 @@ engine run on real quantities, projected through the disclosure policy
 - The customer who declines an address keeps their design and typology
   band (`addressDeclined` on the project); the lead is still capturable
   in Phase 5.
-- Satellite tiles default to Esri World Imagery for the demo; override
-  with `NEXT_PUBLIC_SATELLITE_TILE_URL` / `NEXT_PUBLIC_SATELLITE_ATTRIBUTION`.
-  **Before production**: derivative-measurement licensing (Nearmap/Vexcel)
-  is the real decision — see project-map §3.
+- Satellite tiles come from `lib/imagery/provider.ts` and default to Esri
+  World Imagery for the demo; override with `NEXT_PUBLIC_SATELLITE_TILE_URL`
+  / `NEXT_PUBLIC_SATELLITE_ATTRIBUTION`. **Before production**:
+  derivative-measurement licensing (Nearmap/Vexcel) is the real decision —
+  see project-map §3 and [the imagery seam](#the-satellite-imagery-seam).
 
 ## The time slider (Phase 3.5)
 
@@ -296,6 +303,87 @@ database there's no user table, so a single login can be configured with
 `CONTRACTOR_EMAIL` / `CONTRACTOR_PASSWORD`; leave those unset and nobody can
 sign in, which is the safe default rather than a broken one. **There is no
 default password anywhere in this repo.**
+
+## Photo storage
+
+Project-map section 3 puts photos in S3-compatible object storage (R2,
+Supabase Storage) and section 5's `Photo` carries a `url`. `lib/storage` is
+that seam, with the same two-backend shape as `lib/store`:
+
+```sh
+export S3_BUCKET=landscape-photos
+export S3_ENDPOINT=https://<account>.r2.cloudflarestorage.com
+export S3_ACCESS_KEY_ID=… S3_SECRET_ACCESS_KEY=…
+```
+
+Set those and uploaded photos go to the bucket; leave them unset and the
+bytes stay where they always were — a `photo_objects` row with a
+`DATABASE_URL`, a file under `.data/` without one — so a clean checkout still
+runs the demo with nothing to provision. Nothing above `lib/storage` knows
+which: a project carries a **locator** it never parses.
+
+- **The locator records the backend, the environment only picks the next
+  one.** `inline:photos/<uuid>.jpg` or `s3:photos/<uuid>.jpg`. Point a
+  running deployment at R2 and yesterday's photos still resolve, because
+  their locator still says `inline:`. A test covers exactly that switch.
+- **Half-configured object storage is a fatal error, never a quiet fall
+  back.** A deployment that set three of the four variables and silently
+  kept filling its own database would look fine until the disk did not.
+  Uploads answer 503 and the log says why.
+- **SigV4 over `fetch`, no SDK.** Two calls are needed — PUT an object, GET
+  it back — and the signing is ~60 lines of `node:crypto`. An SDK would be
+  the largest dependency in the tree for it. `lib/storage/s3.ts`.
+- `photos.bytes` is gone. **Migration 0004** moves every existing row's bytes
+  into `photo_objects` and backfills `photos.url` — section 5's field, which
+  was null on every row — with the locator that finds them. The backfill
+  joins against the object that actually landed, so a row whose bytes did not
+  move keeps a null `url` and the `SET NOT NULL` fails the migration rather
+  than leaving a lead with a photo that 404s. Verified against a live
+  Postgres holding pre-migration rows: bytes moved byte-identical, and the
+  migrated project still serves through the route.
+
+### Who may read a photo
+
+A photo of somebody's house is not a price band, so this is a decision and
+not an accident. It is written out in full at the top of
+`lib/storage/index.ts`; in short:
+
+| | |
+|---|---|
+| The bucket | **private, always** — no public object URL, no ACL on upload. Every read is streamed by the app. |
+| The customer read | `GET /api/projects/[id]/photo`, open to whoever holds the project UUID — **deliberately**, and documented as such. |
+| The contractor read | `GET /api/leads/[id]/photo`, **behind the auth guard**. The console never borrows the customer's open route. |
+
+The assumption behind the middle row, stated so it can be overruled: a photo
+is no more sensitive than the design, address and contact details hanging off
+the same UUID, and the customer never signs in. A signed URL or a token on
+the photo alone would not raise the bar — whoever holds the UUID can load the
+design page and be handed a fresh one; it would only move the credential. If
+that assumption is wrong, the fix is a per-project token required by **every**
+customer-facing project route, not by this one. The contractor split is what
+makes that change cheap: the console is already off the open route.
+
+### Tests need no bucket
+
+`lib/storage/__tests__/fakeBucket.ts` is an S3-compatible bucket in process —
+a loopback HTTP server that refuses an unsigned request and refuses one whose
+`x-amz-content-sha256` does not match the body it received, so a signing bug
+cannot pass. The local backend runs in a temp directory. The acceptance path
+(`photos.test.ts`) uploads through the real route with a bucket configured,
+asserts the bytes are in it and **not** in this deployment, renders both the
+customer and contractor surfaces, then unsets the config and does it all
+again on the fallback.
+
+## The satellite imagery seam
+
+`lib/imagery/provider.ts` holds the *shape* of the provider decision, not the
+decision. Section 3 calls it "the real one" and it is a licensing question:
+some tile licences prohibit deriving and reselling measurements, which is
+exactly what this product does. Every provider carries the field the decision
+turns on — `derivativeMeasurements: 'unreviewed' | 'prohibited' | 'permitted'`
+— and the Esri demo tiles the map draws today are `unreviewed`. Nothing
+assumes a licence nobody declared: an unrecognised value is `unreviewed`, not
+a yes. When a licence is signed it is a constant in that file.
 
 ## The database
 

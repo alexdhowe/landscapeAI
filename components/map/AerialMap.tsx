@@ -8,21 +8,17 @@ import { TerraDraw, TerraDrawPolygonMode, TerraDrawSelectMode } from "terra-draw
 import { TerraDrawMapLibreGLAdapter } from "terra-draw-maplibre-gl-adapter";
 
 import type { AerialRegion } from "@/lib/design/types";
+import { resolveImageryProvider } from "@/lib/imagery/provider";
 import type { LngLat } from "@/lib/measure/area";
 import type { RegionKind } from "@/lib/vision/types";
 
 /**
- * Satellite raster for the MVP. Esri World Imagery is keyless for dev/demo;
- * production must move to a provider whose license covers deriving and
- * selling measurements (Nearmap/Vexcel — see project-map.md §3, "Decisions
- * to make before Phase 2"). Swap via env without touching code.
+ * Satellite raster for the MVP, behind lib/imagery: Esri World Imagery is
+ * keyless for dev/demo, and production must move to a provider whose
+ * licence covers deriving and selling measurements (see project-map.md §3
+ * and the note in lib/imagery/provider.ts). Swap via env, not code.
  */
-const TILE_URL =
-  process.env.NEXT_PUBLIC_SATELLITE_TILE_URL ??
-  "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}";
-const TILE_ATTRIBUTION =
-  process.env.NEXT_PUBLIC_SATELLITE_ATTRIBUTION ??
-  "Imagery © Esri, Maxar, Earthstar Geographics, and the GIS User Community";
+const IMAGERY = resolveImageryProvider();
 
 const KIND_COLORS: Record<RegionKind, string> = {
   turf: "#4ade80",
@@ -78,10 +74,10 @@ export function AerialMap({
         sources: {
           satellite: {
             type: "raster",
-            tiles: [TILE_URL],
-            tileSize: 256,
-            maxzoom: 19,
-            attribution: TILE_ATTRIBUTION,
+            tiles: [IMAGERY.tileUrl],
+            tileSize: IMAGERY.tileSize,
+            maxzoom: IMAGERY.maxZoom,
+            attribution: IMAGERY.attribution,
           },
         },
         layers: [{ id: "satellite", type: "raster", source: "satellite" }],

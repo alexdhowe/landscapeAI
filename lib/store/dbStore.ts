@@ -32,7 +32,11 @@ import {
   assertQuotable,
   assertRegion,
 } from "./gates";
-import { ProjectNotFoundError, type ProjectStore } from "./types";
+import {
+  ProjectNotFoundError,
+  type NewProjectPhoto,
+  type ProjectStore,
+} from "./types";
 
 export function createDbStore(): ProjectStore {
   async function getProject(id: string): Promise<DesignProject> {
@@ -59,21 +63,22 @@ export function createDbStore(): ProjectStore {
   }
 
   return {
-    async createProject(photoBytes: Buffer, mediaType: string, ext: string) {
+    async createProject(photo: NewProjectPhoto) {
       const [db, org] = await Promise.all([getDb(), resolveOrg()]);
       const id = randomUUID();
       await q.insertProject(db, {
         id,
         orgId: org.id,
         createdAt: new Date().toISOString(),
-        photo: { fileName: `photo.${ext}`, mediaType, bytes: photoBytes },
+        photo,
       });
       return getProject(id);
     },
 
     getProject,
 
-    async getProjectPhoto(id: string) {
+    /** The row points at the bytes; lib/storage fetches them. */
+    async getPhotoLocator(id: string) {
       if (!UUID_RE.test(id)) throw new ProjectNotFoundError(id);
       const photo = await q.findProjectPhoto(await getDb(), id);
       if (!photo) throw new ProjectNotFoundError(id);

@@ -19,6 +19,7 @@
  * schema vitest.globalSetup.ts creates). Without one it runs against
  * PGlite in-process, so `npm test` needs no server.
  */
+import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 if (!process.env.DATABASE_URL) process.env.PGLITE_DATA_DIR = "memory://";
@@ -42,6 +43,14 @@ const { isFinalQuotePayload } = await import("../../design/quote");
 const { wiPriceBook, wiMarginConfig, wiBandPolicy, wiFinalQuotePolicy } = await import(
   "../../../seed/pricebook.seed"
 );
+const { startFakeBucket, useBucket } = await import(
+  "../../storage/__tests__/fakeBucket"
+);
+const storage = await import("../../storage");
+const { photoObjects, photos } = await import("../schema");
+const { GET: photoGET } = await import(
+  "../../../app/api/projects/[projectId]/photo/route"
+);
 const { POST: submitPOST } = await import(
   "../../../app/api/projects/[projectId]/submit/route"
 );
@@ -60,6 +69,7 @@ afterAll(() => {
   // must not inherit this file's database.
   delete process.env.PGLITE_DATA_DIR;
   store.resetStore();
+  storage.resetPhotoStorage();
   resetOrgCache();
 });
 
@@ -212,6 +222,77 @@ describe("the store, over Drizzle", () => {
     await expect(
       store.getProject("aaaaaaaa-bbbb-4ccc-8ddd-000000000000"),
     ).rejects.toBeInstanceOf(store.ProjectNotFoundError);
+  });
+});
+
+/**
+ * Photo storage, on the database leg (project-map section 3).
+ *
+ * The acceptance beat: with a bucket configured the bytes are in the
+ * bucket and NOT in the database; with none configured they are a row in
+ * this deployment's own object table. Either way the route serves them and
+ * nothing above lib/storage can tell the difference.
+ */
+describe("photo storage, against the database", () => {
+  it("keeps the bytes in photo_objects when no bucket is configured", async () => {
+    const project = await store.createProject(PHOTO_BYTES, "image/jpeg", "jpg");
+    const db = await getDb();
+
+    const row = await db.query.photos.findFirst({
+      where: eq(photos.projectId, project.id),
+    });
+    // Section 5's `url`, no longer null on every row: it is the locator.
+    expect(row!.url).toMatch(/^inline:photos\/[0-9a-f-]{36}\.jpg$/);
+
+    const object = await db.query.photoObjects.findFirst({
+      where: eq(photoObjects.key, row!.url.slice("inline:".length)),
+    });
+    expect(Buffer.from(object!.bytes).equals(PHOTO_BYTES)).toBe(true);
+    expect(object!.mediaType).toBe("image/jpeg");
+
+    const response = await photoGET(
+      new Request(`http://localhost/api/projects/${project.id}/photo`),
+      params(project.id),
+    );
+    expect(response.status).toBe(200);
+    expect(Buffer.from(await response.arrayBuffer()).equals(PHOTO_BYTES)).toBe(true);
+  });
+
+  it("puts the bytes in the bucket and NOT in the database when one is", async () => {
+    const bucket = await startFakeBucket();
+    const restore = useBucket(bucket);
+    storage.resetPhotoStorage();
+    const db = await getDb();
+
+    try {
+      const project = await store.createProject(PHOTO_BYTES, "image/jpeg", "jpg");
+
+      expect([...bucket.objects.values()][0].bytes.equals(PHOTO_BYTES)).toBe(true);
+      const row = await db.query.photos.findFirst({
+        where: eq(photos.projectId, project.id),
+      });
+      expect(row!.url).toMatch(/^s3:photos\/[0-9a-f-]{36}\.jpg$/);
+      // The database gained a pointer and no bytes. Checked by key rather
+      // than by counting rows: with DATABASE_URL set the whole suite shares
+      // one disposable schema, and another file's upload is not this test's
+      // business.
+      const key = row!.url.slice("s3:".length);
+      expect([...bucket.objects.keys()]).toContain(key);
+      expect(
+        await db.query.photoObjects.findFirst({ where: eq(photoObjects.key, key) }),
+      ).toBeUndefined();
+
+      const response = await photoGET(
+        new Request(`http://localhost/api/projects/${project.id}/photo`),
+        params(project.id),
+      );
+      expect(response.status).toBe(200);
+      expect(Buffer.from(await response.arrayBuffer()).equals(PHOTO_BYTES)).toBe(true);
+    } finally {
+      restore();
+      storage.resetPhotoStorage();
+      await bucket.close();
+    }
   });
 });
 

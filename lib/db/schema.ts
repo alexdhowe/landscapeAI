@@ -67,10 +67,7 @@ import type { NormalizedPoint, VerticalElement } from "../vision/types";
 import type { LngLat } from "../measure/area";
 
 /**
- * Photo bytes. Section 3 puts photos in S3-compatible object storage and
- * section 5's Photo carries a `url`; until that session lands the bytes
- * live here so a database deployment needs no second service. `url` is
- * already present for the row to point outward when it does.
+ * Object bytes, for the photo_objects table below.
  */
 const bytea = customType<{ data: Buffer; driverData: Buffer }>({
   dataType: () => "bytea",
@@ -404,6 +401,18 @@ export const projects = pgTable(
   ],
 );
 
+/**
+ * Section 5's Photo: `{ url, exif, classifications[] }`.
+ *
+ * `url` holds the **storage locator** — `inline:photos/<uuid>.jpg` when
+ * this deployment holds the bytes, `s3:photos/<uuid>.jpg` when the
+ * configured bucket does. It is minted, parsed and resolved by lib/storage
+ * and by nothing else; the column stopped being null on every row in
+ * migration 0004, which moved the bytes out of here.
+ *
+ * The classifications live on `regions` — the segmentation pass writes one
+ * row per region it found, which is what the rest of the system reads.
+ */
 export const photos = pgTable(
   "photos",
   {
@@ -413,14 +422,33 @@ export const photos = pgTable(
       .references(() => projects.id, { onDelete: "cascade" }),
     fileName: text("file_name").notNull(),
     mediaType: text("media_type").notNull(),
-    /** Interim storage — see the note on `bytea` above. */
-    bytes: bytea("bytes").notNull(),
-    /** Object-storage URL once photo storage lands. */
-    url: text("url"),
+    /** Where the bytes are. Opaque outside lib/storage. */
+    url: text("url").notNull(),
     exif: jsonb("exif"),
   },
   (t) => [index("photos_project_idx").on(t.projectId)],
 );
+
+/**
+ * The local object store: key → bytes.
+ *
+ * What "the photo is in the database" means when no bucket is configured.
+ * Keyed by the storage key rather than by project, because that is what an
+ * object store is — lib/storage/databaseBackend.ts is the only module that
+ * reads or writes it, and it addresses rows exactly as it addresses S3
+ * objects.
+ *
+ * Deliberately NOT foreign-keyed to a project: an object is written before
+ * the project row exists (see lib/storage/index.ts, putPhoto), and the
+ * order matters — an unreferenced object is garbage, a project whose photo
+ * 404s is a broken lead.
+ */
+export const photoObjects = pgTable("photo_objects", {
+  key: text("key").primaryKey(),
+  mediaType: text("media_type").notNull(),
+  bytes: bytea("bytes").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
 
 /**
  * A segmented region, keyed by the segmentation id the rest of the system

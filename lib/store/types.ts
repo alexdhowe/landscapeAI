@@ -20,6 +20,7 @@ import type {
 } from "../design/types";
 import type { EstimateSnapshot, LeadContact } from "../lead/types";
 import type { MarketContext } from "../pricing/typology";
+import type { PhotoLocator } from "../storage";
 
 export class ProjectNotFoundError extends Error {
   constructor(id: string) {
@@ -56,14 +57,24 @@ export class UnknownRegionError extends Error {
   }
 }
 
+/**
+ * A photo whose bytes lib/storage has already written. The store records
+ * where they went; it never holds them, and neither backend below knows
+ * whether "there" was a bucket, a row, or a file.
+ */
+export type NewProjectPhoto = {
+  fileName: string;
+  mediaType: string;
+  locator: PhotoLocator;
+};
+
 export type ProjectStore = {
-  createProject(
-    photoBytes: Buffer,
-    mediaType: string,
-    ext: string,
-  ): Promise<DesignProject>;
+  createProject(photo: NewProjectPhoto): Promise<DesignProject>;
   getProject(id: string): Promise<DesignProject>;
-  getProjectPhoto(id: string): Promise<{ bytes: Buffer; mediaType: string }>;
+  /** Where this project's photo lives — resolved to bytes by lib/storage. */
+  getPhotoLocator(
+    id: string,
+  ): Promise<{ locator: PhotoLocator; mediaType: string }>;
   setSegmentation(id: string, segmentation: SegmentationState): Promise<DesignProject>;
   setSelection(
     id: string,

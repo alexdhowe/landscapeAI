@@ -13,6 +13,11 @@
  * Nothing above this module knows which one it got, and nothing above it
  * imports lib/db.
  *
+ * Photo BYTES are not part of that choice: they belong to lib/storage,
+ * which makes its own two-backend decision (a bucket when one is
+ * configured, this deployment when not). A project carries the locator
+ * lib/storage minted and nothing else.
+ *
  * Server-only.
  */
 import type { MeasurementDelta } from "../confirm/types";
@@ -27,6 +32,12 @@ import type { EstimateSnapshot, LeadContact } from "../lead/types";
 import type { MarketContext } from "../pricing/typology";
 
 import { isDatabaseConfigured } from "../db/client";
+import {
+  extensionFor,
+  putPhoto,
+  readPhotoBytes,
+  type StoredPhoto,
+} from "../storage";
 import type { ProjectStore } from "./types";
 
 export {
@@ -62,22 +73,36 @@ export function resetStore(): void {
   backend = null;
 }
 
+/**
+ * A new project from an uploaded photo.
+ *
+ * The bytes go to lib/storage first and the project records only where
+ * they went — the seam is called here, once, so neither backend below has
+ * an opinion about whether photos live in a bucket. If the project write
+ * then fails the object is unreferenced, which is garbage; the other order
+ * would give a lead a photo that 404s.
+ */
 export async function createProject(
   photoBytes: Buffer,
   mediaType: string,
-  ext: string,
+  ext = extensionFor(mediaType),
 ): Promise<DesignProject> {
-  return (await store()).createProject(photoBytes, mediaType, ext);
+  const locator = await putPhoto(photoBytes, mediaType);
+  return (await store()).createProject({
+    fileName: `photo.${ext}`,
+    mediaType,
+    locator,
+  });
 }
 
 export async function getProject(id: string): Promise<DesignProject> {
   return (await store()).getProject(id);
 }
 
-export async function getProjectPhoto(
-  id: string,
-): Promise<{ bytes: Buffer; mediaType: string }> {
-  return (await store()).getProjectPhoto(id);
+/** The photo's bytes, from whichever backend holds them. */
+export async function getProjectPhoto(id: string): Promise<StoredPhoto> {
+  const { locator, mediaType } = await (await store()).getPhotoLocator(id);
+  return { bytes: await readPhotoBytes(locator), mediaType };
 }
 
 export async function setSegmentation(

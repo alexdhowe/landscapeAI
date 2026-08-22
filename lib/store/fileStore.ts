@@ -1,6 +1,5 @@
 /**
- * The file-backed project store: JSON + photo bytes under .data/
- * (gitignored).
+ * The file-backed project store: JSON under .data/ (gitignored).
  *
  * This is the fallback, not the legacy. With no DATABASE_URL set the demo
  * runs on a clean checkout with nothing to install and nothing to
@@ -24,6 +23,7 @@ import type {
 } from "../design/types";
 import type { EstimateSnapshot, LeadContact } from "../lead/types";
 import type { MarketContext } from "../pricing/typology";
+import { legacyFileLocator } from "../storage";
 
 import {
   UUID_RE,
@@ -32,7 +32,11 @@ import {
   assertQuotable,
   assertRegion,
 } from "./gates";
-import { ProjectNotFoundError, type ProjectStore } from "./types";
+import {
+  ProjectNotFoundError,
+  type NewProjectPhoto,
+  type ProjectStore,
+} from "./types";
 
 /** Overridable so tests can point the store at a throwaway directory. */
 function dataDir(): string {
@@ -43,6 +47,13 @@ export function createFileStore(): ProjectStore {
   const DATA_DIR = dataDir();
   const projectDir = (id: string) => path.join(DATA_DIR, id);
   const projectFile = (id: string) => path.join(projectDir(id), "project.json");
+  /**
+   * The photo's storage locator, beside the project rather than inside it.
+   * project.json IS the DesignProject the customer's browser is served, and
+   * where a photo's bytes live is not the browser's business — the database
+   * backend keeps the same value in a column nobody renders.
+   */
+  const photoFile = (id: string) => path.join(projectDir(id), "photo.json");
 
   function assertValidId(id: string): void {
     if (!UUID_RE.test(id)) throw new ProjectNotFoundError(id);
@@ -95,29 +106,43 @@ export function createFileStore(): ProjectStore {
   }
 
   return {
-    async createProject(photoBytes: Buffer, mediaType: string, ext: string) {
+    async createProject(photo: NewProjectPhoto) {
       const id = randomUUID();
       const project: DesignProject = {
         id,
         createdAt: new Date().toISOString(),
         status: "playing",
-        photo: { fileName: `photo.${ext}`, mediaType },
+        photo: { fileName: photo.fileName, mediaType: photo.mediaType },
         segmentation: { status: "pending" },
         selections: {},
         marketContext: "residential",
       };
       await fs.mkdir(projectDir(id), { recursive: true });
-      await fs.writeFile(path.join(projectDir(id), project.photo.fileName), photoBytes);
+      await fs.writeFile(photoFile(id), JSON.stringify({ locator: photo.locator }));
       await writeProject(project);
       return project;
     },
 
     getProject,
 
-    async getProjectPhoto(id: string) {
+    /**
+     * A project written before the storage seam existed has no photo.json:
+     * its bytes are the file sitting next to project.json, which is exactly
+     * what a legacy inline locator addresses. The database got a migration
+     * for the same problem (0004); .data/ has no migration runner, so its
+     * old projects are addressed where they already are.
+     */
+    async getPhotoLocator(id: string) {
       const project = await getProject(id);
-      const bytes = await fs.readFile(path.join(projectDir(id), project.photo.fileName));
-      return { bytes, mediaType: project.photo.mediaType };
+      let locator: string;
+      try {
+        locator = (JSON.parse(await fs.readFile(photoFile(id), "utf8")) as {
+          locator: string;
+        }).locator;
+      } catch {
+        locator = legacyFileLocator(id, project.photo.fileName);
+      }
+      return { locator, mediaType: project.photo.mediaType };
     },
 
     setSegmentation(id: string, segmentation: SegmentationState) {

@@ -4,18 +4,18 @@ import {
   SUPPORTED_IMAGE_MEDIA_TYPES,
   type SupportedImageMediaType,
 } from "@/lib/vision/classify";
+import { StorageConfigError } from "@/lib/storage";
 import { createProject } from "@/lib/store/projects";
 
 const MAX_PHOTO_BYTES = 8 * 1024 * 1024;
 
-const EXT_BY_MEDIA_TYPE: Record<SupportedImageMediaType, string> = {
-  "image/jpeg": "jpg",
-  "image/png": "png",
-  "image/gif": "gif",
-  "image/webp": "webp",
-};
-
-/** POST multipart/form-data with a "photo" file → a new play-stage project. */
+/**
+ * POST multipart/form-data with a "photo" file → a new play-stage project.
+ *
+ * The bytes go through lib/storage — the configured bucket when there is
+ * one, this deployment when there is not — and the project records only
+ * the locator it minted. This route has no opinion about which.
+ */
 export async function POST(request: Request) {
   let form: FormData;
   try {
@@ -46,6 +46,20 @@ export async function POST(request: Request) {
   }
 
   const bytes = Buffer.from(await photo.arrayBuffer());
-  const project = await createProject(bytes, mediaType, EXT_BY_MEDIA_TYPE[mediaType]);
-  return NextResponse.json({ projectId: project.id }, { status: 201 });
+  try {
+    const project = await createProject(bytes, mediaType);
+    return NextResponse.json({ projectId: project.id }, { status: 201 });
+  } catch (error) {
+    // Half-configured object storage is the operator's mistake, not the
+    // customer's, and it must not be answered by quietly writing the photo
+    // somewhere else. Say so in the log; say nothing about it in the body.
+    if (error instanceof StorageConfigError) {
+      console.error("[photo upload] object storage is misconfigured:", error.message);
+      return NextResponse.json(
+        { error: "Photo storage is unavailable — try again shortly" },
+        { status: 503 },
+      );
+    }
+    throw error;
+  }
 }
