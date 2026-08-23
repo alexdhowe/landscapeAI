@@ -54,10 +54,24 @@ afterAll(() => {
   storage.resetPhotoStorage();
 });
 
-/** A tiny but real JPEG header — the routes only care that it is bytes. */
-const JPEG = Buffer.from([
-  0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01,
-]);
+/**
+ * A real 2x2 JPEG, encoded here rather than written out as a byte literal.
+ *
+ * It used to be a twelve-byte SOI-and-JFIF stub, which was enough while
+ * the upload route only moved bytes around. The route now normalises what
+ * it is handed — orientation baked in, metadata dropped, long edge capped
+ * — so its input has to be something a decoder accepts. This one is small
+ * enough and clean enough that normalisation has nothing to do, and the
+ * route hands the very same buffer to storage; the byte-identity
+ * assertions below still mean what they meant.
+ */
+const { encode: encodeJpeg } = await import("jpeg-js");
+const JPEG = Buffer.from(
+  encodeJpeg(
+    { data: new Uint8Array(2 * 2 * 4).fill(200), width: 2, height: 2 },
+    80,
+  ).data,
+);
 
 const params = (projectId: string) => ({ params: Promise.resolve({ projectId }) });
 

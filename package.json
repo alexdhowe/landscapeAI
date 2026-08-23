@@ -14,7 +14,8 @@
     "db:migrate": "drizzle-kit migrate",
     "db:seed": "tsx scripts/db-seed.ts",
     "db:setup": "npm run db:migrate && npm run db:seed",
-    "db:user": "tsx scripts/db-user.ts"
+    "db:user": "tsx scripts/db-user.ts",
+    "shots": "tsx scripts/screenshots.mts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.120.0",
@@ -22,6 +23,8 @@
     "@turf/helpers": "^7.4.0",
     "@turf/length": "^7.4.0",
     "drizzle-orm": "^0.44.0",
+    "heic-decode": "^2.1.0",
+    "jpeg-js": "^0.4.4",
     "maplibre-gl": "^6.4.1",
     "next": "^15.4.0",
     "next-auth": "^5.0.0-beta.32",
@@ -38,6 +41,7 @@
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
     "drizzle-kit": "^0.31.0",
+    "playwright": "^1.56.0",
     "tailwindcss": "^4.1.0",
     "tsx": "^4.23.12",
     "typescript": "^5.8.0",

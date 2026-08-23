@@ -1,4 +1,11 @@
+import type { Metadata } from "next";
+
 import { Configurator } from "@/components/configurator/Configurator";
+
+export const metadata: Metadata = {
+  title: "Your design",
+  description: "Swap what's in your yard and watch the budget range follow.",
+};
 
 export default async function DesignPage({
   params,
@@ -7,13 +14,13 @@ export default async function DesignPage({
 }) {
   const { projectId } = await params;
   return (
-    <main className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
-      <header className="mb-6">
-        <h1 className="text-xl font-semibold tracking-tight text-neutral-900">
+    <main className="mx-auto w-full max-w-6xl flex-1 px-4 pb-12 pt-5 sm:px-6 sm:pt-8">
+      <header className="mb-4 sm:mb-6">
+        <h1 className="display text-2xl text-bark-900 sm:text-3xl">
           Your yard, your call
         </h1>
-        <p className="text-sm text-neutral-500">
-          Click a labeled area, swap what&apos;s in it, watch the budget follow.
+        <p className="mt-1 text-sm text-bark-600">
+          Tap a labelled area, swap what&apos;s in it, watch the budget follow.
         </p>
       </header>
       <Configurator projectId={projectId} />

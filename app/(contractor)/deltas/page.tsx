@@ -1,6 +1,8 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 
 import { ProvenanceBadge } from "@/components/leads/badges";
+import { Card, EmptyState, SectionHeader } from "@/components/ui/Card";
 import { analyzeDeltas, type ErrorStats } from "@/lib/confirm/analytics";
 import type { MeasurementDelta } from "@/lib/confirm/types";
 import type { QuantitySource } from "@/lib/pricing/types";
@@ -8,6 +10,8 @@ import { listMeasurementDeltas } from "@/lib/store/projects";
 
 /** The corpus changes whenever a rep confirms — always render current state. */
 export const dynamic = "force-dynamic";
+
+export const metadata: Metadata = { title: "Estimation error" };
 
 const JOB_TYPE_LABELS: Record<string, string> = {
   mulch_to_stone: "Mulch-to-stone conversion",
@@ -21,17 +25,17 @@ const qty = (n: number) => n.toLocaleString("en-US", { maximumFractionDigits: 1 
 
 function errorTone(value: number): string {
   const abs = Math.abs(value);
-  if (abs >= 25) return "text-red-700";
-  if (abs >= 10) return "text-amber-700";
-  return "text-emerald-700";
+  if (abs >= 25) return "text-clay-700";
+  if (abs >= 10) return "text-flag-700";
+  return "text-canopy-800";
 }
 
 /** Mean/P90 for one cut of the corpus, with the sample size next to it. */
 function StatsRow({ label, stats }: { label: React.ReactNode; stats: ErrorStats }) {
   return (
-    <tr className="border-b border-neutral-100">
-      <td className="py-2 pr-3 text-neutral-800">{label}</td>
-      <td className="py-2 pr-3 tabular-nums text-neutral-500">{stats.count}</td>
+    <tr className="border-b border-bark-100">
+      <td className="py-2 pr-3 text-bark-800">{label}</td>
+      <td className="py-2 pr-3 tabular-nums text-bark-600">{stats.count}</td>
       <td className={`py-2 pr-3 tabular-nums ${errorTone(stats.meanErrorPct)}`}>
         {signedPct(stats.meanErrorPct)}
       </td>
@@ -41,7 +45,7 @@ function StatsRow({ label, stats }: { label: React.ReactNode; stats: ErrorStats 
       <td className={`py-2 pr-3 tabular-nums ${errorTone(stats.p90AbsErrorPct)}`}>
         {pct(stats.p90AbsErrorPct)}
       </td>
-      <td className="py-2 tabular-nums text-neutral-500">{pct(stats.maxAbsErrorPct)}</td>
+      <td className="py-2 tabular-nums text-bark-600">{pct(stats.maxAbsErrorPct)}</td>
     </tr>
   );
 }
@@ -54,14 +58,12 @@ function StatsTable({
   rows: { key: string; label: React.ReactNode; stats: ErrorStats }[];
 }) {
   return (
-    <section className="rounded-xl border border-neutral-200 bg-white p-5 shadow-sm">
-      <h2 className="text-sm font-semibold uppercase tracking-wide text-neutral-500">
-        {caption}
-      </h2>
+    <Card as="section" className="p-5">
+      <SectionHeader title={caption} />
       <div className="mt-3 overflow-x-auto">
         <table className="w-full min-w-[600px] text-left text-sm">
           <thead>
-            <tr className="border-b border-neutral-200 text-xs uppercase tracking-wide text-neutral-400">
+            <tr className="border-b border-bark-200 text-xs uppercase tracking-wide text-bark-500">
               <th className="py-2 pr-3 font-medium">Cut</th>
               <th className="py-2 pr-3 font-medium">n</th>
               <th className="py-2 pr-3 font-medium">Bias (mean)</th>
@@ -73,7 +75,7 @@ function StatsTable({
           <tbody>
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={6} className="py-3 text-sm text-neutral-400">
+                <td colSpan={6} className="py-3 text-sm text-bark-600">
                   No deltas in this cut yet.
                 </td>
               </tr>
@@ -85,7 +87,7 @@ function StatsTable({
           </tbody>
         </table>
       </div>
-    </section>
+    </Card>
   );
 }
 
@@ -109,17 +111,30 @@ export default async function DeltasPage() {
   return (
     <div className="space-y-5">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight text-neutral-900">
-          Estimation error
-        </h1>
-        <p className="mt-1 max-w-3xl text-sm text-neutral-500">
+        <h1 className="display text-2xl text-bark-900">Estimation error</h1>
+        <p className="mt-1 max-w-3xl text-sm text-bark-600">
           {deltas.length === 0
-            ? "No measurement deltas yet. They accumulate every time a rep corrects a quantity on site — one row per correction, forever."
+            ? "One row per correction, forever — this is the training corpus."
             : `${deltas.length} correction${deltas.length === 1 ? "" : "s"} across ${
                 new Set(deltas.map((d) => d.projectId)).size
               } job${new Set(deltas.map((d) => d.projectId)).size === 1 ? "" : "s"}. Bias is signed (positive = we estimate high); the absolute columns are magnitude. P90 is the number that should set band width.`}
         </p>
       </div>
+
+      {deltas.length === 0 && (
+        <EmptyState title="No measurement deltas yet">
+          A delta is written every time a rep corrects a quantity on a site
+          visit — the estimate that was wrong, the confirmed truth that
+          replaced it, and the provenance of each. Confirm a lead from the{" "}
+          <Link
+            href="/dashboard"
+            className="tap-target inline-flex font-medium underline underline-offset-4"
+          >
+            inbox
+          </Link>{" "}
+          and the first one lands here.
+        </EmptyState>
+      )}
 
       {deltas.length > 0 && (
         <div className="grid gap-3 sm:grid-cols-3">
@@ -128,17 +143,14 @@ export default async function DeltasPage() {
             { label: "Mean absolute error", value: pct(analytics.overall.meanAbsErrorPct) },
             { label: "P90 absolute error", value: pct(analytics.overall.p90AbsErrorPct) },
           ].map((card) => (
-            <div
-              key={card.label}
-              className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm"
-            >
-              <p className="text-xs font-medium uppercase tracking-wide text-neutral-500">
+            <Card key={card.label} className="p-4">
+              <p className="text-2xs font-semibold uppercase tracking-wider text-bark-500">
                 {card.label}
               </p>
-              <p className="mt-1 text-2xl font-semibold tabular-nums tracking-tight text-neutral-900">
+              <p className="tnum mt-1 text-2xl font-semibold tracking-tight text-bark-900">
                 {card.value}
               </p>
-            </div>
+            </Card>
           ))}
         </div>
       )}
@@ -171,14 +183,12 @@ export default async function DeltasPage() {
       />
 
       {analytics.worst.length > 0 && (
-        <section className="rounded-xl border border-neutral-200 bg-white p-5 shadow-sm">
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-neutral-500">
-            Biggest misses
-          </h2>
+        <Card as="section" className="p-5">
+          <SectionHeader title="Biggest misses" />
           <div className="mt-3 overflow-x-auto">
             <table className="w-full min-w-[620px] text-left text-sm">
               <thead>
-                <tr className="border-b border-neutral-200 text-xs uppercase tracking-wide text-neutral-400">
+                <tr className="border-b border-bark-200 text-xs uppercase tracking-wide text-bark-500">
                   <th className="py-2 pr-3 font-medium">Region</th>
                   <th className="py-2 pr-3 font-medium">Job type</th>
                   <th className="py-2 pr-3 font-medium">Estimated</th>
@@ -189,18 +199,18 @@ export default async function DeltasPage() {
               </thead>
               <tbody>
                 {analytics.worst.map(({ delta, errorPct }) => (
-                  <tr key={delta.id} className="border-b border-neutral-100">
-                    <td className="py-2 pr-3 text-neutral-800">{delta.regionLabel}</td>
-                    <td className="py-2 pr-3 text-xs text-neutral-500">
+                  <tr key={delta.id} className="border-b border-bark-100">
+                    <td className="py-2 pr-3 text-bark-800">{delta.regionLabel}</td>
+                    <td className="py-2 pr-3 text-xs text-bark-500">
                       {JOB_TYPE_LABELS[delta.jobType] ?? delta.jobType}
                     </td>
-                    <td className="py-2 pr-3 tabular-nums text-neutral-500">
+                    <td className="py-2 pr-3 tabular-nums text-bark-500">
                       {qty(delta.beforeQty.value)} {delta.unit}
                       <span className="ml-1.5 align-middle">
                         <ProvenanceBadge source={delta.beforeQty.source} />
                       </span>
                     </td>
-                    <td className="py-2 pr-3 tabular-nums font-medium text-neutral-900">
+                    <td className="py-2 pr-3 tabular-nums font-medium text-bark-900">
                       {qty(delta.afterQty.value)} {delta.unit}
                     </td>
                     <td className={`py-2 pr-3 tabular-nums ${errorTone(errorPct)}`}>
@@ -209,7 +219,7 @@ export default async function DeltasPage() {
                     <td className="py-2">
                       <Link
                         href={`/leads/${delta.projectId}`}
-                        className="text-xs text-neutral-500 underline hover:text-neutral-800"
+                        className="tap-target inline-flex text-xs font-medium text-bark-700 underline underline-offset-4 hover:text-bark-900"
                       >
                         open
                       </Link>
@@ -219,7 +229,7 @@ export default async function DeltasPage() {
               </tbody>
             </table>
           </div>
-        </section>
+        </Card>
       )}
     </div>
   );

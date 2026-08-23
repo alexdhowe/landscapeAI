@@ -9,7 +9,7 @@ export function SignOut({ name }: { name: string }) {
   const [busy, setBusy] = useState(false);
 
   return (
-    <div className="flex items-center gap-2 text-sm text-neutral-500">
+    <div className="flex items-center gap-2.5 text-sm text-bark-300">
       <span className="hidden sm:inline">{name}</span>
       <button
         type="button"
@@ -21,9 +21,9 @@ export function SignOut({ name }: { name: string }) {
           router.push("/login");
           router.refresh();
         }}
-        className="rounded-md border border-neutral-300 px-2 py-1 text-xs hover:border-neutral-900 hover:text-neutral-900 disabled:opacity-50"
+        className="inline-flex min-h-11 items-center rounded-md border border-bark-700 px-3 text-xs font-medium text-bark-200 transition-colors hover:border-bark-500 hover:text-white disabled:opacity-50"
       >
-        Sign out
+        {busy ? "Signing out…" : "Sign out"}
       </button>
     </div>
   );

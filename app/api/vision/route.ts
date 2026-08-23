@@ -1,10 +1,7 @@
 import { NextResponse } from "next/server";
 
-import {
-  SUPPORTED_IMAGE_MEDIA_TYPES,
-  classifyPhoto,
-  type SupportedImageMediaType,
-} from "@/lib/vision/classify";
+import { classifyPhoto } from "@/lib/vision/classify";
+import { isVisionMediaType } from "@/lib/vision/mediaTypes";
 import {
   ProjectLockedError,
   ProjectNotFoundError,
@@ -31,12 +28,14 @@ export async function POST(request: Request) {
   try {
     await getProject(body.projectId);
     const { bytes, mediaType } = await getProjectPhoto(body.projectId);
-    if (!SUPPORTED_IMAGE_MEDIA_TYPES.includes(mediaType as SupportedImageMediaType)) {
+    // The upload route normalises everything into this list, so a stored
+    // photo outside it is a bug here rather than a bad upload.
+    if (!isVisionMediaType(mediaType)) {
       return NextResponse.json({ error: "Stored photo has unsupported type" }, { status: 500 });
     }
 
     try {
-      const segmentation = await classifyPhoto(bytes, mediaType as SupportedImageMediaType);
+      const segmentation = await classifyPhoto(bytes, mediaType);
       const project = await setSegmentation(body.projectId, {
         status: "ready",
         ...segmentation,

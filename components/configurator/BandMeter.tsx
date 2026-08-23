@@ -32,16 +32,16 @@ export function BandMeter({
 
   return (
     <div>
-      <div className="relative h-2.5 rounded-full bg-neutral-200">
+      <div className="relative h-2.5 rounded-full bg-bark-200">
         <div
-          className="absolute inset-y-0 rounded-full bg-emerald-500 transition-all duration-1000 ease-out"
+          className="absolute inset-y-0 rounded-full bg-canopy-500 transition-all duration-1000 ease-out"
           style={{
             left: `${narrowed ? left : 0}%`,
             right: `${narrowed ? right : 0}%`,
           }}
         />
       </div>
-      <div className="mt-1 flex justify-between text-[11px] text-neutral-400">
+      <div className="mt-1 flex justify-between text-2xs text-bark-500">
         <span>{usd(outer.low)}</span>
         <span>{usd(outer.high)}</span>
       </div>

@@ -19,7 +19,7 @@
  */
 import { decode } from "next-auth/jwt";
 
-import { authSecret, sessionCookieName } from "./secret";
+import { authSecret, sessionCookieNames } from "./secret";
 import type { Contractor, ContractorRole } from "./types";
 
 /** Pull one cookie out of a Cookie header without pulling in a parser. */
@@ -57,20 +57,28 @@ function toContractor(token: Record<string, unknown> | null): Contractor | null 
 export async function contractorFromRequest(
   request: Request,
 ): Promise<Contractor | null> {
-  const name = sessionCookieName();
-  const raw = readCookie(request.headers.get("cookie"), name);
-  if (!raw) return null;
-  try {
-    return toContractor(
-      (await decode({ token: raw, secret: authSecret(), salt: name })) as Record<
-        string,
-        unknown
-      > | null,
-    );
-  } catch {
-    // A tampered, expired, or foreign-secret token is simply not a session.
-    return null;
+  const header = request.headers.get("cookie");
+  // Both names Auth.js might have written under — it picks the __Secure-
+  // prefix from the request scheme, not from NODE_ENV. See
+  // sessionCookieNames() for what that cost. The name is also the JWE
+  // salt, so a token only decodes under the name it was written with.
+  for (const name of sessionCookieNames()) {
+    const raw = readCookie(header, name);
+    if (!raw) continue;
+    try {
+      const contractor = toContractor(
+        (await decode({ token: raw, secret: authSecret(), salt: name })) as Record<
+          string,
+          unknown
+        > | null,
+      );
+      if (contractor) return contractor;
+    } catch {
+      // A tampered, expired, or foreign-secret token is simply not a
+      // session. Keep looking: the other cookie may still be one.
+    }
   }
+  return null;
 }
 
 /** The contractor in a server component, or null. */

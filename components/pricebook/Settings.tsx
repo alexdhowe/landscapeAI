@@ -95,7 +95,7 @@ export function Settings({
             })
           }
           disabled={busy}
-          className={`${button} mt-4 bg-neutral-900 text-white hover:bg-neutral-700`}
+          className={`${button} mt-4 bg-bark-900 text-white hover:bg-bark-700`}
         >
           Save to draft
         </button>
@@ -170,7 +170,7 @@ export function Settings({
               })
             }
             disabled={busy}
-            className={`${button} mt-4 bg-neutral-900 text-white hover:bg-neutral-700`}
+            className={`${button} mt-4 bg-bark-900 text-white hover:bg-bark-700`}
           >
             Save to draft
           </button>

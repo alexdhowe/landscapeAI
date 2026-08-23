@@ -5,6 +5,10 @@ import { useCallback, useEffect, useState } from "react";
 import { customerBand, isFinalQuotePayload } from "@/lib/design/quote";
 import type { SnapshotCustomerView } from "@/lib/lead/snapshot";
 
+import { Button } from "@/components/ui/Button";
+import { Callout, Card } from "@/components/ui/Card";
+import { Field } from "@/components/ui/Field";
+
 const usd = (n: number) => `$${n.toLocaleString("en-US")}`;
 
 /**
@@ -91,19 +95,34 @@ export function SubmitLead({
       ? snapshot!.estimate.band.basis === "measured"
       : false;
     return (
-      <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
-        <p className="text-sm font-semibold text-emerald-900">
-          Design sent to the contractor ✓
+      <div className="rounded-xl border border-canopy-200 bg-canopy-50 p-4 sm:p-5">
+        <p className="flex items-center gap-2 text-sm font-semibold text-canopy-900">
+          <svg
+            aria-hidden
+            viewBox="0 0 20 20"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className="size-4 shrink-0"
+          >
+            <path d="M3.5 10.5 8 15l8.5-10" />
+          </svg>
+          Design sent to the contractor
         </p>
         {band && (
-          <p className="mt-1 text-sm text-emerald-800">
-            Your locked estimate: <strong>{usd(band.low)} – {usd(band.high)}</strong>
+          <p className="mt-2 text-sm text-canopy-800">
+            Your locked estimate:{" "}
+            <strong className="tnum">
+              {usd(band.low)} – {usd(band.high)}
+            </strong>
             {measured
               ? ", measured from your yard."
               : ", based on typical projects like yours."}
           </p>
         )}
-        <p className="mt-2 text-xs text-emerald-700">
+        <p className="mt-3 text-xs text-canopy-800">
           A rep will reach out to confirm details and visit the site. This
           estimate is frozen exactly as you see it
           {snapshot ? (
@@ -119,65 +138,81 @@ export function SubmitLead({
     );
   }
 
+  // Nothing to send yet, so nothing here. A four-field form the customer
+  // cannot submit is most of a phone screen spent on a dead end, and a
+  // placeholder saying "pick something first" would be the third card in a
+  // row saying it — the budget card already does. This appears the moment
+  // there is an estimate to send.
+  if (!canSubmit) return null;
+
   return (
-    <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
-      <p className="text-xs font-medium uppercase tracking-wide text-neutral-500">
+    <Card className="p-4 sm:p-5">
+      <h2 className="text-2xs font-semibold uppercase tracking-wider text-bark-500">
         Like this design?
-      </p>
-      <p className="mt-1 text-sm text-neutral-600">
+      </h2>
+      <p className="mt-1.5 text-sm text-bark-700">
         Send it to the contractor — a rep confirms everything on site before
         anything is final.
       </p>
-      <form onSubmit={submit} className="mt-3 space-y-2.5">
-        <input
-          type="text"
-          required
-          maxLength={120}
-          placeholder="Your name"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none"
-        />
-        <input
-          type="email"
-          required
-          maxLength={200}
-          placeholder="Email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none"
-        />
-        <input
-          type="tel"
-          maxLength={40}
-          placeholder="Phone (optional)"
-          value={phone}
-          onChange={(e) => setPhone(e.target.value)}
-          className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none"
-        />
-        <textarea
-          maxLength={2000}
-          rows={2}
-          placeholder="Anything the crew should know? (optional)"
-          value={notes}
-          onChange={(e) => setNotes(e.target.value)}
-          className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none"
-        />
-        {error && <p className="text-xs text-red-600">{error}</p>}
-        <button
-          type="submit"
-          disabled={sending || !canSubmit}
-          className="w-full rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white transition hover:bg-emerald-700 disabled:opacity-50"
-        >
-          {sending ? "Sending…" : "Send my design & estimate"}
-        </button>
-        {!canSubmit && (
-          <p className="text-xs text-neutral-400">
-            Pick at least one material or add-on first so there&apos;s an estimate
-            to send.
-          </p>
+      <form onSubmit={submit} className="mt-4 space-y-3">
+        <Field label="Your name">
+          {(props) => (
+            <input
+              {...props}
+              type="text"
+              required
+              autoComplete="name"
+              maxLength={120}
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+            />
+          )}
+        </Field>
+        <Field label="Email">
+          {(props) => (
+            <input
+              {...props}
+              type="email"
+              required
+              autoComplete="email"
+              maxLength={200}
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+            />
+          )}
+        </Field>
+        <Field label="Phone" hint="Optional.">
+          {(props) => (
+            <input
+              {...props}
+              type="tel"
+              autoComplete="tel"
+              maxLength={40}
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+            />
+          )}
+        </Field>
+        <Field label="Anything the crew should know?" hint="Optional.">
+          {(props) => (
+            <textarea
+              {...props}
+              maxLength={2000}
+              rows={2}
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+            />
+          )}
+        </Field>
+        {error && (
+          <Callout tone="clay" role="alert" className="text-xs">
+            {error}
+          </Callout>
         )}
+        <Button type="submit" disabled={sending} block size="lg">
+          {sending ? "Sending…" : "Send my design & estimate"}
+        </Button>
       </form>
-    </div>
+    </Card>
   );
 }

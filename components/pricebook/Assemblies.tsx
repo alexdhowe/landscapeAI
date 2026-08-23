@@ -75,7 +75,7 @@ function Editor({
     });
 
   return (
-    <div className="space-y-4 rounded-lg border border-neutral-300 bg-neutral-50 p-4">
+    <div className="space-y-4 rounded-lg border border-bark-300 bg-bark-50 p-4">
       <div className="grid gap-3 sm:grid-cols-3">
         {isNew && (
           <Field label="Assembly id">
@@ -113,10 +113,10 @@ function Editor({
       </div>
 
       <div>
-        <p className="text-xs font-medium uppercase tracking-wide text-neutral-500">
+        <p className="text-xs font-medium uppercase tracking-wide text-bark-500">
           Components
         </p>
-        <p className="mt-1 text-xs text-neutral-500">
+        <p className="mt-1 text-xs text-bark-500">
           Set a quantity per unit for materials, or a production rate (units per
           crew-hour) for labour and equipment — one or the other, never both.
         </p>
@@ -171,7 +171,7 @@ function Editor({
                   })
                 }
                 disabled={busy}
-                className="mb-1 text-xs text-red-700 underline hover:text-red-900"
+                className="mb-1 text-xs text-clay-700 underline hover:text-clay-900"
               >
                 Remove
               </button>
@@ -190,18 +190,18 @@ function Editor({
             })
           }
           disabled={busy}
-          className="mt-3 text-xs text-neutral-600 underline hover:text-neutral-900"
+          className="mt-3 text-xs text-bark-600 underline hover:text-bark-900"
         >
           Add component
         </button>
       </div>
 
-      <div className="flex gap-2 border-t border-neutral-200 pt-3">
+      <div className="flex gap-2 border-t border-bark-200 pt-3">
         <button
           type="button"
           onClick={onSave}
           disabled={busy || draft.id.trim() === "" || draft.name.trim() === ""}
-          className={`${button} bg-neutral-900 text-white hover:bg-neutral-700`}
+          className={`${button} bg-bark-900 text-white shadow-e1 hover:bg-bark-800`}
         >
           Save to draft
         </button>
@@ -209,7 +209,7 @@ function Editor({
           type="button"
           onClick={onCancel}
           disabled={busy}
-          className={`${button} border border-neutral-300 text-neutral-700`}
+          className={`${button} border border-bark-300 bg-white text-bark-700 hover:border-bark-400 hover:bg-bark-50`}
         >
           Cancel
         </button>
@@ -256,7 +256,7 @@ export function Assemblies({
             setEditing(null);
           }}
           disabled={busy || adding}
-          className={`${button} border border-neutral-300 text-neutral-700 hover:border-neutral-900`}
+          className={`${button} border border-bark-300 bg-white text-bark-700 hover:border-bark-400 hover:bg-bark-50`}
         >
           Add assembly
         </button>
@@ -287,13 +287,13 @@ export function Assemblies({
               isNew={false}
             />
           ) : (
-            <details key={assembly.id} className="rounded-lg border border-neutral-200 p-3">
+            <details key={assembly.id} className="rounded-lg border border-bark-200 p-3">
               <summary className="flex cursor-pointer flex-wrap items-center justify-between gap-2">
-                <span className="text-sm text-neutral-800">
+                <span className="text-sm text-bark-800">
                   {assembly.name}{" "}
-                  <span className="font-mono text-xs text-neutral-400">{assembly.id}</span>
+                  <span className="font-mono text-xs text-bark-500">{assembly.id}</span>
                 </span>
-                <span className="text-xs text-neutral-500">
+                <span className="text-xs text-bark-500">
                   per {assembly.unit} · {assembly.components.length} component
                   {assembly.components.length === 1 ? "" : "s"}
                 </span>
@@ -306,20 +306,20 @@ export function Assemblies({
                     );
                     const cost = componentCost(config, component);
                     return (
-                      <tr key={i} className="border-t border-neutral-100">
-                        <td className="py-1.5 pr-3 text-neutral-700">
+                      <tr key={i} className="border-t border-bark-100">
+                        <td className="py-1.5 pr-3 text-bark-700">
                           {item?.name ?? (
-                            <span className="text-red-700">
+                            <span className="text-clay-700">
                               missing SKU {component.costItemId}
                             </span>
                           )}
                         </td>
-                        <td className="py-1.5 pr-3 text-xs text-neutral-500">
+                        <td className="py-1.5 pr-3 text-xs text-bark-500">
                           {component.qtyPerUnit !== undefined
                             ? `${component.qtyPerUnit} ${item?.unit ?? ""} per ${assembly.unit}`
                             : `${component.productionRate} ${assembly.unit} per hour`}
                         </td>
-                        <td className="py-1.5 text-right tabular-nums text-neutral-500">
+                        <td className="py-1.5 text-right tabular-nums text-bark-500">
                           {cost === null ? "—" : `${usd(cost)} / ${assembly.unit}`}
                         </td>
                       </tr>
@@ -336,7 +336,7 @@ export function Assemblies({
                     setAdding(false);
                   }}
                   disabled={busy}
-                  className="text-xs text-neutral-600 underline hover:text-neutral-900"
+                  className="text-xs text-bark-600 underline hover:text-bark-900"
                 >
                   Edit
                 </button>
@@ -346,7 +346,7 @@ export function Assemblies({
                     send(`/api/pricebook/assemblies/${encodeURIComponent(assembly.id)}`, "DELETE")
                   }
                   disabled={busy}
-                  className="text-xs text-red-700 underline hover:text-red-900"
+                  className="text-xs text-clay-700 underline hover:text-clay-900"
                 >
                   Delete
                 </button>

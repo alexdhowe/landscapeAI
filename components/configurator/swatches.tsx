@@ -3,15 +3,6 @@
 import { useId } from "react";
 
 import type { SwatchId } from "@/lib/catalog/options";
-import type { RegionKind } from "@/lib/vision/types";
-
-/** Tint + stroke for regions that haven't been swapped yet. */
-export const KIND_COLORS: Record<RegionKind, string> = {
-  turf: "#22c55e",
-  bed: "#b45309",
-  hardscape: "#64748b",
-  foundation_planting: "#0ea5e9",
-};
 
 /**
  * Procedural material textures built from SVG turbulence + lighting.

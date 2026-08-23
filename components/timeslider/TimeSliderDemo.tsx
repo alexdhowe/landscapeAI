@@ -121,7 +121,7 @@ export default function TimeSliderDemo() {
       <div className="min-w-0 flex-1">
         <svg
           viewBox={`0 0 ${SCENE.widthFt} ${SCENE.heightFt}`}
-          className="w-full rounded-lg border border-neutral-200 bg-white"
+          className="w-full rounded-lg border border-bark-200 bg-white"
           role="img"
           aria-label={`Plan view of the sample design at year ${year}`}
         >
@@ -163,7 +163,7 @@ export default function TimeSliderDemo() {
           })}
           <TreeGlyph placement={tree} year={year} />
         </svg>
-        <p className="mt-2 text-xs text-neutral-500">
+        <p className="mt-2 text-xs text-bark-500">
           Plan view, 60′ × 40′. Bed, walkway, and house are static — drag the
           slider and only the plants change. Red rings mark canopies that have
           collided by the year shown.
@@ -173,10 +173,10 @@ export default function TimeSliderDemo() {
       <div className="w-full shrink-0 space-y-5 lg:w-80">
         <div>
           <div className="flex items-baseline justify-between">
-            <label htmlFor="year" className="text-sm font-medium text-neutral-700">
+            <label htmlFor="year" className="text-sm font-medium text-bark-700">
               Years after planting
             </label>
-            <span className="text-2xl font-semibold tabular-nums text-neutral-900">
+            <span className="text-2xl font-semibold tabular-nums text-bark-900">
               {year}
             </span>
           </div>
@@ -188,17 +188,21 @@ export default function TimeSliderDemo() {
             step={1}
             value={year}
             onChange={(e) => setYear(Number(e.target.value))}
-            className="mt-2 w-full accent-green-700"
+            // h-11 so the track is a 44px drag target on a phone; the
+            // thumb itself is drawn by the platform.
+            className="mt-2 h-11 w-full accent-canopy-700"
           />
           <div className="mt-1 flex gap-2">
             {[1, 3, 5].map((y) => (
               <button
                 key={y}
+                type="button"
+                aria-pressed={year === y}
                 onClick={() => setYear(y)}
-                className={`rounded border px-2 py-0.5 text-xs ${
+                className={`min-h-11 rounded-lg border px-3.5 text-sm font-medium transition-colors ${
                   year === y
-                    ? "border-green-700 bg-green-700 text-white"
-                    : "border-neutral-300 text-neutral-600 hover:bg-neutral-100"
+                    ? "border-canopy-700 bg-canopy-700 text-white"
+                    : "border-bark-300 text-bark-700 hover:bg-bark-100"
                 }`}
               >
                 Year {y}
@@ -207,14 +211,14 @@ export default function TimeSliderDemo() {
           </div>
         </div>
 
-        <div className="rounded-lg border border-neutral-200 p-3 text-sm">
-          <p className="font-medium text-neutral-800">
+        <div className="rounded-lg border border-bark-200 p-3 text-sm">
+          <p className="font-medium text-bark-800">
             {nameBySku[tree.skuId]}
           </p>
-          <p className="mt-1 text-neutral-600">
+          <p className="mt-1 text-bark-600">
             {ftIn(sizeAtYear(plantMetaBySku[tree.skuId], year).heightFt)} tall ·{" "}
             {ftIn(sizeAtYear(plantMetaBySku[tree.skuId], year).spreadFt)} spread ·{" "}
-            <span className="text-neutral-500">
+            <span className="text-bark-500">
               {treeSpec.kind === "staged"
                 ? treeSpec.state.replace("_", "-")
                 : "scaled"}{" "}
@@ -224,12 +228,12 @@ export default function TimeSliderDemo() {
         </div>
 
         {report.warnings.length > 0 && (
-          <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm">
-            <p className="font-medium text-red-800">
+          <div className="rounded-lg border border-clay-200 bg-clay-50 p-3 text-sm">
+            <p className="font-medium text-clay-800">
               Crowding by year {report.evaluationYear}
             </p>
             {report.corrections.map((c) => (
-              <p key={c.skuId} className="mt-2 text-red-900">
+              <p key={c.skuId} className="mt-2 text-clay-900">
                 {c.currentCount} × {nameBySku[c.skuId]} on a{" "}
                 {ftIn(c.rowLengthFt)} run crowd out (mature spread{" "}
                 {ftIn(plantMetaBySku[c.skuId].matureSpreadFt)}). Suggest{" "}
@@ -239,7 +243,7 @@ export default function TimeSliderDemo() {
                 .
               </p>
             ))}
-            <p className="mt-2 text-xs text-red-700">
+            <p className="mt-2 text-xs text-clay-700">
               {report.warnings.length} colliding pair
               {report.warnings.length === 1 ? "" : "s"} at year{" "}
               {report.evaluationYear}.
@@ -247,7 +251,7 @@ export default function TimeSliderDemo() {
           </div>
         )}
 
-        <p className="text-xs text-neutral-500">
+        <p className="text-xs text-bark-500">
           Year 1 renders true to install size — sparse is honest. Setting that
           expectation before the sale is the cheapest callback prevention
           available.

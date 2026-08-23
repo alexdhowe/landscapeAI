@@ -2,6 +2,8 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { SignOut } from "@/components/auth/SignOut";
+import { Badge } from "@/components/ui/Badge";
+import { Wordmark } from "@/components/ui/Wordmark";
 import { currentContractor } from "@/lib/auth/session";
 
 /**
@@ -12,6 +14,11 @@ import { currentContractor } from "@/lib/auth/session";
  * bounces anyone with no session cookie, but that check is UX — this is
  * where the token is actually verified, and nothing below renders until it
  * has been.
+ *
+ * Visually it is the same product as the customer side and deliberately a
+ * different register: darker chrome, denser type, information first. The
+ * wordmark is the shared part, and the amber "internal" marker is the one
+ * thing on either side that says which of the two you are looking at.
  */
 export default async function ContractorLayout({
   children,
@@ -19,37 +26,44 @@ export default async function ContractorLayout({
   const contractor = await currentContractor();
   if (!contractor) redirect("/login");
 
+  const links = [
+    { href: "/dashboard", label: "Lead inbox" },
+    { href: "/deltas", label: "Estimation error" },
+    ...(contractor.role === "admin"
+      ? [{ href: "/pricebook", label: "Price book" }]
+      : []),
+  ];
+
   return (
-    <div className="min-h-screen bg-neutral-100">
-      <header className="border-b border-neutral-200 bg-white">
-        <div className="mx-auto flex max-w-5xl items-center justify-between px-6 py-3">
-          <div className="flex items-center gap-4">
-            <Link href="/dashboard" className="font-semibold tracking-tight text-neutral-900">
-              LandscapeAI <span className="font-normal text-neutral-400">· Contractor</span>
-            </Link>
-            <nav className="flex items-center gap-4 text-sm text-neutral-500">
-              <Link href="/dashboard" className="hover:text-neutral-900">
-                Lead inbox
-              </Link>
-              <Link href="/deltas" className="hover:text-neutral-900">
-                Estimation error
-              </Link>
-              {contractor.role === "admin" && (
-                <Link href="/pricebook" className="hover:text-neutral-900">
-                  Price book
-                </Link>
-              )}
+    <div className="flex min-h-screen min-w-0 flex-col bg-bark-100">
+      <header className="border-b border-bark-800 bg-bark-950">
+        <div className="mx-auto flex w-full max-w-6xl flex-wrap items-center justify-between gap-x-6 gap-y-2 px-5 py-2.5 sm:px-6">
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-1">
+            <Wordmark href="/dashboard" suffix="Contractor" tone="light" />
+            <nav aria-label="Console">
+              <ul className="flex items-center gap-1">
+                {links.map((link) => (
+                  <li key={link.href}>
+                    <Link
+                      href={link.href}
+                      className="inline-flex min-h-11 items-center rounded-md px-2.5 text-sm text-bark-300 transition-colors hover:bg-bark-800 hover:text-white"
+                    >
+                      {link.label}
+                    </Link>
+                  </li>
+                ))}
+              </ul>
             </nav>
           </div>
           <div className="flex items-center gap-3">
-            <span className="rounded-full bg-amber-100 px-2.5 py-1 text-[11px] font-medium text-amber-800">
-              Internal — full pricing visible
-            </span>
+            <Badge tone="flag">Internal — full pricing visible</Badge>
             <SignOut name={contractor.name || contractor.email} />
           </div>
         </div>
       </header>
-      <main className="mx-auto max-w-5xl px-6 py-8">{children}</main>
+      <main className="mx-auto w-full min-w-0 max-w-6xl flex-1 px-5 py-7 sm:px-6 sm:py-8">
+        {children}
+      </main>
     </div>
   );
 }

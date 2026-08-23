@@ -1,1 +1,289 @@
 @import "tailwindcss";
+
+/*
+ * The design system.
+ *
+ * Everything visual in this app resolves to a token defined here. Before
+ * this file existed every colour was a Tailwind literal picked ad hoc, so
+ * eight sessions produced eight slightly different greens and no component
+ * agreed with another about what "muted text" meant. The rule now is:
+ *
+ *   No component names a raw palette colour. Ever.
+ *
+ * There are two audiences and one company. The customer surfaces (/start,
+ * /design/*) are calm and mobile-first — a homeowner standing in their yard
+ * on a phone. The contractor console (/dashboard, /leads, /deltas,
+ * /pricebook) is dense and desktop-first. They share this file, which is
+ * what makes them read as the same product.
+ */
+
+@theme {
+  /* ---------------------------------------------------------------- */
+  /* Type                                                              */
+  /* ---------------------------------------------------------------- */
+  /* One pairing: a warm serif for display, a neutral sans for the rest.
+     Both are loaded by next/font in app/layout.tsx, which sets these
+     variables on <html>. The fallbacks are what renders if that ever
+     fails, so they are real stacks, not decoration. */
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, -apple-system,
+    "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-display: var(--font-fraunces), ui-serif, Georgia, "Times New Roman",
+    serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+
+  /* A 1.2-ish scale anchored at 16px. Line heights are set per step
+     because a single ratio reads wrong at both ends. */
+  --text-2xs: 0.6875rem;      /* 11px — provenance badges, meter ticks */
+  --text-2xs--line-height: 1rem;
+  --text-xs: 0.75rem;         /* 12px — dense table cells, helper text */
+  --text-xs--line-height: 1.125rem;
+  --text-sm: 0.875rem;        /* 14px — the console's body size */
+  --text-sm--line-height: 1.375rem;
+  --text-base: 1rem;          /* 16px — the customer's body size. Never
+                                 smaller on a form control: iOS zooms the
+                                 viewport on focus below 16px. */
+  --text-base--line-height: 1.6rem;
+  --text-lg: 1.125rem;
+  --text-lg--line-height: 1.7rem;
+  --text-xl: 1.375rem;
+  --text-xl--line-height: 1.85rem;
+  --text-2xl: 1.75rem;
+  --text-2xl--line-height: 2.15rem;
+  --text-3xl: 2.125rem;
+  --text-3xl--line-height: 2.5rem;
+  --text-4xl: 2.75rem;
+  --text-4xl--line-height: 3rem;
+  --text-5xl: 3.5rem;
+  --text-5xl--line-height: 3.6rem;
+
+  --tracking-tightest: -0.035em;
+
+  /* ---------------------------------------------------------------- */
+  /* Colour                                                            */
+  /* ---------------------------------------------------------------- */
+
+  /* bark — the neutral ramp. Warm rather than grey: this is a company
+     that works outdoors, and a cold grey UI around a photograph of a
+     garden looks like a spreadsheet. 500 and above are AA on white
+     (lib/design/__tests__/tokens.test.ts checks every stop). */
+  --color-bark-50: #faf9f7;
+  --color-bark-100: #f3f2ee;
+  --color-bark-200: #e6e4dd;
+  --color-bark-300: #d1cec4;
+  --color-bark-400: #a8a49a;
+  --color-bark-500: #6f6c63;
+  --color-bark-600: #57544d;
+  --color-bark-700: #43413b;
+  --color-bark-800: #2e2d29;
+  --color-bark-900: #1c1b18;
+  --color-bark-950: #0e0e0c;
+
+  /* canopy — the brand green. Deep and slightly desaturated; a saturated
+     "eco" green next to a real photograph reads synthetic. */
+  --color-canopy-50: #f0f6f1;
+  --color-canopy-100: #dbebde;
+  --color-canopy-200: #b8d7bf;
+  --color-canopy-300: #8bbb96;
+  --color-canopy-400: #5b9a6a;
+  --color-canopy-500: #3d7c4d;
+  --color-canopy-600: #2e633d;
+  --color-canopy-700: #275033;
+  --color-canopy-800: #21412b;
+  --color-canopy-900: #1b3524;
+  --color-canopy-950: #0d1c12;
+
+  /* survey — the measurement blue. Reserved: it means "this number came
+     from the aerial pass", which is the beat §3 asks to make visible. */
+  --color-survey-50: #eff5fb;
+  --color-survey-100: #dbe8f6;
+  --color-survey-200: #b9d2ee;
+  --color-survey-300: #88b3e0;
+  --color-survey-400: #548ecd;
+  --color-survey-500: #336fb2;
+  --color-survey-600: #265993;
+  --color-survey-700: #204877;
+  --color-survey-800: #1d3b61;
+  --color-survey-900: #1b3351;
+  --color-survey-950: #0f1d2f;
+
+  /* clay — refusal and error. Terracotta rather than fire-engine red:
+     it has to sit next to a photograph of a garden without screaming. */
+  --color-clay-50: #fdf4f2;
+  --color-clay-100: #fbe4df;
+  --color-clay-200: #f6c8be;
+  --color-clay-300: #eda393;
+  --color-clay-400: #dd7461;
+  --color-clay-500: #c85340;
+  --color-clay-600: #a93a2a;
+  --color-clay-700: #8a2f24;
+  --color-clay-800: #722a21;
+  --color-clay-900: #60271f;
+  --color-clay-950: #34110c;
+
+  /* flag — attention without alarm: unmeasured areas, drafts, the
+     "internal pricing visible" marker on the console. */
+  --color-flag-50: #fdf8ed;
+  --color-flag-100: #f9edd0;
+  --color-flag-200: #f2d89f;
+  --color-flag-300: #e8be67;
+  --color-flag-400: #dca23e;
+  --color-flag-500: #c38320;
+  --color-flag-600: #a1651a;
+  --color-flag-700: #7f4b1a;
+  --color-flag-800: #683d1c;
+  --color-flag-900: #58331a;
+  --color-flag-950: #321909;
+
+  /* ---------------------------------------------------------------- */
+  /* Radius, elevation, motion                                         */
+  /* ---------------------------------------------------------------- */
+  --radius-xs: 0.25rem;
+  --radius-sm: 0.375rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+  --radius-xl: 1rem;
+  --radius-2xl: 1.375rem;
+  --radius-3xl: 1.75rem;
+
+  /* Elevation is warm-tinted — a neutral-black shadow over a warm
+     background greys it out. Four steps, and that is the whole set. */
+  --shadow-e1: 0 1px 2px 0 rgb(28 27 24 / 0.05);
+  --shadow-e2: 0 1px 3px 0 rgb(28 27 24 / 0.07), 0 1px 2px -1px rgb(28 27 24 / 0.06);
+  --shadow-e3: 0 4px 12px -2px rgb(28 27 24 / 0.09), 0 2px 4px -2px rgb(28 27 24 / 0.05);
+  --shadow-e4: 0 16px 40px -12px rgb(28 27 24 / 0.22), 0 4px 10px -4px rgb(28 27 24 / 0.08);
+
+  --ease-out-soft: cubic-bezier(0.22, 1, 0.36, 1);
+
+  --animate-shimmer: shimmer 1.6s linear infinite;
+  --animate-rise: rise 0.5s var(--ease-out-soft) both;
+  --animate-sweep: sweep 2.4s var(--ease-out-soft) infinite;
+}
+
+/* Touch devices. Used to offer the camera only where there is one, and to
+   drop the drag-and-drop affordance where dragging is not a thing. */
+@custom-variant coarse (@media (pointer: coarse));
+@custom-variant fine (@media (pointer: fine));
+
+@keyframes shimmer {
+  from { background-position: 200% 0; }
+  to   { background-position: -200% 0; }
+}
+
+@keyframes rise {
+  from { opacity: 0; transform: translateY(0.5rem); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* The segmentation wait: a band of light travelling down the customer's
+   own photo while the model looks at it. */
+@keyframes sweep {
+  0%   { transform: translateY(-60%); opacity: 0; }
+  15%  { opacity: 1; }
+  85%  { opacity: 1; }
+  100% { transform: translateY(160%); opacity: 0; }
+}
+
+/* -------------------------------------------------------------------- */
+/* Semantic aliases                                                      */
+/* -------------------------------------------------------------------- */
+/* Defined outside @theme on purpose: these are meanings, not palette
+   entries, and they must not become `bg-surface-500`-style utilities. */
+:root {
+  --page: var(--color-bark-50);
+  --surface: #ffffff;
+  --focus-ring: var(--color-canopy-600);
+
+  /* The minimum comfortable tap target. 44px is the Apple HIG floor and
+     the number the acceptance test measures against; every interactive
+     element on a customer surface either is this tall or uses the
+     `tap-target` utility below to reach it without growing visually. */
+  --tap: 2.75rem;
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+    scroll-behavior: smooth;
+  }
+
+  body {
+    background-color: var(--page);
+    color: var(--color-bark-900);
+    font-family: var(--font-sans);
+    /* No customer surface may scroll sideways on a 390px phone; this is
+       the backstop, and the Playwright pass in scripts/screenshots.mts
+       asserts it for real. */
+    overflow-x: hidden;
+  }
+
+  /* One focus treatment for the whole app. Visible, high-contrast, and
+     never removed — the previous code set `focus:outline-none` on form
+     fields with nothing in its place. */
+  :focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+    border-radius: var(--radius-xs);
+  }
+
+  ::selection {
+    background-color: var(--color-canopy-200);
+    color: var(--color-canopy-950);
+  }
+
+  /* Numbers that sit in a column — prices, quantities, error percentages
+     — must not jitter as they change. */
+  th, td, .tnum {
+    font-variant-numeric: tabular-nums;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+/* -------------------------------------------------------------------- */
+/* Utilities                                                             */
+/* -------------------------------------------------------------------- */
+
+/* Grow a visually small control to a 44px hit area without changing how
+   it looks. Used on icon buttons and inline links in dense rows. */
+@utility tap-target {
+  position: relative;
+
+  &::after {
+    content: "";
+    position: absolute;
+    inset: 50% 0 0 50%;
+    min-width: var(--tap);
+    min-height: var(--tap);
+    translate: -50% -50%;
+  }
+}
+
+/* The loading placeholder. One shimmer, used everywhere something is
+   pending, so a wait always looks like the same thing happening. */
+@utility skeleton {
+  background-color: var(--color-bark-200);
+  background-image: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgb(255 255 255 / 0.65) 50%,
+    transparent 100%
+  );
+  background-size: 200% 100%;
+  animation: var(--animate-shimmer);
+}
+
+/* Serif display type. The wordmark and the top heading of a customer
+   surface; nothing else. */
+@utility display {
+  font-family: var(--font-display);
+  font-weight: 500;
+  letter-spacing: var(--tracking-tightest);
+}

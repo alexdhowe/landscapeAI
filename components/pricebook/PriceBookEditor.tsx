@@ -9,7 +9,7 @@ import type { DraftView } from "@/lib/pricebook/service";
 import { Assemblies } from "./Assemblies";
 import { CostItems } from "./CostItems";
 import { Settings } from "./Settings";
-import { ChangeList, IssueList, Section, button } from "./shared";
+import { ChangeList, IssueList, Section, button, input } from "./shared";
 
 export type { AssemblyComponent, CostItem, CostItemKind, Assembly };
 
@@ -109,8 +109,8 @@ export function PriceBookEditor({ initial }: { initial: DraftView }) {
         }
         right={
           <span
-            className={`rounded-full px-2.5 py-1 text-[11px] font-medium ${
-              draft ? "bg-amber-100 text-amber-800" : "bg-emerald-100 text-emerald-800"
+            className={`rounded-full px-2.5 py-1 text-2xs font-medium ${
+              draft ? "bg-flag-100 text-flag-800" : "bg-canopy-100 text-canopy-800"
             }`}
           >
             {draft ? `Draft · ${changes.length} change${changes.length === 1 ? "" : "s"}` : "Published"}
@@ -121,22 +121,22 @@ export function PriceBookEditor({ initial }: { initial: DraftView }) {
           <div className="space-y-4">
             <ChangeList changes={changes} />
             <IssueList issues={issues} />
-            <div className="flex flex-wrap items-end gap-3 border-t border-neutral-100 pt-4">
-              <label className="flex-1 text-xs text-neutral-500">
+            <div className="flex flex-wrap items-end gap-3 border-t border-bark-100 pt-4">
+              <label className="flex-1 text-xs text-bark-500">
                 What changed, in your words
                 <input
                   value={label}
                   onChange={(e) => setLabel(e.target.value)}
                   placeholder="e.g. Spring 2026 stone increase"
                   disabled={busy}
-                  className="mt-1 w-full rounded-lg border border-neutral-200 px-2.5 py-1.5 text-sm outline-none focus:border-neutral-400"
+                  className={`mt-1 ${input}`}
                 />
               </label>
               <button
                 type="button"
                 onClick={publish}
                 disabled={busy || !publishable}
-                className={`${button} bg-neutral-900 text-white hover:bg-neutral-700`}
+                className={`${button} bg-bark-900 text-white shadow-e1 hover:bg-bark-800`}
               >
                 {busy ? "Working…" : `Publish revision ${draft.revision}`}
               </button>
@@ -144,13 +144,13 @@ export function PriceBookEditor({ initial }: { initial: DraftView }) {
                 type="button"
                 onClick={discard}
                 disabled={busy}
-                className={`${button} border border-neutral-300 text-neutral-700 hover:border-neutral-900`}
+                className={`${button} border border-bark-300 bg-white text-bark-700 hover:border-bark-400 hover:bg-bark-50`}
               >
                 Discard draft
               </button>
             </div>
             {!publishable && (
-              <p className="text-xs text-red-700">
+              <p className="text-xs text-clay-700">
                 Fix the problems above before publishing. Until then the book keeps
                 pricing from revision {published?.revision ?? "—"}.
               </p>
@@ -162,12 +162,12 @@ export function PriceBookEditor({ initial }: { initial: DraftView }) {
       </Section>
 
       {error && (
-        <p role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+        <p role="alert" className="rounded-lg border border-clay-200 bg-clay-50 p-3 text-sm text-clay-800">
           {error}
         </p>
       )}
 
-      <div className="flex gap-1 rounded-xl border border-neutral-200 bg-white p-1 shadow-sm">
+      <div className="flex gap-1 rounded-xl border border-bark-200 bg-white p-1 shadow-e1">
         {TABS.map((t) => (
           <button
             key={t.id}
@@ -175,8 +175,8 @@ export function PriceBookEditor({ initial }: { initial: DraftView }) {
             onClick={() => setTab(t.id)}
             className={`flex-1 rounded-lg px-3 py-2 text-sm font-medium transition ${
               tab === t.id
-                ? "bg-neutral-900 text-white"
-                : "text-neutral-600 hover:bg-neutral-100"
+                ? "bg-bark-900 text-white"
+                : "text-bark-600 hover:bg-bark-100"
             }`}
           >
             {t.label}

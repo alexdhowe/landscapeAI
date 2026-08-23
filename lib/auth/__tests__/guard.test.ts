@@ -18,7 +18,9 @@ process.env.PROJECTS_DATA_DIR = mkdtempSync(
 const store = await import("../../store/projects");
 const { demoSegmentation } = await import("../../vision/demo");
 const { contractorHeaders } = await import("./helpers");
-const { readCookie } = await import("../session");
+const { contractorFromRequest, readCookie } = await import("../session");
+const { encode } = await import("next-auth/jwt");
+const { authSecret } = await import("../secret");
 const { POST: submitPOST } = await import(
   "../../../app/api/projects/[projectId]/submit/route"
 );
@@ -175,5 +177,59 @@ describe("the contractor gate", () => {
       params(projectId),
     );
     expect(quote.status).toBe(200);
+  });
+});
+
+describe("which cookie a session is read from", () => {
+  /**
+   * The regression for a real 401: a signed-in rep's lead page rendered
+   * but its photo did not.
+   *
+   * Auth.js picks the `__Secure-` cookie prefix from the **scheme of the
+   * request**, not from NODE_ENV — a `__Secure-` cookie is only valid over
+   * HTTPS. A production build served over plain HTTP therefore writes
+   * `authjs.session-token`, while the route-handler accessor looked only
+   * for `__Secure-authjs.session-token`. Server components read the
+   * session through Auth.js and found it; route handlers read it through
+   * lib/auth/session.ts and did not.
+   */
+  async function cookieNamed(name: string): Promise<string> {
+    const token = await encode({
+      salt: name,
+      secret: authSecret(),
+      token: {
+        sub: "11111111-2222-4333-8444-555555555555",
+        email: "sam@example.com",
+        name: "Sam Rep",
+        role: "rep",
+        orgId: "wi-reference",
+      },
+    });
+    return `${name}=${encodeURIComponent(token)}`;
+  }
+
+  const withCookie = (cookie: string) =>
+    new Request("http://localhost/api/leads/x/photo", { headers: { cookie } });
+
+  it.each(["authjs.session-token", "__Secure-authjs.session-token"])(
+    "accepts a session written as %s",
+    async (name) => {
+      const contractor = await contractorFromRequest(withCookie(await cookieNamed(name)));
+      expect(contractor?.email).toBe("sam@example.com");
+    },
+  );
+
+  it("still refuses a token whose salt does not match its cookie name", async () => {
+    // The name is the JWE salt, so trying both names cannot be used to
+    // smuggle a token in under the wrong one.
+    const token = (await cookieNamed("authjs.session-token")).split("=")[1];
+    const mislabelled = `__Secure-authjs.session-token=${token}`;
+    expect(await contractorFromRequest(withCookie(mislabelled))).toBeNull();
+  });
+
+  it("refuses a request with no cookie at all", async () => {
+    expect(
+      await contractorFromRequest(new Request("http://localhost/api/leads/x/photo")),
+    ).toBeNull();
   });
 });

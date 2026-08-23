@@ -1,6 +1,8 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 
 import { PriceBookEditor } from "@/components/pricebook/PriceBookEditor";
+import { Callout, Card, SectionHeader } from "@/components/ui/Card";
 import { currentContractor } from "@/lib/auth/session";
 import {
   PriceBookUnavailableError,
@@ -14,12 +16,13 @@ import { describeChange } from "@/lib/pricebook/diff";
 /** The book changes under the page whenever anyone publishes. */
 export const dynamic = "force-dynamic";
 
+export const metadata: Metadata = { title: "Price book" };
+
 function Unavailable({ message }: { message: string }) {
   return (
-    <div className="rounded-xl border border-amber-200 bg-amber-50 p-5 text-sm text-amber-900">
-      <p className="font-medium">The price book is read-only here.</p>
-      <p className="mt-2">{message}</p>
-    </div>
+    <Callout tone="flag" title="The price book is read-only here.">
+      <p className="mt-1">{message}</p>
+    </Callout>
   );
 }
 
@@ -27,25 +30,22 @@ function Unavailable({ message }: { message: string }) {
 function History({ history }: { history: RevisionHistoryEntry[] }) {
   const published = history.filter((r) => r.status === "published");
   return (
-    <section className="rounded-xl border border-neutral-200 bg-white p-5 shadow-sm">
-      <h2 className="text-sm font-semibold uppercase tracking-wide text-neutral-500">
-        History
-      </h2>
-      <p className="mt-1 text-sm text-neutral-500">
-        Every revision is frozen once published, so this diff is what actually
-        happened — there is no separate log that could disagree with the rows.
-      </p>
+    <Card as="section" className="p-5">
+      <SectionHeader
+        title="History"
+        subtitle="Every revision is frozen once published, so this diff is what actually happened — there is no separate log that could disagree with the rows."
+      />
       <ol className="mt-4 space-y-4">
         {published.map((revision) => (
-          <li key={revision.id} className="border-l-2 border-neutral-200 pl-4">
+          <li key={revision.id} className="border-l-2 border-bark-200 pl-4">
             <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-              <span className="text-sm font-medium text-neutral-900">
+              <span className="text-sm font-medium text-bark-900">
                 Revision {revision.revision}
               </span>
               {revision.label && (
-                <span className="text-sm text-neutral-700">{revision.label}</span>
+                <span className="text-sm text-bark-700">{revision.label}</span>
               )}
-              <span className="text-xs text-neutral-400">
+              <span className="text-xs text-bark-600">
                 {revision.publishedBy} ·{" "}
                 {revision.publishedAt
                   ? new Date(revision.publishedAt).toLocaleString("en-US")
@@ -53,21 +53,21 @@ function History({ history }: { history: RevisionHistoryEntry[] }) {
               </span>
             </div>
             {revision.note && (
-              <p className="mt-1 text-sm text-neutral-500">{revision.note}</p>
+              <p className="mt-1 text-sm text-bark-600">{revision.note}</p>
             )}
             {revision.changes.length > 0 ? (
-              <ul className="mt-2 space-y-1 text-sm text-neutral-600">
+              <ul className="mt-2 space-y-1 text-sm text-bark-600">
                 {revision.changes.slice(0, 12).map((change, i) => (
                   <li key={`${change.key}-${i}`}>{describeChange(change)}</li>
                 ))}
                 {revision.changes.length > 12 && (
-                  <li className="text-neutral-400">
+                  <li className="text-bark-600">
                     …and {revision.changes.length - 12} more
                   </li>
                 )}
               </ul>
             ) : (
-              <p className="mt-2 text-sm text-neutral-400">
+              <p className="mt-2 text-sm text-bark-600">
                 {revision.revision === 1
                   ? "The seeded book — nothing before it to differ from."
                   : "No changes."}
@@ -76,7 +76,7 @@ function History({ history }: { history: RevisionHistoryEntry[] }) {
           </li>
         ))}
       </ol>
-    </section>
+    </Card>
   );
 }
 
@@ -92,17 +92,19 @@ export default async function PriceBookPage() {
   const contractor = await currentContractor();
   if (contractor?.role !== "admin") {
     return (
-      <div className="rounded-xl border border-neutral-200 bg-white p-5 text-sm text-neutral-600 shadow-sm">
-        <p className="font-medium text-neutral-900">Admins only.</p>
-        <p className="mt-2">
-          The price book decides what every customer is quoted, so it is limited to
-          admin accounts.{" "}
-          <Link href="/dashboard" className="underline">
+      <Callout tone="neutral" title="Admins only.">
+        <p className="mt-1">
+          The price book decides what every customer is quoted, so it is
+          limited to admin accounts.{" "}
+          <Link
+            href="/dashboard"
+            className="font-medium underline underline-offset-4"
+          >
             Back to the lead inbox
           </Link>
           .
         </p>
-      </div>
+      </Callout>
     );
   }
 
@@ -119,6 +121,7 @@ export default async function PriceBookPage() {
 
   return (
     <div className="space-y-5">
+      <h1 className="display text-2xl text-bark-900">Price book</h1>
       <PriceBookEditor initial={view} />
       <History history={history} />
     </div>

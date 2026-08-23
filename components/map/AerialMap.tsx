@@ -11,6 +11,9 @@ import type { AerialRegion } from "@/lib/design/types";
 import { resolveImageryProvider } from "@/lib/imagery/provider";
 import type { LngLat } from "@/lib/measure/area";
 import type { RegionKind } from "@/lib/vision/types";
+// The same four tints the photo canvas uses, so a bed reads as the same
+// colour on the photo and on the aerial — it is the same region.
+import { KIND_COLORS } from "@/components/configurator/regionColors";
 
 /**
  * Satellite raster for the MVP, behind lib/imagery: Esri World Imagery is
@@ -20,12 +23,7 @@ import type { RegionKind } from "@/lib/vision/types";
  */
 const IMAGERY = resolveImageryProvider();
 
-const KIND_COLORS: Record<RegionKind, string> = {
-  turf: "#4ade80",
-  bed: "#f59e0b",
-  hardscape: "#94a3b8",
-  foundation_planting: "#34d399",
-};
+
 
 export type EditSession = {
   /** Bump to start a fresh session even for the same region. */
@@ -191,7 +189,7 @@ export function AerialMap({
   return (
     <div
       ref={containerRef}
-      className="h-[420px] w-full overflow-hidden rounded-xl border border-neutral-200 sm:h-[520px]"
+      className="h-[420px] w-full overflow-hidden rounded-xl border border-bark-200 sm:h-[520px]"
     />
   );
 }

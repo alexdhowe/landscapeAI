@@ -19,7 +19,7 @@ const AerialMap = dynamic(
 
 function MapPlaceholder() {
   return (
-    <div className="flex h-[420px] w-full items-center justify-center rounded-xl border border-neutral-200 bg-neutral-100 text-sm text-neutral-400 sm:h-[520px]">
+    <div className="flex h-[420px] w-full items-center justify-center rounded-xl border border-bark-200 bg-bark-100 text-sm text-bark-500 sm:h-[520px]">
       Loading aerial…
     </div>
   );
@@ -235,13 +235,13 @@ export function LocateFlow({ projectId }: { projectId: string }) {
 
   if (error && !project) {
     return (
-      <div className="mx-auto max-w-lg rounded-xl border border-red-200 bg-red-50 p-6 text-sm text-red-700">
+      <div className="mx-auto max-w-lg rounded-xl border border-clay-200 bg-clay-50 p-6 text-sm text-clay-700">
         {error}
       </div>
     );
   }
   if (!project) {
-    return <p className="text-center text-sm text-neutral-500">Loading your design…</p>;
+    return <p className="text-center text-sm text-bark-500">Loading your design…</p>;
   }
 
   const location = project.location;
@@ -250,11 +250,11 @@ export function LocateFlow({ projectId }: { projectId: string }) {
   if (!location) {
     return (
       <div className="mx-auto max-w-xl space-y-4">
-        <div className="rounded-xl border border-neutral-200 bg-white p-5 shadow-sm">
-          <h2 className="text-base font-semibold text-neutral-900">
+        <div className="rounded-xl border border-bark-200 bg-white p-5 shadow-e1">
+          <h2 className="text-base font-semibold text-bark-900">
             Where is this yard?
           </h2>
-          <p className="mt-1 text-sm text-neutral-500">
+          <p className="mt-1 text-sm text-bark-500">
             We&apos;ll pull aerial imagery of your property so you can outline the
             real areas — and your budget range narrows to your actual yard.
           </p>
@@ -270,34 +270,34 @@ export function LocateFlow({ projectId }: { projectId: string }) {
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Street address, city, state"
-              className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm focus:border-sky-500 focus:outline-none"
+              className="min-h-11 w-full rounded-lg border border-bark-300 px-3 py-2.5 text-base text-bark-900 transition-colors placeholder:text-bark-500 hover:border-bark-400"
             />
             <button
               type="submit"
               disabled={searching || query.trim().length < 3}
-              className="shrink-0 rounded-lg bg-sky-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-sky-700 disabled:opacity-50"
+              className="inline-flex min-h-11 shrink-0 items-center rounded-lg bg-survey-700 px-4 text-sm font-medium text-white shadow-e1 transition-colors hover:bg-survey-800 disabled:cursor-not-allowed disabled:opacity-45"
             >
               {searching ? "Searching…" : "Find it"}
             </button>
           </form>
 
           {candidates && candidates.length === 0 && (
-            <p className="mt-3 text-sm text-neutral-500">
+            <p className="mt-3 text-sm text-bark-600">
               No matches — try adding the city and state.
             </p>
           )}
           {candidates && candidates.length > 0 && (
-            <ul className="mt-3 divide-y divide-neutral-100 rounded-lg border border-neutral-200">
+            <ul className="mt-3 divide-y divide-bark-100 rounded-lg border border-bark-200">
               {candidates.map((c) => (
                 <li key={`${c.lat},${c.lng}`}>
                   <button
                     type="button"
                     onClick={() => void chooseCandidate(c)}
-                    className="w-full px-3 py-2.5 text-left text-sm text-neutral-700 transition hover:bg-sky-50"
+                    className="flex min-h-11 w-full items-center px-3 py-2.5 text-left text-sm text-bark-800 transition-colors hover:bg-survey-50"
                   >
                     {c.label}
                     {c.source === "demo" && (
-                      <span className="ml-2 rounded-full bg-sky-100 px-2 py-0.5 text-xs text-sky-700">
+                      <span className="ml-2 rounded-full bg-survey-100 px-2 py-0.5 text-xs text-survey-700">
                         demo pin
                       </span>
                     )}
@@ -308,21 +308,21 @@ export function LocateFlow({ projectId }: { projectId: string }) {
           )}
         </div>
 
-        <div className="text-center text-sm text-neutral-500">
+        <div className="text-center text-sm text-bark-500">
           <button
             type="button"
             onClick={() => {
               void patchProject({ addressDeclined: true });
             }}
-            className="underline decoration-neutral-300 underline-offset-2 hover:text-neutral-700"
+            className="underline decoration-bark-300 underline-offset-2 hover:text-bark-700"
           >
             Prefer not to share an address? Keep your estimate range
           </button>
         </div>
         {project.addressDeclined && (
-          <div className="rounded-lg border border-neutral-200 bg-neutral-50 px-4 py-3 text-center text-sm text-neutral-600">
+          <div className="rounded-lg border border-bark-200 bg-bark-50 px-4 py-3 text-center text-sm text-bark-600">
             No problem — your design and budget range are saved.{" "}
-            <Link href={`/design/${projectId}`} className="font-medium text-sky-700">
+            <Link href={`/design/${projectId}`} className="font-medium text-survey-700">
               Back to your design →
             </Link>
           </div>
@@ -341,7 +341,7 @@ export function LocateFlow({ projectId }: { projectId: string }) {
     <div className="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(300px,1fr)]">
       <div className="space-y-3">
         <div className="flex items-center justify-between gap-3 text-sm">
-          <p className="truncate text-neutral-600" title={location.address}>
+          <p className="truncate text-bark-600" title={location.address}>
             📍 {location.address}
           </p>
           <button
@@ -351,19 +351,19 @@ export function LocateFlow({ projectId }: { projectId: string }) {
               setMeasuring(null);
               setProject({ ...project, location: undefined });
             }}
-            className="shrink-0 text-xs text-neutral-400 underline underline-offset-2 hover:text-neutral-600"
+            className="shrink-0 text-xs text-bark-500 underline underline-offset-2 hover:text-bark-600"
           >
             change address
           </button>
         </div>
         {location.source === "demo" && (
-          <div className="rounded-lg border border-sky-200 bg-sky-50 px-4 py-2.5 text-sm text-sky-800">
+          <div className="rounded-lg border border-survey-200 bg-survey-50 px-4 py-2.5 text-sm text-survey-800">
             Demo pin — the geocoder was unreachable, so this aerial is a stand-in
             location, not your address.
           </div>
         )}
         {measuring && (
-          <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-800">
+          <div className="rounded-lg border border-flag-200 bg-flag-50 px-4 py-2.5 text-sm text-flag-800">
             {measuring.session.seedRing
               ? "Drag the corners (or the shape) to match the real area, then save."
               : "Click the map to outline the area; click the first point again to close it."}
@@ -375,7 +375,7 @@ export function LocateFlow({ projectId }: { projectId: string }) {
           </div>
         )}
         {error && (
-          <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-2.5 text-sm text-red-700">
+          <div className="rounded-lg border border-clay-200 bg-clay-50 px-4 py-2.5 text-sm text-clay-700">
             {error}
           </div>
         )}
@@ -389,7 +389,7 @@ export function LocateFlow({ projectId }: { projectId: string }) {
             setMeasuring((m) => (m ? { ...m, pendingRing: ring } : m));
           }}
         />
-        <p className="text-xs text-neutral-400">
+        <p className="text-xs text-bark-500">
           Areas are measured geodesically from what you draw — aerial imagery is
           for reference. A rep confirms all quantities on site before any final
           quote.
@@ -397,43 +397,43 @@ export function LocateFlow({ projectId }: { projectId: string }) {
       </div>
 
       <div className="space-y-4">
-        <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
-          <p className="text-xs font-medium uppercase tracking-wide text-neutral-500">
-            Budget band
-          </p>
+        <div className="rounded-xl border border-bark-200 bg-white p-4 shadow-e1">
+          <h2 className="text-2xs font-semibold uppercase tracking-wider text-bark-500">
+            Budget range
+          </h2>
           {band?.band ? (
             <div className="mt-2">
-              <p className="text-2xl font-semibold tracking-tight text-neutral-900">
+              <p className="tnum display text-3xl text-bark-900">
                 {usd(band.band.low)} – {usd(band.band.high)}
               </p>
               {measuredBand && band.typologyBand ? (
                 <div className="mt-3">
                   <BandMeter outer={band.typologyBand} inner={measuredBand} />
-                  <p className="mt-1.5 text-xs text-emerald-700">
+                  <p className="mt-1.5 text-xs text-canopy-700">
                     Narrowed from {usd(band.typologyBand.low)} –{" "}
                     {usd(band.typologyBand.high)} using your measurements.
                   </p>
                 </div>
               ) : (
-                <p className="mt-1 text-xs text-neutral-500">
+                <p className="mt-1 text-xs text-bark-500">
                   Based on typical projects — outline a designed area below to
                   narrow it.
                 </p>
               )}
             </div>
           ) : (
-            <p className="mt-2 text-sm text-neutral-500">
+            <p className="mt-2 text-sm text-bark-500">
               Pick materials on your photo first — then measuring narrows the
               price.
             </p>
           )}
         </div>
 
-        <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
-          <p className="text-xs font-medium uppercase tracking-wide text-neutral-500">
+        <div className="rounded-xl border border-bark-200 bg-white p-4 shadow-e1">
+          <h2 className="text-2xs font-semibold uppercase tracking-wider text-bark-500">
             Your areas
-          </p>
-          <ul className="mt-2 divide-y divide-neutral-100">
+          </h2>
+          <ul className="mt-2 divide-y divide-bark-100">
             {orderedRegions.map((region) => {
               const aerial = aerialByPhotoRegion.get(region.id);
               const isMeasuring = measuring?.photoRegionId === region.id;
@@ -442,15 +442,15 @@ export function LocateFlow({ projectId }: { projectId: string }) {
                 <li key={region.id} className="py-2.5">
                   <div className="flex items-center justify-between gap-2">
                     <div className="min-w-0">
-                      <p className="truncate text-sm font-medium text-neutral-800">
+                      <p className="truncate text-sm font-medium text-bark-800">
                         {region.label}
                         {designed && (
-                          <span className="ml-1.5 rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700">
+                          <span className="ml-1.5 rounded-full bg-canopy-100 px-1.5 py-0.5 text-2xs font-medium text-canopy-700">
                             in your design
                           </span>
                         )}
                       </p>
-                      <p className="text-xs text-neutral-400">
+                      <p className="text-xs text-bark-500">
                         {REGION_KIND_LABELS[region.kind]}
                         {aerial &&
                           ` · ${Math.round(aerial.areaSf.value).toLocaleString("en-US")} SF · ${Math.round(
@@ -466,14 +466,14 @@ export function LocateFlow({ projectId }: { projectId: string }) {
                           type="button"
                           disabled={!measuring?.pendingRing || measuring.saving}
                           onClick={() => void saveMeasurement()}
-                          className="rounded-lg bg-emerald-600 px-2.5 py-1 text-xs font-medium text-white transition hover:bg-emerald-700 disabled:opacity-50"
+                          className="tap-target inline-flex min-h-9 items-center rounded-lg bg-canopy-700 px-3 text-xs font-medium text-white transition-colors hover:bg-canopy-800 disabled:cursor-not-allowed disabled:opacity-45"
                         >
                           {measuring?.saving ? "Saving…" : "Save this area"}
                         </button>
                         <button
                           type="button"
                           onClick={() => setMeasuring(null)}
-                          className="rounded-lg border border-neutral-300 px-2.5 py-1 text-xs text-neutral-600 transition hover:bg-neutral-50"
+                          className="rounded-lg border border-bark-300 px-2.5 py-1 text-xs text-bark-600 transition hover:bg-bark-50"
                         >
                           Cancel
                         </button>
@@ -483,7 +483,7 @@ export function LocateFlow({ projectId }: { projectId: string }) {
                         <button
                           type="button"
                           onClick={() => startMeasuring(region.id, aerial?.ring ?? null)}
-                          className="rounded-lg border border-neutral-300 px-2.5 py-1 text-xs text-neutral-700 transition hover:bg-neutral-50"
+                          className="rounded-lg border border-bark-300 px-2.5 py-1 text-xs text-bark-700 transition hover:bg-bark-50"
                         >
                           {aerial ? "Re-draw" : "Draw on map"}
                         </button>
@@ -499,7 +499,7 @@ export function LocateFlow({ projectId }: { projectId: string }) {
                                 ),
                               )
                             }
-                            className="rounded-lg border border-neutral-300 px-2.5 py-1 text-xs text-neutral-700 transition hover:bg-neutral-50"
+                            className="rounded-lg border border-bark-300 px-2.5 py-1 text-xs text-bark-700 transition hover:bg-bark-50"
                           >
                             Suggest a shape
                           </button>
@@ -508,7 +508,7 @@ export function LocateFlow({ projectId }: { projectId: string }) {
                           <button
                             type="button"
                             onClick={() => void removeMeasurement(region.id)}
-                            className="rounded-lg px-2.5 py-1 text-xs text-neutral-400 transition hover:text-red-600"
+                            className="tap-target inline-flex min-h-9 items-center rounded-lg px-3 text-xs font-medium text-bark-600 transition-colors hover:text-clay-700"
                           >
                             Remove
                           </button>
@@ -524,7 +524,7 @@ export function LocateFlow({ projectId }: { projectId: string }) {
 
         <Link
           href={`/design/${projectId}`}
-          className="block rounded-lg bg-neutral-900 px-4 py-2.5 text-center text-sm font-medium text-white transition hover:bg-neutral-700"
+          className="flex min-h-11 w-full items-center justify-center rounded-lg bg-bark-900 px-4 text-sm font-medium text-white shadow-e1 transition-colors hover:bg-bark-800"
         >
           {measuredBand ? "Done — back to your design" : "Back to your design"}
         </Link>

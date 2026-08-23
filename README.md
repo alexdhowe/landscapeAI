@@ -24,11 +24,13 @@ not negotiable.
 | Contractor auth | ✅ done — Auth.js, console and contractor APIs gated |
 | `/pricebook` | ✅ done — full CRUD on immutable, published revisions |
 | Photo storage — S3-compatible | ✅ done — `lib/storage`, bucket or local, migration 0004 |
+| Design system | ✅ done — tokens in `app/globals.css`, one font pairing, primitives, loading/empty/error states |
+| Photos off an iPhone | ✅ done — HEIC → JPEG, EXIF orientation baked in, GPS stripped, long edge capped |
 
 All six phases are in, they run on Postgres, the contractor console is behind
-a login, the price book is editable, and photos live in object storage when a
-bucket is configured. `npm test` runs 277 tests — with a database and without
-one.
+a login, the price book is editable, photos live in object storage when a
+bucket is configured, and the whole thing has been designed and opened on a
+phone. `npm test` runs 336 tests — with a database and without one.
 
 One gap is left from section 3 and it is not a coding gap: `/api/imagery`
 waits on the **imagery provider decision**, which is a licensing question —
@@ -47,10 +49,15 @@ store, so a clean checkout runs the demo with nothing to provision.
 ## Commands
 
 ```sh
-npm test          # Vitest — 277 tests across every phase
+npm test          # Vitest — 336 tests across every phase. No server, no network, no browser.
 npm run typecheck
 npm run dev
 npm run build
+
+npm run shots     # dev-only: drive the customer flow in a real browser at
+                  # 390x844 and 1440x900, capture every surface, and audit
+                  # horizontal scroll and 44px tap targets. Needs a running
+                  # server; see "Looking at it" below.
 
 npm run db:generate   # regenerate migrations from lib/db/schema.ts
 npm run db:migrate    # apply them
@@ -85,6 +92,261 @@ picker filtered to the clicked region's kind, and a budget band that reads
 - Projects live behind `lib/store/projects.ts` and photo bytes behind
   `lib/storage` — the only modules that know where anything is kept. See
   [photo storage](#photo-storage) and [the database](#the-database) below.
+- The upload accepts **HEIC** and leads with the camera; what reaches
+  storage is always upright, metadata-free and capped at 1600px on the long
+  edge. See [a photo straight off an iPhone](#a-photo-straight-off-an-iphone).
+
+## The design system
+
+Everything visual resolves to a token in `app/globals.css`. Before that file
+existed it was one line — `@import "tailwindcss"` — and eight sessions had
+produced eight slightly different greens and no shared idea of what "muted
+text" meant. The rule now is that **no component names a raw palette colour**,
+and `lib/design/__tests__/tokens.test.ts` greps `app/` and `components/` to
+keep it that way.
+
+- **Five ramps, named for what they mean.** `bark` is the neutral, warm rather
+  than grey — this is a company that works outdoors and a cold grey UI around
+  a photograph of a garden looks like a spreadsheet. `canopy` is the brand
+  green, deep and desaturated because a saturated "eco" green next to a real
+  photograph reads synthetic. `survey` blue means *this number came from the
+  aerial pass*. `clay` is refusal, `flag` is attention-without-alarm.
+- **The ramps are tested, not eyeballed.** Same test computes WCAG contrast
+  from the hex values: 600–950 is AA on white and on the page ground, 700–950
+  is AA on its own 50/100 tints (which is what `Callout` and `Badge` do), and
+  white is AA on 600–950 (which is what `Button` does). The 400 stop is
+  asserted to be *below* AA, so reaching for it as a text colour is a
+  documented boundary rather than an accident.
+- **One font pairing through `next/font`.** Fraunces carries the wordmark and
+  the top heading of a customer surface; Inter carries everything else,
+  including every number in the console, with tabular figures anywhere numbers
+  sit in a column.
+- **Primitives only where something was already repeated three times.**
+  `components/ui/` holds Button, Card/Callout/EmptyState/SectionHeader, Field,
+  Badge, Skeleton and the Wordmark. That is the whole list. This was a design
+  pass, not a framework.
+- **Loading, empty and error states.** There was not a single `loading.tsx`,
+  `error.tsx` or `not-found.tsx` in the tree. There are now, per route group
+  and per heavy route, and each skeleton is in the shape of the thing it is
+  waiting for so nothing jumps when it arrives.
+- Metadata, per-route titles, a favicon (`app/icon.svg`) and an OG card
+  (`app/opengraph-image.tsx`, drawn from the same tokens so it cannot drift
+  from the product it pictures).
+
+**Two audiences, one company.** The customer surfaces (`/`, `/start`,
+`/design/*`) are mobile-first — the design target is a homeowner standing in
+their yard holding a phone, not a desktop browser. The console (`/dashboard`,
+`/leads/[id]`, `/deltas`, `/pricebook`, `/login`) is dense, desktop-first and
+information-first, on darker chrome. The wordmark, the ramps and the
+primitives are what make them the same product.
+
+### Accessibility is part of the bar
+
+- One focus treatment for the whole app, in a `:focus-visible` base rule.
+  Four components had `focus:outline-none` with nothing in its place; none
+  do now.
+- AA contrast, enforced by the token test above.
+- 44px minimum tap targets, enforced by the audit in `npm run shots`. The
+  `tap-target` utility extends a hit area without changing how a control
+  looks, for dense console rows.
+- Real alt text, and deliberately *short* alt text on the photo canvases: a
+  browser renders alt text at the image's place while it loads, and a
+  sentence long enough to name every region is wide enough to stretch the
+  column it sits in.
+- **Keyboard access to the regions on the photo canvas.** The polygons were
+  click targets and nothing else, so a keyboard could not reach any of them
+  and the configurator was unusable without a pointer. The fix is not
+  `tabIndex` on an SVG polygon — focus rings on SVG are inconsistent across
+  browsers, a shape has no accessible name to speak, and on a 390px-wide
+  photo the markers overlap each other so 44px hit areas around them steal
+  one another's taps. Instead there is a **region strip** under the photo:
+  one real button per region, in document order, 44px, no overlap, carrying
+  `aria-pressed`. Focusing one highlights its polygon. What sits on the photo
+  is a redundant pointer convenience, hidden from assistive technology so
+  nothing is announced twice.
+
+### Looking at it
+
+`scripts/screenshots.mts` (`npm run shots`) drives the whole customer flow in
+a real Chromium at 390×844 and 1440×900 — upload, segmentation wait, region
+swap, band, submit — then signs in and captures the console. It writes PNGs
+to `.shots/` and audits two rules that are easy to state and easy to break:
+no horizontal scroll at 390px, and no interactive element under 44 CSS px. It
+exits non-zero on a finding.
+
+It is **not** part of `npm test`, which stays browser-free. Run it against a
+server you have already started:
+
+```sh
+npm run build
+AUTH_TRUST_HOST=1 AUTH_SECRET=$(openssl rand -base64 32) \
+  CONTRACTOR_EMAIL=you@example.com CONTRACTOR_PASSWORD=… npm start &
+npm run shots -- --photo ./some-photo.heic
+```
+
+Three real bugs came straight out of pointing it at a phone viewport: a grid
+child with `min-width: auto` stretching the whole page sideways, region
+markers stealing each other's taps, and a signed-in rep's lead photo coming
+back 401 (see [contractor auth](#contractor-auth)).
+
+### The thirty seconds, measured
+
+§2's thesis is a customer clicking around their own yard inside thirty seconds
+of landing. Nobody had ever measured it. On a production build, locally, with
+a 12-megapixel portrait HEIC as the upload:
+
+| Leg | 390×844 | 1440×900 |
+|---|---|---|
+| Landing → `/start` interactive | 39 ms | 33 ms |
+| Photo chosen → design page | 1,637 ms | 1,230 ms |
+| Landing → labelled regions | 3,754 ms | 3,817 ms |
+| **Landing → first budget band** | **5,857 ms** | **6,475 ms** |
+
+**That number does not include the vision call.** No `ANTHROPIC_API_KEY` was
+available in the environment this was measured in, so segmentation fell back
+to the demo overlay, which costs nothing. What the table says honestly is that
+**everything this application does other than the model call spends about six
+seconds of the thirty**, and roughly 1.5 s of that is the upload, most of
+which is normalising a 12 MP HEIC in pure JavaScript.
+
+So the remaining ~24 s is the Claude vision call, and it is the whole risk.
+That is a real number somebody with a key should put in this table. The lever
+on it, if it turns out to be tight, is `lib/vision/classify.ts`: the model and
+the size of the JSON the prompt asks for. Segmentation quality against
+latency is a product decision and this session did not make it.
+
+**The wait is designed rather than papered over.** A band of light travels
+down the customer's own photograph while the model reads it, with placeholder
+chips in the shape of the labels that are coming; the local copy of the photo
+appears within a few hundred milliseconds of the tap, long before the server
+is finished with it, and the same motion continues on the design page so the
+two read as one. A skeleton over the photo beats a spinner beside it: it keeps
+the thing they came for on screen and it stops the layout jumping.
+
+## A photo straight off an iPhone
+
+`/start` used to accept JPEG, PNG, GIF and WebP. iPhones shoot HEIC. There was
+also no "take a photo" affordance, which is the obvious thing to offer someone
+standing in the yard they want re-landscaped. Both are fixed, and the fix
+started with a structural problem rather than with a decoder.
+
+### The list that was two lists
+
+`SUPPORTED_IMAGE_MEDIA_TYPES` lived in `lib/vision/classify.ts` and the upload
+route, the vision route and the classifier all read it as one list. It was
+conflating **what a customer may upload** with **what Claude's vision API
+accepts**, and those answers now differ. That conflation is what made
+"accept HEIC" look like a one-line change to a constant.
+
+They are two files now:
+
+| | |
+|---|---|
+| `lib/vision/mediaTypes.ts` | `VISION_IMAGE_MEDIA_TYPES` — the vision API's contract. JPEG, PNG, GIF, WebP. Nothing may widen it. |
+| `lib/image/mediaTypes.ts` | `UPLOAD_IMAGE_MEDIA_TYPES` — what a customer may send. The same four plus HEIC/HEIF. |
+
+`lib/image/normalize.ts` is the bridge, and a test asserts the invariant that
+holds the two together: **whatever a customer is allowed to upload, what
+leaves normalisation is on the vision list.**
+
+### What happens to the bytes
+
+The upload route (`app/api/projects/route.ts`) is the only place in the
+application that handles raw uploaded bytes, which is where the conversion
+belongs. In one pass, before anything reaches `lib/storage`:
+
+- **HEIC → JPEG.** Storing raw HEIC and serving it would render in Safari and
+  break in Chrome, which is worse than rejecting it.
+- **EXIF orientation baked into the pixels.** iPhone photos carry a rotation
+  tag. The browser applies it and the vision model does not, so a portrait
+  photo that keeps its tag gets segmented sideways and every polygon lands on
+  the wrong part of the picture.
+- **Long edge capped at 1600px.** Claude's vision API resizes anything whose
+  long edge exceeds ~1568px before the model sees it, so every pixel above
+  that is upload latency and nothing else — and the upload is on the critical
+  path of the thirty seconds. 1600 sits just above that threshold and leaves
+  the design canvas slightly more than the model uses. A 12 MP HEIC (815 KB)
+  lands in storage as a 1200×1600 JPEG of 119 KB.
+- **All metadata dropped, GPS included.** A photo of somebody's house does not
+  need to carry their coordinates into the object store; the address is asked
+  for separately, on its own screen, with a decline button. The encoder writes
+  no EXIF at all, so this holds by construction rather than by a stripping
+  pass that could miss a container.
+
+`MAX_PHOTO_BYTES` was 8 MB, which a 48-megapixel iPhone photo exceeds
+outright — the customer most likely to be standing in their yard with a phone
+was the one most likely to be rejected. The ingest cap is now 25 MB
+(`lib/image/limits.ts`), checked before the body is buffered, and what lands
+in storage is far smaller because normalisation caps the long edge first.
+
+The media type is decided from the **leading bytes**, not from the browser's
+`File.type`: Safari reports `""` for a HEIC dragged out of Photos and an
+Android picker reports `application/octet-stream` for anything it does not
+recognise. The declared type is used only so a refusal can name what the
+customer thinks they sent.
+
+### The decoder, and what was checked before committing to it
+
+The project had zero native dependencies and `npm test` needed no network and
+no build step. Both are still true.
+
+- **sharp was not used.** Its prebuilt binaries deliberately ship *without*
+  HEIF support — libheif, libde265 and x265 are LGPL/GPL and HEVC is patent
+  encumbered — so "just use sharp" would have produced a decoder that throws
+  on exactly the format this is for, plus a native dependency in a tree that
+  had none.
+- **`heic-decode` + `jpeg-js`.** Three packages, no native code, no postinstall
+  build: `heic-decode` (ISC) wraps `libheif-js` (**LGPL-3.0**, a prebuilt wasm
+  bundle), and `jpeg-js` (BSD-3) does the JPEG leg. Both are imported lazily,
+  so the ~6 MB wasm bundle only loads when a HEIC actually arrives. **The
+  LGPL-3.0 dependency is worth a licence review before this ships** — it is
+  used unmodified and resolved at runtime, which is the ordinary dynamic-
+  linking reading, but that is a call for somebody with authority to make it,
+  the same as the imagery decision.
+- **Converting in the browser was considered and rejected on the thirty
+  seconds.** Every in-browser HEIC decoder is the same libheif wasm build, and
+  it would have to reach the phone *before* the first upload could start, over
+  whatever cellular connection the customer is standing on — a multi-second
+  tax on the first interaction of the funnel, paid by every visitor including
+  the ones who upload a JPEG. On the server it is lazy, warm, and paid once.
+
+**PNG, GIF and WebP pass through untouched.** Nothing shoots them — they are
+screenshots and saved web images — so they carry no orientation tag and no
+coordinates, and adding a PNG and a WebP codec to normalise formats no camera
+produces would be dependency for its own sake. The cost is that they cannot be
+shrunk, so they are held to a smaller ceiling that keeps them inside the vision
+API's own per-image limit. If that ever bites a real customer the fix is a
+decoder for the offending format in `lib/image`, and nothing above that module
+has to change.
+
+### Tested against a real HEIC
+
+`lib/image/__tests__/fixtures/` holds three small committed files — a genuine
+HEIF container with the rotation in its `irot` property and a GPS fix, the same
+picture as a JPEG with `Orientation: 6` in the tag, and an upright JPEG with
+GPS and nothing else to do. Each is four flat colour quadrants, so a test can
+assert *which way up* the picture came out rather than merely that something
+decoded. `lib/image/__tests__/upload.test.ts` puts the HEIC through the real
+upload route into the in-process bucket fake and checks the three things that
+were wrong: it is a JPEG so it renders in Chrome, it is portrait so the
+polygons land right, and it carries no EXIF.
+
+The fixtures were **generated, not shot** — nobody in this session had an
+iPhone, and a photo of a real house is not a thing to commit to a repository.
+`scripts/make-image-fixtures.py` is the generator and
+`lib/image/__tests__/fixtures/README.md` says so; the tests assert
+relationships rather than pinned bytes, so dropping in a real capture works.
+
+### On the phone
+
+`/start` leads with the camera. `capture="environment"` is offered only where
+there is a camera to open — it is ignored on a desktop browser, so showing it
+there would be two buttons that do the same thing — and the drag-and-drop
+target only appears where there is something to drag with. Each control is a
+styled `<label>` wrapping a visually-hidden file input: one tab stop,
+announced as a file input, with the focus ring on the label. The moment a file
+is chosen the browser's own copy of it fills the screen, dimmed, with the
+segmentation sweep already running.
 
 ## The aerial measurement layer (Phase 3)
 
@@ -284,6 +546,18 @@ route ignores the body field entirely. The delta is the training corpus and
 `correctedBy` is its provenance; provenance the caller asserts for itself
 isn't provenance. The lead page shows the name read-only rather than asking
 for it.
+
+**Which cookie a session is read from.** Auth.js picks the `__Secure-` cookie
+prefix from the **scheme of the request**, not from `NODE_ENV` — a `__Secure-`
+cookie is only valid over HTTPS. `lib/auth/session.ts` read `NODE_ENV` alone,
+so a production build served over plain HTTP looked for a cookie name that
+had never been written. The symptom was a signed-in rep whose lead page
+rendered (server components read the session through Auth.js and found it)
+but whose lead photo came back 401 (route handlers read it through this
+module and did not). It now tries both names. That is not a weakening: the
+cookie name is also the JWE salt, so a token still only decodes under the name
+it was actually written with — there is a test for exactly that. Found by
+running `npm run shots` against a production build.
 
 Passwords are scrypt from `node:crypto` — no dependency — with the cost
 parameters and salt encoded in the stored string, so the cost can be raised

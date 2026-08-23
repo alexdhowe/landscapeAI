@@ -150,7 +150,7 @@ export function ConfirmQuantities({
 
   if (rows.length === 0) {
     return (
-      <p className="text-sm text-neutral-500">
+      <p className="text-sm text-bark-500">
         This design has no selected regions, so there is nothing to measure.
       </p>
     );
@@ -161,7 +161,7 @@ export function ConfirmQuantities({
       <div className="overflow-x-auto">
         <table className="w-full min-w-[560px] text-left text-sm">
           <thead>
-            <tr className="border-b border-neutral-200 text-xs uppercase tracking-wide text-neutral-400">
+            <tr className="border-b border-bark-200 text-xs uppercase tracking-wide text-bark-500">
               <th className="py-2 pr-3 font-medium">Region</th>
               <th className="py-2 pr-3 font-medium">Current source</th>
               <th className="py-2 pr-3 font-medium">Area (SF)</th>
@@ -176,8 +176,8 @@ export function ConfirmQuantities({
                 { key: "perimeterLf", unit: "LF", current: row.perimeterLf.value },
               ];
               return (
-                <tr key={row.regionId} className="border-b border-neutral-100">
-                  <td className="py-2 pr-3 text-neutral-800">{row.label}</td>
+                <tr key={row.regionId} className="border-b border-bark-100">
+                  <td className="py-2 pr-3 text-bark-800">{row.label}</td>
                   <td className="py-2 pr-3">
                     <ProvenanceBadge source={row.areaSf.source} />
                   </td>
@@ -196,15 +196,15 @@ export function ConfirmQuantities({
                             disabled={locked || busy}
                             value={draft?.[key] ?? ""}
                             onChange={(e) => setDraft(row.regionId, key, e.target.value)}
-                            className={`w-28 rounded-lg border px-2 py-1 text-sm tabular-nums outline-none ${
+                            className={`min-h-11 w-28 rounded-md border px-2.5 py-1 text-sm tabular-nums transition-colors ${
                               edited
-                                ? "border-emerald-400 bg-emerald-50 text-emerald-900"
-                                : "border-neutral-200 text-neutral-800"
-                            } disabled:bg-neutral-100 disabled:text-neutral-400`}
+                                ? "border-canopy-400 bg-canopy-50 text-canopy-900"
+                                : "border-bark-200 text-bark-800"
+                            } disabled:bg-bark-100 disabled:text-bark-500`}
                           />
                           <label
                             title="I measured this on site"
-                            className="flex cursor-pointer items-center gap-1 text-[11px] text-neutral-400"
+                            className="tap-target flex min-h-11 cursor-pointer items-center gap-1.5 text-2xs text-bark-600"
                           >
                             <input
                               type="checkbox"
@@ -213,7 +213,7 @@ export function ConfirmQuantities({
                               // the box only adds the unchanged case.
                               disabled={locked || busy || edited}
                               onChange={() => toggle(row.regionId, key)}
-                              className="h-3.5 w-3.5 accent-emerald-600"
+                              className="size-4 accent-canopy-700"
                             />
                             measured
                           </label>
@@ -229,29 +229,29 @@ export function ConfirmQuantities({
       </div>
 
       {locked ? (
-        <p className="text-xs text-neutral-500">
+        <p className="text-xs text-bark-600">
           The final quote has been issued — further corrections would not reach
           it. A revised quote is a new revision, which this MVP does not model.
         </p>
       ) : (
         <>
           <div className="grid gap-2 sm:grid-cols-2">
-            <div className="text-xs text-neutral-500">
+            <div className="text-xs font-medium text-bark-600">
               Confirmed by
               {/* Not editable: the server records the signed-in contractor,
                   so a field here could only disagree with the delta. */}
-              <p className="mt-1 rounded-lg border border-neutral-200 bg-neutral-50 px-2.5 py-1.5 text-sm text-neutral-800">
+              <p className="mt-1 rounded-lg border border-bark-200 bg-bark-50 px-2.5 py-1.5 text-sm text-bark-800">
                 {confirmedBy}
               </p>
             </div>
-            <label className="text-xs text-neutral-500">
+            <label className="text-xs font-medium text-bark-600">
               Site note (optional)
               <input
                 value={note}
                 onChange={(e) => setNote(e.target.value)}
                 placeholder="e.g. bed wraps behind the downspout"
                 disabled={busy}
-                className="mt-1 w-full rounded-lg border border-neutral-200 px-2.5 py-1.5 text-sm text-neutral-800 outline-none focus:border-neutral-400"
+                className="mt-1 min-h-11 w-full rounded-md border border-bark-300 bg-white px-2.5 py-1.5 text-sm text-bark-900 transition-colors hover:border-bark-400"
               />
             </label>
           </div>
@@ -261,7 +261,7 @@ export function ConfirmQuantities({
               type="button"
               onClick={submitCorrections}
               disabled={busy || corrections.length === 0}
-              className="rounded-lg bg-neutral-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-neutral-700 disabled:bg-neutral-300"
+              className="inline-flex min-h-11 items-center rounded-lg bg-bark-900 px-4 text-sm font-medium text-white shadow-e1 transition-colors hover:bg-bark-800 disabled:cursor-not-allowed disabled:bg-bark-300 disabled:shadow-none"
             >
               {busy
                 ? "Recording…"
@@ -269,7 +269,7 @@ export function ConfirmQuantities({
                   ? "No changes to record"
                   : `Record ${corrections.length} correction${corrections.length === 1 ? "" : "s"}`}
             </button>
-            <span className="max-w-md text-xs text-neutral-500">
+            <span className="max-w-md text-xs text-bark-500">
               Each one writes a measurement delta — the estimate it replaced
               is kept, not overwritten. Tick <em>measured</em> without
               changing a number to record that the estimate was right.
@@ -279,7 +279,7 @@ export function ConfirmQuantities({
       )}
 
       {error && (
-        <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-800">{error}</p>
+        <p className="rounded-lg bg-clay-50 px-3 py-2 text-sm text-clay-800">{error}</p>
       )}
     </div>
   );
@@ -323,13 +323,13 @@ export function IssueFinalQuote({
         type="button"
         onClick={issue}
         disabled={disabled || busy}
-        className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-emerald-500 disabled:bg-neutral-300"
+        className="inline-flex min-h-11 items-center rounded-lg bg-canopy-700 px-4 text-sm font-medium text-white shadow-e1 transition-colors hover:bg-canopy-800 disabled:cursor-not-allowed disabled:bg-bark-300 disabled:shadow-none"
       >
         {busy ? "Issuing…" : "Issue final quote"}
       </button>
-      <p className="text-xs text-neutral-500">{reason}</p>
+      <p className="text-xs text-bark-600">{reason}</p>
       {error && (
-        <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-800">{error}</p>
+        <p className="rounded-lg bg-clay-50 px-3 py-2 text-sm text-clay-800">{error}</p>
       )}
     </div>
   );

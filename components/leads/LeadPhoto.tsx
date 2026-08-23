@@ -3,17 +3,13 @@
  * Server-rendered: plain SVG polygons in percent coordinates, no
  * interactivity — the rep is reviewing the design, not editing it.
  */
+import { KIND_COLORS } from "@/components/configurator/regionColors";
 import { getOption } from "@/lib/catalog/options";
 import type { RegionSelection } from "@/lib/design/types";
-import type { RegionKind, SegmentedRegion } from "@/lib/vision/types";
+import type { SegmentedRegion } from "@/lib/vision/types";
 import { REGION_KIND_LABELS } from "@/lib/vision/types";
 
-const KIND_COLORS: Record<RegionKind, string> = {
-  turf: "#22c55e",
-  bed: "#b45309",
-  hardscape: "#64748b",
-  foundation_planting: "#0ea5e9",
-};
+
 
 function centroid(polygon: [number, number][]): [number, number] {
   let x = 0;
@@ -35,9 +31,9 @@ export function LeadPhoto({
   selections: Record<string, RegionSelection>;
 }) {
   return (
-    <div className="relative overflow-hidden rounded-xl bg-neutral-900">
+    <div className="relative min-w-0 overflow-hidden rounded-xl bg-bark-900">
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={photoUrl} alt="Customer's yard" className="block w-full select-none" />
+      <img src={photoUrl} alt="The customer's yard, with the segmented regions outlined." className="block w-full max-w-full select-none" />
       <svg
         className="absolute inset-0 h-full w-full"
         viewBox="0 0 100 100"

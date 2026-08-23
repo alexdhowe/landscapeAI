@@ -3,6 +3,10 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 
+import { Button } from "@/components/ui/Button";
+import { Callout } from "@/components/ui/Card";
+import { Field } from "@/components/ui/Field";
+
 /**
  * The contractor sign-in form.
  *
@@ -43,54 +47,40 @@ export function LoginForm({ next }: { next: string }) {
 
   return (
     <form onSubmit={onSubmit} className="space-y-4">
-      <div>
-        <label
-          htmlFor="email"
-          className="block text-sm font-medium text-neutral-700"
-        >
-          Email
-        </label>
-        <input
-          id="email"
-          name="email"
-          type="email"
-          autoComplete="username"
-          required
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm outline-none focus:border-neutral-900"
-        />
-      </div>
-      <div>
-        <label
-          htmlFor="password"
-          className="block text-sm font-medium text-neutral-700"
-        >
-          Password
-        </label>
-        <input
-          id="password"
-          name="password"
-          type="password"
-          autoComplete="current-password"
-          required
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm outline-none focus:border-neutral-900"
-        />
-      </div>
+      <Field label="Email">
+        {(props) => (
+          <input
+            {...props}
+            name="email"
+            type="email"
+            autoComplete="username"
+            required
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+          />
+        )}
+      </Field>
+      <Field label="Password">
+        {(props) => (
+          <input
+            {...props}
+            name="password"
+            type="password"
+            autoComplete="current-password"
+            required
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+          />
+        )}
+      </Field>
       {error && (
-        <p role="alert" className="text-sm text-red-700">
+        <Callout tone="clay" role="alert">
           {error}
-        </p>
+        </Callout>
       )}
-      <button
-        type="submit"
-        disabled={busy}
-        className="w-full rounded-lg bg-neutral-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
-      >
+      <Button type="submit" tone="neutral" size="md" block disabled={busy}>
         {busy ? "Signing in…" : "Sign in"}
-      </button>
+      </Button>
     </form>
   );
 }

@@ -69,7 +69,7 @@ function Form({
     setDraft({ ...draft, [key]: e.target.value });
 
   return (
-    <div className="space-y-3 rounded-lg border border-neutral-300 bg-neutral-50 p-4">
+    <div className="space-y-3 rounded-lg border border-bark-300 bg-bark-50 p-4">
       <div className="grid gap-3 sm:grid-cols-3">
         {isNew && (
           <Field label="SKU id">
@@ -141,7 +141,7 @@ function Form({
           type="button"
           onClick={onSave}
           disabled={busy || draft.id.trim() === "" || draft.name.trim() === ""}
-          className={`${button} bg-neutral-900 text-white hover:bg-neutral-700`}
+          className={`${button} bg-bark-900 text-white shadow-e1 hover:bg-bark-800`}
         >
           Save to draft
         </button>
@@ -149,7 +149,7 @@ function Form({
           type="button"
           onClick={onCancel}
           disabled={busy}
-          className={`${button} border border-neutral-300 text-neutral-700`}
+          className={`${button} border border-bark-300 bg-white text-bark-700 hover:border-bark-400 hover:bg-bark-50`}
         >
           Cancel
         </button>
@@ -192,7 +192,7 @@ export function CostItems({
             setEditing(null);
           }}
           disabled={busy || adding}
-          className={`${button} border border-neutral-300 text-neutral-700 hover:border-neutral-900`}
+          className={`${button} border border-bark-300 bg-white text-bark-700 hover:border-bark-400 hover:bg-bark-50`}
         >
           Add cost item
         </button>
@@ -212,7 +212,7 @@ export function CostItems({
         <div className="overflow-x-auto">
           <table className="w-full min-w-[640px] text-left text-sm">
             <thead>
-              <tr className="border-b border-neutral-200 text-xs uppercase tracking-wide text-neutral-400">
+              <tr className="border-b border-bark-200 text-xs uppercase tracking-wide text-bark-500">
                 <th className="py-2 pr-3 font-medium">SKU</th>
                 <th className="py-2 pr-3 font-medium">Name</th>
                 <th className="py-2 pr-3 font-medium">Kind</th>
@@ -239,18 +239,18 @@ export function CostItems({
                     </td>
                   </tr>
                 ) : (
-                  <tr key={item.id} className="border-b border-neutral-100">
-                    <td className="py-2 pr-3 font-mono text-xs text-neutral-500">{item.id}</td>
-                    <td className="py-2 pr-3 text-neutral-800">{item.name}</td>
-                    <td className="py-2 pr-3 text-neutral-500">{item.kind}</td>
-                    <td className="py-2 pr-3 text-neutral-500">{item.unit}</td>
-                    <td className="py-2 pr-3 text-right tabular-nums text-neutral-800">
+                  <tr key={item.id} className="border-b border-bark-100">
+                    <td className="py-2 pr-3 font-mono text-xs text-bark-500">{item.id}</td>
+                    <td className="py-2 pr-3 text-bark-800">{item.name}</td>
+                    <td className="py-2 pr-3 text-bark-500">{item.kind}</td>
+                    <td className="py-2 pr-3 text-bark-500">{item.unit}</td>
+                    <td className="py-2 pr-3 text-right tabular-nums text-bark-800">
                       {usd(item.unitCost)}
                     </td>
-                    <td className="py-2 pr-3 text-right tabular-nums text-neutral-500">
+                    <td className="py-2 pr-3 text-right tabular-nums text-bark-500">
                       {item.burdenPct === undefined ? "—" : `${item.burdenPct}%`}
                     </td>
-                    <td className="py-2 pr-3 text-right tabular-nums text-neutral-500">
+                    <td className="py-2 pr-3 text-right tabular-nums text-bark-500">
                       {item.wasteFactorPct === undefined ? "—" : `${item.wasteFactorPct}%`}
                     </td>
                     <td className="py-2 text-right whitespace-nowrap">
@@ -262,7 +262,7 @@ export function CostItems({
                           setAdding(false);
                         }}
                         disabled={busy}
-                        className="text-xs text-neutral-600 underline hover:text-neutral-900"
+                        className="text-xs text-bark-600 underline hover:text-bark-900"
                       >
                         Edit
                       </button>
@@ -272,7 +272,7 @@ export function CostItems({
                           send(`/api/pricebook/cost-items/${encodeURIComponent(item.id)}`, "DELETE")
                         }
                         disabled={busy}
-                        className="ml-3 text-xs text-red-700 underline hover:text-red-900"
+                        className="ml-3 text-xs text-clay-700 underline hover:text-clay-900"
                       >
                         Delete
                       </button>

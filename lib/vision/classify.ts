@@ -6,21 +6,9 @@
 import Anthropic from "@anthropic-ai/sdk";
 
 import { demoSegmentation } from "./demo";
+import type { VisionImageMediaType } from "./mediaTypes";
 import { parseSegmentation } from "./parse";
 import type { SegmentationResult } from "./types";
-
-export type SupportedImageMediaType =
-  | "image/jpeg"
-  | "image/png"
-  | "image/gif"
-  | "image/webp";
-
-export const SUPPORTED_IMAGE_MEDIA_TYPES: SupportedImageMediaType[] = [
-  "image/jpeg",
-  "image/png",
-  "image/gif",
-  "image/webp",
-];
 
 const SEGMENTATION_PROMPT = `You are analyzing a homeowner's photo of their yard for a landscape design tool.
 
@@ -72,7 +60,7 @@ export function hasVisionCredentials(): boolean {
  */
 export async function classifyPhoto(
   imageData: Buffer,
-  mediaType: SupportedImageMediaType,
+  mediaType: VisionImageMediaType,
 ): Promise<SegmentationResult> {
   if (!hasVisionCredentials()) {
     return demoSegmentation();
