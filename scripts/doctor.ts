@@ -22,6 +22,10 @@ import { cleanKey, looksLikeAnthropicKey } from "../lib/vision/credentials";
 const ROOT = process.cwd();
 const ENV_FILE = path.join(ROOT, ".env.local");
 
+/** The public prefix and the tail, never the middle. */
+const preview = (key: string) =>
+  key.length <= 20 ? `"${key}"` : `"${key.slice(0, 12)}…${key.slice(-4)}"`;
+
 const ok = (m: string) => console.log(`  ✓ ${m}`);
 const bad = (m: string) => console.log(`  ✗ ${m}`);
 const info = (m: string) => console.log(`    ${m}`);
@@ -93,10 +97,32 @@ async function main() {
       "Replace it with a real key from console.anthropic.com, then restart the server.",
     );
   } else {
-    ok(`Set — ${apiKey.length} characters`);
-    if (!looksLikeAnthropicKey(apiKey)) {
-      info("Note: it does not look like an Anthropic key (they start with 'sk-ant-' and are long).");
-      info("Fine if you are pointing at a gateway; suspicious if you are not.");
+    ok(`Set — ${apiKey.length} characters, starts with ${preview(apiKey)}`);
+
+    // The prefix is public information — it is the part of a key you can
+    // read off the console screen — and showing it is what turns "the API
+    // said no" into "you pasted the wrong thing".
+    const nonAscii = apiKey.match(/[^\x20-\x7e]/g);
+    if (nonAscii) {
+      fail(
+        `The key contains ${nonAscii.length} character(s) that are not plain text — likely curly quotes from TextEdit.`,
+        "TextEdit → Edit → Substitutions → turn OFF Smart Quotes, then re-paste. Or edit with `nano .env.local` instead.",
+      );
+    } else if (/^["'\`]/.test(apiKey)) {
+      fail(
+        "The key starts with a quote character that is not a matching pair.",
+        "Remove the quotes around the key in .env.local — it needs none.",
+      );
+    } else if (/^sk-proj-|^sk-[A-Za-z0-9]{20}/.test(apiKey) && !apiKey.startsWith("sk-ant-")) {
+      fail(
+        "That looks like an OpenAI key, not an Anthropic one.",
+        "Anthropic keys start with 'sk-ant-' and come from console.anthropic.com → API keys.",
+      );
+    } else if (!looksLikeAnthropicKey(apiKey)) {
+      fail(
+        "It does not look like an Anthropic key — those start with 'sk-ant-'.",
+        "Copy the whole key from console.anthropic.com → API keys (it is only shown once, at creation). Fine to ignore if you are deliberately pointing at a gateway.",
+      );
     }
   }
 
