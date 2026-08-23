@@ -1,6 +1,25 @@
+import type { Metadata } from "next";
+
 import { ButtonLink } from "@/components/ui/Button";
 import { Wordmark } from "@/components/ui/Wordmark";
 import Link from "next/link";
+
+/**
+ * The one page that is meant to be found.
+ *
+ * The root layout sets `robots: { index: false }` for the whole app and
+ * that stays right for everything else: every customer URL past this point
+ * is an unguessable project UUID (indexing one would publish a stranger's
+ * photograph and contact details) and the console is private. This page is
+ * marketing — it names the product, describes what it does, and holds the
+ * button that starts the funnel — so it is the one surface that should be
+ * findable. `app/robots.ts` says the same thing to crawlers at the site
+ * level; this says it per page, and the two agree deliberately.
+ */
+export const metadata: Metadata = {
+  robots: { index: true, follow: true },
+  alternates: { canonical: "/" },
+};
 
 /**
  * The front door. Mobile-first like every customer surface: one promise,

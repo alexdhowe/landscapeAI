@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 
+import { locateEnabled } from "@/lib/locate/gate";
 import { assertValidRing, measureRing, ringAreaSf } from "@/lib/measure/area";
 import {
   ProjectLockedError,
@@ -26,6 +27,7 @@ const MIN_AREA_SF = 1;
  * re-posting replaces it.
  */
 export async function POST(request: Request, { params }: Params) {
+  if (!locateEnabled()) return gatedOff();
   const { projectId } = await params;
   let body: { photoRegionId?: unknown; ring?: unknown };
   try {
@@ -95,6 +97,7 @@ export async function POST(request: Request, { params }: Params) {
 
 /** DELETE ?photoRegionId=… → the project with that measurement removed. */
 export async function DELETE(request: Request, { params }: Params) {
+  if (!locateEnabled()) return gatedOff();
   const { projectId } = await params;
   const photoRegionId = new URL(request.url).searchParams.get("photoRegionId");
   if (!photoRegionId) {
@@ -114,4 +117,15 @@ export async function DELETE(request: Request, { params }: Params) {
     }
     throw error;
   }
+}
+
+/**
+ * The aerial leg is licensed, not built: with the imagery or geocoder
+ * terms undeclared, these routes do not exist. A measurement is the one
+ * thing this product sells, so drawing one on tiles whose licence forbids
+ * deriving and selling measurements is the failure mode to design out —
+ * not a warning in a README. See lib/locate/gate.ts.
+ */
+function gatedOff() {
+  return NextResponse.json({ error: "Not found" }, { status: 404 });
 }

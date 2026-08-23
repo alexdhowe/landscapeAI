@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { geocodeAddress } from "@/lib/geo/geocode";
+import { locateEnabled } from "@/lib/locate/gate";
 
 /**
  * POST { query } → { candidates, source }.
@@ -10,6 +11,13 @@ import { geocodeAddress } from "@/lib/geo/geocode";
  * not stored until the customer confirms a candidate via project PATCH.
  */
 export async function POST(request: Request) {
+  // The aerial leg is gated on two licensing decisions, and this route is
+  // part of it — hiding the page while leaving the geocoder open would be
+  // a gate in name only. See lib/locate/gate.ts.
+  if (!locateEnabled()) {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+
   let body: { query?: unknown };
   try {
     body = await request.json();

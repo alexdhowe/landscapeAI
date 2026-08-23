@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
+import { notFound } from "next/navigation";
 
 import { LocateFlow } from "@/components/locate/LocateFlow";
+import { locateEnabled } from "@/lib/locate/gate";
 
 export const metadata: Metadata = {
   title: "Measure your yard",
@@ -14,6 +16,10 @@ export default async function LocatePage({
   params: Promise<{ projectId: string }>;
 }) {
   const { projectId } = await params;
+  // The aerial leg is licensed, not built: until the imagery and geocoder
+  // terms are declared, this surface does not exist. See lib/locate/gate.ts
+  // — the customer keeps their design and a typology band without it.
+  if (!locateEnabled()) notFound();
   return (
     <main className="mx-auto w-full max-w-6xl flex-1 px-4 pb-12 pt-5 sm:px-6 sm:pt-8">
       <header className="mb-4 sm:mb-6">

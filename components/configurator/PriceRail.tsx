@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/Badge";
 import { ButtonLink } from "@/components/ui/Button";
 import { Callout, Card } from "@/components/ui/Card";
 import { Skeleton } from "@/components/ui/Skeleton";
+import { locateEnabled } from "@/lib/locate/gate";
 
 import { BandMeter } from "./BandMeter";
 
@@ -76,6 +77,11 @@ export function PriceRail({
 }) {
   const band = payload?.band ?? null;
   const measured = band?.basis === "measured";
+  // The aerial leg is licensed, not built. With the imagery or geocoder
+  // terms undeclared there is nothing to send a customer to, so the call
+  // to action is absent rather than broken — the band stays at typology
+  // width and the rest of the funnel is unchanged. See lib/locate/gate.ts.
+  const aerial = locateEnabled();
 
   return (
     <Card className="p-4 sm:p-5">
@@ -203,7 +209,7 @@ export function PriceRail({
             </ul>
           )}
 
-          {locked ? null : measured ? (
+          {locked || !aerial ? null : measured ? (
             <ButtonLink
               href={`/design/${projectId}/locate`}
               tone="ghost"

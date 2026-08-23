@@ -10,9 +10,14 @@ export default defineConfig({
   test: {
     include: ["lib/**/__tests__/**/*.test.ts"],
     environment: "node",
-    // Creates and drops a disposable Postgres schema when DATABASE_URL is
-    // set; a no-op without one.
+    // Names the run and sweeps up after it when DATABASE_URL is set; a
+    // no-op without one.
     globalSetup: ["./vitest.globalSetup.ts"],
+    // Gives each test file its own migrated, seeded schema when
+    // DATABASE_URL is set. Per file rather than per run: two files that
+    // disagree about global state must not depend on which worker runs
+    // them. A no-op without one.
+    setupFiles: ["./vitest.setup.ts"],
     // PGlite compiles Postgres to wasm on first use, and a cold Postgres
     // round trip is slower than a JSON file write.
     testTimeout: 30_000,

@@ -26,18 +26,26 @@ not negotiable.
 | Photo storage — S3-compatible | ✅ done — `lib/storage`, bucket or local, migration 0004 |
 | Design system | ✅ done — tokens in `app/globals.css`, one font pairing, primitives, loading/empty/error states |
 | Photos off an iPhone | ✅ done — HEIC → JPEG, EXIF orientation baked in, GPS stripped, long edge capped |
+| Rate limiting | ✅ done — per-IP token buckets at the app's edge, tightest on upload and vision |
+| Deployment configuration | ✅ done — Dockerfile, `fly.toml`, `docs/deploy.md`. **Not yet deployed** — see below |
+| The aerial leg (`/design/[id]/locate`) | ⛔ gated off — waits on the imagery and geocoder licences |
 
 All six phases are in, they run on Postgres, the contractor console is behind
 a login, the price book is editable, photos live in object storage when a
 bucket is configured, and the whole thing has been designed and opened on a
-phone. `npm test` runs 336 tests — with a database and without one.
+phone. `npm test` runs 380 tests — with a database and without one.
 
-One gap is left from section 3 and it is not a coding gap: `/api/imagery`
-waits on the **imagery provider decision**, which is a licensing question —
-some tile licences prohibit deriving and reselling measurements, which is
-exactly this product. `lib/imagery/provider.ts` is the shape that decision
-will land in; the current Esri demo tiles sit behind it, flagged
-`unreviewed`.
+**It has not been deployed.** The tenth session wrote the configuration —
+[`docs/deploy.md`](./docs/deploy.md) is the runbook, `Dockerfile` and
+`fly.toml` are the artifact — closed the one code gap that made deploying
+irresponsible (nothing throttled ten anonymous API routes), and verified
+the production build end to end locally. It had no cloud account, no
+domain and no Anthropic key, so the deploy itself, the measurement of the
+vision call and the acceptance run from a real phone are the next hands-on
+step. See [three decisions that gate the launch](#three-decisions-that-gate-the-launch)
+for what must be answered first, and
+[putting it in front of people](#putting-it-in-front-of-people) for what
+changed.
 
 ## Stack
 
@@ -49,7 +57,7 @@ store, so a clean checkout runs the demo with nothing to provision.
 ## Commands
 
 ```sh
-npm test          # Vitest — 336 tests across every phase. No server, no network, no browser.
+npm test          # Vitest — 380 tests across every phase. No server, no network, no browser.
 npm run typecheck
 npm run dev
 npm run build
@@ -66,7 +74,199 @@ npm run db:setup      # migrate + seed
 npm run db:user -- --email sam@example.com --name "Sam Rep"   # a contractor login
 ```
 
-See `.env.example` for what is configurable. All of it is optional.
+See `.env.example` for what is configurable — all of it optional for local
+work, and not for a deployment: [`docs/deploy.md`](./docs/deploy.md) says
+which variables a production instance cannot open without.
+
+## Three decisions that gate the launch
+
+None of these is a coding decision, all three were researched rather than
+guessed at, and none of them is answered here.
+
+**1. The imagery licence — project-map §3 calls it "the real one."** Some
+tile licences prohibit deriving and reselling measurements, which is
+precisely what the aerial leg does. The Esri World Imagery tiles the map
+draws today are flagged `unreviewed` in `lib/imagery/provider.ts` — nobody
+has read Esri's terms against this use — and Nearmap and Vexcel are the
+candidates that licence derivative measurement cleanly, per property.
+**Until a licence is declared `permitted`, `/design/[projectId]/locate` does
+not go live**, and that is now enforced rather than noted: see
+[the aerial leg is licensed, not built](#the-aerial-leg-is-licensed-not-built).
+
+**2. The geocoder.** `lib/geo/geocode.ts` is Nominatim, whose usage policy
+does not cover production commercial traffic — it asks for a single thread,
+attribution, and no heavy or commercial use of the public endpoint. Mapbox
+and Google are the paid candidates §3 names. Same class of decision, same
+surface, and it gates the same leg.
+
+**3. `libheif-js` is LGPL-3.0**, and it decodes every iPhone photo. What was
+actually checked, rather than assumed:
+
+- The dependency chain is `heic-decode` (ISC) → `libheif-js` (LGPL-3.0), a
+  prebuilt Emscripten build of libheif. The bundled `LICENSE` is the LGPL-3
+  text plus the GPL-3 it incorporates by reference, plus MIT for the sample
+  wrappers.
+- **What is actually compiled into the wasm matters and was inspected.**
+  The bundle contains libheif and **libde265** — both LGPL-3.0 — and
+  contains no `x265`, no `libaom`, no `dav1d`. That is the good case: x265
+  is GPL-2.0, and had the encoder been in there the analysis would be a
+  different one.
+- **The obligation turns on distribution, and there is none.** LGPL-3.0
+  attaches its conditions to *conveying* the work. Running it on your own
+  server for network users is not conveying — that is what the AGPL adds
+  and the LGPL does not — so a hosted deployment triggers no source-
+  provision obligation. The library is used **unmodified** and resolved at
+  runtime, so §2's modification terms do not bite either.
+- **What is conveyed to a browser: nothing.** The decoder is loaded lazily,
+  server-side, in the upload route (`lib/image/normalize.ts`), and the
+  session that added it rejected in-browser decoding on latency grounds.
+  That decision is now also the thing keeping this analysis simple, and it
+  is worth not reversing casually: shipping the wasm to browsers *is*
+  conveying, and §4 would then require notices and a way for a recipient to
+  relink or replace the library.
+- **What would change the answer:** shipping a self-hosted or on-prem build
+  to a contractor, an Electron or native app that bundles it, or moving
+  decode into the browser. Any of those makes §4 apply.
+- **A separate question the licence does not cover:** HEVC is patent
+  encumbered, which is why sharp's prebuilt binaries ship without HEIF at
+  all. Patent licensing for decoding HEVC server-side is a commercial
+  question for whoever signs, not a copyright one, and no amount of reading
+  the LGPL answers it.
+
+The practical reading is that this is fine as deployed and cheap to keep
+fine: keep the decode server-side, keep the library unmodified, and keep
+the licence files that ship in the package. But it wants a real answer from
+someone with authority before real customers' photos go through it, which
+is the same standing as the two licences above.
+
+## Putting it in front of people
+
+The tenth session added no features. It closed the one gap that made
+deploying irresponsible, wrote the deployment artifact, and found two bugs
+that only exist in a production build.
+
+### Ten anonymous routes, and nothing metered
+
+Anonymous is correct — §2's thesis is no address and no form, and
+`lib/storage/index.ts` documents why the customer photo read is open to
+whoever holds the project UUID. Anonymous *plus unmetered* was the problem:
+`POST /api/projects` accepts 25 MB and then spends ~1.5 s of CPU-bound,
+pure-JavaScript image decode on it, `POST /api/vision` spends a metered
+Anthropic call, and a loop over either needs no skill to write.
+
+`lib/ratelimit/` is per-IP token buckets, checked in `middleware.ts`
+**before a handler sees the request** — which is the whole point of putting
+it at the edge: a refusal never buffers the body and never wakes the
+decoder. A limit inside the handler would have paid most of the bill before
+saying no.
+
+- **Burst and sustained are separate numbers.** A customer taps six things
+  in three seconds and then stops; a limiter modelling only the sustained
+  rate either refuses that customer or lets an attacker run flat out.
+- **Budgets are a table with tests** (`lib/ratelimit/policy.ts`), tightest
+  on upload and vision, comfortable on `/api/price` because it fires on
+  every material swap, and each route in its own namespace so spending one
+  budget never spends another.
+- **A refusal costs no token**, so a retry loop cannot push its own recovery
+  further away. `Retry-After` says when to come back and the body says
+  nothing else — a limiter that explains itself can be measured and stepped
+  around.
+- **Which header the address comes from is the security decision**, not a
+  detail: a header the client can set is a budget the client can reset.
+  Single-valued proxy headers first, `x-forwarded-for` leftmost as the
+  fallback (the *rightmost* entry behind a CDN is the CDN, and bucketing on
+  it would put every customer in the world in one bucket), IPv6 bucketed by
+  /64 because that is the subscriber. Set
+  `RATE_LIMIT_CLIENT_IP_HEADER` in production and it stops guessing.
+- **Memory is bounded** — least-recently-seen keys are evicted, so a flood
+  from many addresses cannot turn the limiter into the leak.
+- **Not distributed, deliberately.** State is per instance, so *N* machines
+  multiply every budget by *N*: a factor of two on two machines, and a
+  reason to reach for the platform's own limiter (or Cloudflare's) before
+  reaching for a Redis. `docs/deploy.md` §10 has the order to try things in.
+- **Tested in process**, no server and no network, the way the rest of the
+  suite works: `lib/ratelimit/__tests__/middleware.test.ts` hammers the real
+  middleware and asserts that it sheds load, that a second address is
+  unaffected mid-flood, and that one customer's whole session — upload,
+  segment, twelve swaps, draw, submit — never touches a limit.
+
+Verified against the production build as well: six uploads then `429` with
+`Retry-After: 20`, eight vision calls then `429`, a second address unaffected,
+the health check and the landing page untouched.
+
+**Anonymity was not weakened to get there.** A login on `/start` would
+delete the product.
+
+### The aerial leg is licensed, not built
+
+`lib/locate/gate.ts` turns the two licensing decisions above into a gate.
+Until both the imagery and geocoder terms are declared `permitted`,
+`/design/[projectId]/locate` redirects back to the design, `POST
+/api/geocode` and the drawing routes answer 404, and the price rail does not
+offer the button. Anything unrecognised — including unset — is `unreviewed`,
+which is off; there is deliberately no way to force the leg on without
+naming a term somebody signed.
+
+The rest of the funnel does not need it, and that is asserted rather than
+assumed: `lib/locate/__tests__/gate.test.ts` drives a design, a typology
+band, a declined address and a submitted lead with the leg gated off, and
+checks the frozen snapshot leaks nothing.
+
+### Two bugs that only exist in a production build
+
+Both were found by running the real artifact rather than the test suite,
+and both would have been live on day one.
+
+- **Every redirect in `middleware.ts` pointed at `localhost`.** In a
+  self-hosted Next server the URL middleware sees is built from the
+  process's own hostname and port, not from the `Host` header the browser
+  sent, so the documented `NextResponse.redirect(new URL(path, request.url))`
+  produces `Location: http://localhost:8080/login` behind any proxy. The
+  signed-out console redirect had been carrying this since the auth
+  session. Both redirects now reconstruct the host from the request.
+- **One matcher entry with a named parameter matched every path in the
+  app.** Adding `"/design/:projectId/locate"` to the middleware matcher made
+  Next hand the middleware every request, and everything it did not
+  recognise fell through to the console's login redirect — including the
+  landing page, which redirected to `/login`, which redirected to `/login`.
+  `npm run shots` caught it in one run (`ERR_TOO_MANY_REDIRECTS`) and the
+  unit tests could not, because they call the middleware directly and never
+  see the matcher. The fix is both halves: matcher entries name a subtree
+  and nothing else, and the middleware now decides what is console by an
+  explicit prefix list, so it is correct even when handed a path it was not
+  meant to see.
+
+### What ships and where
+
+- `Dockerfile` — three stages, `output: "standalone"`, no `node_modules` in
+  the runtime image, running as a non-root user. Nothing in it is
+  Fly-specific: it is `node server.js` on `$PORT`.
+- `fly.toml` — Fly.io, Chicago, one always-on machine (auto-stop would spend
+  part of the thirty seconds on a cold start), 2 GB because
+  `lib/image/limits.ts` admits an 80-megapixel photo, and concurrency limits
+  that tell the truth about a decode that blocks the event loop for 1.5 s.
+- **Why not Vercel**, the obvious answer for a Next app: its serverless
+  functions cap a request body at 4.5 MB and `MAX_UPLOAD_BYTES` is 25 MB.
+  The iPhone upload path — the entry to the whole funnel — would fail
+  outright. Checked before committing to a platform, which is the only time
+  that number is cheap to discover.
+- `package.json` now pins `engines.node` and `packageManager`; there is a
+  `.nvmrc`. The deployment should not discover its Node version by accident.
+- `app/api/health/route.ts` — liveness only, deliberately shallow, and
+  exempt from rate limiting so a flood cannot make the deployment look
+  unhealthy and get itself restarted.
+- `next.config.ts` — `X-Frame-Options`, `nosniff`, a referrer policy and
+  HSTS. A real Content-Security-Policy is written down as a gap rather than
+  half-added.
+- **Indexing:** `/` is indexable and everything else stays `noindex`
+  (`app/robots.ts` and the per-page metadata agree). A `/design/<uuid>` in a
+  search index is a privacy incident, not a ranking problem; a marketing
+  page nobody can find is not in front of real people.
+- [`docs/deploy.md`](./docs/deploy.md) — the runbook: what to provision,
+  what has to be set, the first deploy in order, backups and a restore
+  drill (`measurement_deltas` is the one loss this product cannot absorb),
+  where logs go, and the smoke tests to run against the deployment before
+  anyone is given the address.
 
 ## The photo experience (Phase 2)
 
@@ -215,6 +415,16 @@ on it, if it turns out to be tight, is `lib/vision/classify.ts`: the model and
 the size of the JSON the prompt asks for. Segmentation quality against
 latency is a product decision and this session did not make it.
 
+**It is still not measured.** The deployment session had no
+`ANTHROPIC_API_KEY` either, and no deployed instance to point at, so the
+table above is unchanged and still excludes the model call. What that
+session *could* confirm is that nothing it changed moved the rest of the
+number: `npm run shots` against the production standalone build is clean —
+no horizontal scroll, no tap target under 44px, no page errors — and the
+funnel still runs end to end with rate limiting armed and the aerial leg
+gated off. The command to close the gap, against the deployment and then
+from a real phone on cellular, is in `docs/deploy.md` §9.
+
 **The wait is designed rather than papered over.** A band of light travels
 down the customer's own photograph while the model reads it, with placeholder
 chips in the shape of the labels that are coming; the local copy of the photo
@@ -302,7 +512,10 @@ no build step. Both are still true.
   LGPL-3.0 dependency is worth a licence review before this ships** — it is
   used unmodified and resolved at runtime, which is the ordinary dynamic-
   linking reading, but that is a call for somebody with authority to make it,
-  the same as the imagery decision.
+  the same as the imagery decision. The deployment session inspected what is
+  actually in the wasm and what the licence attaches to; the findings are in
+  [three decisions that gate the launch](#three-decisions-that-gate-the-launch),
+  and they are findings, not the decision.
 - **Converting in the browser was considered and rejected on the thirty
   seconds.** Every in-browser HEIC decoder is the same libheif wasm build, and
   it would have to reach the phone *before* the first upload could start, over
@@ -349,6 +562,10 @@ is chosen the browser's own copy of it fills the screen, dimmed, with the
 segmentation sweep already running.
 
 ## The aerial measurement layer (Phase 3)
+
+**Gated off until the imagery and geocoder licences are declared** — see
+[the aerial leg is licensed, not built](#the-aerial-leg-is-licensed-not-built).
+Everything below is built and tested; it is simply not served yet.
 
 From the design page, "Add your address" leads to
 `/design/[projectId]/locate`: geocode → MapLibre over satellite raster
@@ -637,6 +854,13 @@ that assumption is wrong, the fix is a per-project token required by **every**
 customer-facing project route, not by this one. The contractor split is what
 makes that change cheap: the console is already off the open route.
 
+**Raised again before launch, and unchanged.** That reasoning was written
+when the only photos in existence were generated test fixtures, and the next
+photo through this path is of somebody's actual house. The deployment session
+put the assumption back in front of the owner rather than quietly
+re-affirming it or quietly changing it — neither read moved while the
+deployment was wired up.
+
 ### Tests need no bucket
 
 `lib/storage/__tests__/fakeBucket.ts` is an S3-compatible bucket in process —
@@ -658,6 +882,11 @@ turns on — `derivativeMeasurements: 'unreviewed' | 'prohibited' | 'permitted'`
 — and the Esri demo tiles the map draws today are `unreviewed`. Nothing
 assumes a licence nobody declared: an unrecognised value is `unreviewed`, not
 a yes. When a licence is signed it is a constant in that file.
+
+`lib/locate/gate.ts` is what now *acts* on that field, together with the
+geocoder's own declaration: with either undeclared, the whole aerial leg is
+off — the page redirects, the routes 404, the button is absent. The seam
+held the shape of the decision; the gate holds the deployment to it.
 
 ## The database
 
@@ -733,9 +962,22 @@ has.
 - With no `DATABASE_URL`, the store tests use throwaway temp directories and
   the database acceptance test brings up **PGlite** — Postgres compiled to
   wasm, in-process, disposable.
-- With `DATABASE_URL` set, the entire suite runs against that server inside a
-  **disposable schema** created and dropped per run
-  (`vitest.globalSetup.ts`), so a run never touches your data.
+- With `DATABASE_URL` set, the entire suite runs against that server, and
+  **each test file gets its own disposable schema** — migrated and seeded
+  exactly as `npm run db:setup` would, dropped when the file finishes
+  (`vitest.setup.ts`), with `vitest.globalSetup.ts` naming the run and
+  sweeping up after a worker that died before its own cleanup ran. A run
+  never touches your data.
+
+  It was one schema for the whole run until the deployment session, and
+  that was scheduling luck: `lib/pricebook/__tests__/api.test.ts` publishes
+  a new price book revision — that is the feature — and
+  `lib/db/__tests__/store.test.ts` asserts the org resolves to the seeded
+  book. Whether they collided depended on which worker ran them and when,
+  and adding unrelated test files to the run was enough to lose the coin
+  toss. A suite whose result depends on scheduling is not a suite, and the
+  alternative fix — weakening the assertion until the two files stop
+  disagreeing — would have deleted the thing being asserted.
 
 Either way `lib/db/__tests__/store.test.ts` drives the phase 5 and phase 6
 acceptance paths through the real route handlers — submit a lead, correct a

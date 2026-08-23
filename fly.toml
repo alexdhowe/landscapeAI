@@ -1,0 +1,71 @@
+# Fly.io, chosen in docs/deploy.md — read the "why this host" section there
+# before changing anything in this file; most of these numbers are a
+# consequence of what lib/image/normalize.ts does to a 12-megapixel photo.
+#
+# Rename the app before the first deploy: `fly launch --no-deploy` writes a
+# name of its own, or set one here.
+
+app = "landscapeai"
+primary_region = "ord"   # Chicago — nearest region to the Wisconsin service area.
+
+[build]
+  dockerfile = "Dockerfile"
+
+  # NEXT_PUBLIC_* are inlined into the client bundle at build time, so they
+  # belong here and not in [env]. Uncomment and fill in your own values;
+  # `fly deploy --build-arg NAME=value` works too. The two licence
+  # declarations gate the aerial leg (lib/locate/gate.ts) and default to
+  # "unreviewed", which is off — declare only a term you have signed.
+  # [build.args]
+  #   NEXT_PUBLIC_SITE_URL = "https://your-hostname"
+  #   NEXT_PUBLIC_SATELLITE_TILE_URL = ""
+  #   NEXT_PUBLIC_SATELLITE_ATTRIBUTION = ""
+  #   NEXT_PUBLIC_SATELLITE_LICENCE = "unreviewed"
+  #   NEXT_PUBLIC_GEOCODER_LICENCE = "unreviewed"
+
+[env]
+  PORT = "8080"
+  # The one header fly-proxy writes the caller's real address into. The
+  # limiter refuses to guess when this is set: see lib/ratelimit/client.ts.
+  # Behind Cloudflare this becomes "cf-connecting-ip".
+  RATE_LIMIT_CLIENT_IP_HEADER = "fly-client-ip"
+
+# Everything secret — AUTH_SECRET, DATABASE_URL, the four S3 variables,
+# ANTHROPIC_API_KEY — is set with `fly secrets set` and is deliberately
+# absent from this file. See docs/deploy.md.
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_start_machines = true
+
+  # NOT auto_stop_machines. §2's thesis is a customer playing inside thirty
+  # seconds of landing, and a cold start would be spent before the page
+  # renders — the one budget this product cannot borrow from.
+  auto_stop_machines = false
+  min_machines_running = 1
+
+  [http_service.concurrency]
+    # Normalising a 12 MP HEIC is ~1.5 s of CPU-bound, pure-JS work that
+    # blocks the event loop for its duration, so a machine's useful
+    # concurrency is small and honest numbers here are what make the proxy
+    # queue instead of the app time out.
+    type = "requests"
+    soft_limit = 6
+    hard_limit = 12
+
+  [[http_service.checks]]
+    interval = "15s"
+    timeout = "5s"
+    grace_period = "20s"
+    method = "GET"
+    path = "/api/health"
+
+[[vm]]
+  # 2 GB is sized on the decode, not on Next: lib/image/limits.ts admits up
+  # to 80 megapixels, and an RGB buffer for one of those is ~240 MB before
+  # the JPEG encoder allocates its own. shared-cpu is burstable; if p95
+  # upload latency drifts under real traffic, "performance-1x" is the
+  # dedicated-CPU version of this line and the first thing to try.
+  size = "shared-cpu-2x"
+  memory = "2gb"
