@@ -106,8 +106,14 @@ its dashboard.
 Nothing here runs on your machine. Roughly 30 minutes, most of it signup
 forms.
 
-**1. Postgres — [neon.com](https://neon.com), no card.** Create a project,
-copy the connection string it shows you (the pooled one). Keep the tab.
+**1. Postgres — [neon.com](https://neon.com), no card.** Create a project
+and copy the connection string. **Take the direct one, not the pooled one**
+— the pooled host has `-pooler` in it, and this app opens at most five
+connections from one small instance, so there is nothing to pool. (Paste
+the pooled one anyway and it still works: `lib/db/client.ts` recognises a
+pooler and turns off named prepared statements, which is the failure that
+would otherwise look like a database fault. The direct endpoint is simply
+one less thing between you and Postgres.) Keep the tab open.
 
 **2. GitHub secrets.** In this repository → Settings → Secrets and
 variables → Actions → New repository secret:
@@ -126,7 +132,9 @@ Then delete the `CONTRACTOR_ADMIN_PASSWORD` secret. The password is now a
 scrypt hash in your database and the secret has no further use.
 
 **4. Deploy — [render.com](https://render.com), no card.** New → Blueprint →
-connect this repository → it reads `render.yaml` and asks for:
+connect this repository. Render deploys the repo's **default branch**,
+which is `claude/read-begin-execution-imfwzz` — the trunk, and where every
+session's work lands. It reads `render.yaml` and asks for:
 
 - `DATABASE_URL` — the same string.
 - `ANTHROPIC_API_KEY` — your key. Type it into Render's field; it does not
@@ -435,3 +443,9 @@ would delete the product: §2's whole thesis is no address and no form.
 - **The free tier's numbers are in §1** and are not defects to be fixed
   here: 0.1 CPU, a cold start, 512 MB, and a database with no real backup
   retention. They are what free costs.
+- **This repository is public.** Nothing secret is in it and nothing here
+  changes because of that — but `seed/pricebook.seed.ts` becomes your real
+  burden, overhead and margin figures the moment real bids replace the
+  Wisconsin placeholders, and those are the numbers project-map §1 says
+  never to show a customer. Make the repository private before that swap,
+  or keep the real book only in the database and edit it at `/pricebook`.
