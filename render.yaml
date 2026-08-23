@@ -1,0 +1,50 @@
+# Render Blueprint — the zero-cost path.
+#
+# Deploy from a browser: Render → New → Blueprint → pick this repository.
+# Render reads this file, creates the service, and asks for the values
+# marked `sync: false`. docs/deploy.md is the walkthrough, including which
+# free tiers this assumes and what they cost you in performance.
+#
+# Why Render for the free version and Fly (fly.toml) for the paid one:
+# Render's free instance needs no card, and this app cannot go on the usual
+# free target — Vercel caps a serverless request body at 4.5 MB against the
+# 25 MB this app accepts from an iPhone. What the free instance costs is
+# real and is written down in docs/deploy.md: 0.1 CPU against a photo
+# decode that wants a whole one, and a spin-down after 15 minutes of
+# inactivity that puts a cold start in front of the first visitor.
+#
+# The same Dockerfile runs on both, and on anything else that runs a
+# container.
+services:
+  - type: web
+    name: landscapeai
+    runtime: docker
+    plan: free
+    region: ohio # closest free region to the Wisconsin service area
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/health
+    envVars:
+      # Render generates this once and keeps it. Without it the app refuses
+      # to serve in production, on purpose: a predictable secret means
+      # anyone can mint a contractor session.
+      - key: AUTH_SECRET
+        generateValue: true
+
+      # Postgres connection string (Neon's free plan is the assumption in
+      # docs/deploy.md). Prompted on first deploy, never stored here.
+      - key: DATABASE_URL
+        sync: false
+
+      # Without it, segmentation falls back to a demo overlay the UI labels
+      # as such. Shipping that labelled is a demo; shipping it unlabelled
+      # would be a lie, and the label is not removable.
+      - key: ANTHROPIC_API_KEY
+        sync: false
+
+      # The public address, e.g. https://landscapeai.onrender.com. Render
+      # turns service environment variables into Docker build arguments, so
+      # this reaches the build — which is where it has to be, because the
+      # <head> and robots.txt are prerendered (lib/site/url.ts). Fill it in
+      # after the first deploy tells you the hostname, then redeploy.
+      - key: SITE_URL
+        sync: false

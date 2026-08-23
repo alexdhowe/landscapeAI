@@ -1,0 +1,83 @@
+# Set up (or update) the production database from a browser.
+#
+# This deployment has no laptop in it: the schema, the seed price book and
+# the first contractor account all have to be created from somewhere that
+# is not a developer's machine, and this is that somewhere. Run it from
+# GitHub → Actions → "Database setup" → "Run workflow".
+#
+# It is safe to re-run. Migrations replay only what has not been applied,
+# and the seed refuses to overwrite an org that already exists — by then
+# its price book has almost certainly moved on at /pricebook.
+#
+# Secrets it needs (Settings → Secrets and variables → Actions):
+#   DATABASE_URL                the Postgres connection string
+#   CONTRACTOR_ADMIN_PASSWORD   only when creating an admin; delete it after
+name: Database setup
+
+on:
+  workflow_dispatch:
+    inputs:
+      create_admin:
+        description: "Also create/update a contractor admin login"
+        type: boolean
+        default: false
+      admin_email:
+        description: "Admin email (only used when the box above is ticked)"
+        type: string
+        required: false
+      admin_name:
+        description: "Admin display name"
+        type: string
+        required: false
+
+# Two runs at once would race on the same schema.
+concurrency: database-setup
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Check the connection string is configured
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          if [ -z "$DATABASE_URL" ]; then
+            echo "::error::DATABASE_URL is not set. Add it under Settings → Secrets and variables → Actions."
+            exit 1
+          fi
+
+      - run: npm ci
+
+      - name: Apply migrations
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: npm run db:migrate
+
+      - name: Seed the price book
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: npm run db:seed
+
+      - name: Create the contractor admin
+        if: ${{ inputs.create_admin }}
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          # Read by scripts/db-user.ts only when there is no terminal to
+          # prompt at. Remove this secret once the account exists.
+          CONTRACTOR_ADMIN_PASSWORD: ${{ secrets.CONTRACTOR_ADMIN_PASSWORD }}
+        run: |
+          if [ -z "$CONTRACTOR_ADMIN_PASSWORD" ]; then
+            echo "::error::CONTRACTOR_ADMIN_PASSWORD is not set — add it as a secret, run this once, then delete it."
+            exit 1
+          fi
+          npm run db:user -- \
+            --email "${{ inputs.admin_email }}" \
+            --name "${{ inputs.admin_name }}" \
+            --role admin

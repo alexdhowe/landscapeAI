@@ -1,6 +1,8 @@
 import type { Metadata, Viewport } from "next";
 import { Fraunces, Inter } from "next/font/google";
 
+import { siteUrl } from "@/lib/site/url";
+
 import "./globals.css";
 
 /**
@@ -26,9 +28,10 @@ const TAGLINE =
   "Photograph your yard, swap what's in it, and see what projects like yours cost — before anyone visits.";
 
 export const metadata: Metadata = {
-  // Relative OG/icon URLs need a base. Configurable because the value is
-  // deployment-specific and this repo deliberately has no deploy config.
-  metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000"),
+  // Relative OG/icon URLs need a base. Resolved at request time from
+  // SITE_URL (or whatever the host already knows about itself) — see
+  // lib/site/url.ts for why the NEXT_PUBLIC_ variable alone was a trap.
+  metadataBase: new URL(siteUrl()),
   title: {
     default: `${SITE_NAME} — see what your yard could be`,
     // Every route sets its own title; this is the frame around it.

@@ -6,6 +6,14 @@
  * Prompts for the password rather than taking it as an argument, so it does
  * not end up in shell history or in `ps`. There is no self-service signup:
  * the contractor console is not a place strangers get accounts.
+ *
+ * **Without a terminal** — a CI job, which is how a deployment that owns no
+ * laptop creates its first admin — there is nothing to prompt, so the
+ * password is read from `CONTRACTOR_ADMIN_PASSWORD`. That variable is the
+ * operator's own secret, supplied for one run; it is not a default and
+ * there is still no password anywhere in this repository. The prompt is
+ * preferred whenever a terminal exists, because an environment variable is
+ * visible to every process in the job.
  */
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
@@ -55,7 +63,17 @@ async function main() {
     return;
   }
 
-  const password = await readPassword("Password: ");
+  const password = stdin.isTTY
+    ? await readPassword("Password: ")
+    : (process.env.CONTRACTOR_ADMIN_PASSWORD ?? "").trim();
+
+  if (!password) {
+    console.error(
+      "No password. With a terminal this prompts for one; without one (a CI job) set CONTRACTOR_ADMIN_PASSWORD for that run.",
+    );
+    process.exitCode = 1;
+    return;
+  }
   if (password.length < 12) {
     console.error("Password must be at least 12 characters.");
     process.exitCode = 1;

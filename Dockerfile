@@ -35,20 +35,28 @@ ENV NEXT_TELEMETRY_DISABLED=1
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
-# NEXT_PUBLIC_* values are inlined into the client bundle at BUILD time, so
-# they are build arguments and not runtime secrets — and changing one means
-# rebuilding the image, not restarting it. The aerial leg's two licence
+# These are all BUILD-time values, and none of them is a secret. The two
+# licence declarations are inlined into the client bundle; SITE_URL is
+# baked into the prerendered <head> and robots.txt (lib/site/url.ts).
+# Changing any of them means rebuilding the image, not restarting it.
+# Render converts a service's environment variables into build args with
+# the same names automatically, so on Render these are just dashboard
+# entries; elsewhere, pass them with --build-arg. The aerial leg's two licence
 # declarations are here for exactly that reason (lib/locate/gate.ts): the
 # server reads them at runtime and the price rail reads them from the
 # bundle, so a deployment that sets them in only one place would show a
 # customer a button that 404s. Set them in both, or in neither.
+ARG SITE_URL
 ARG NEXT_PUBLIC_SITE_URL
+ARG RENDER_EXTERNAL_URL
 ARG NEXT_PUBLIC_SATELLITE_TILE_URL
 ARG NEXT_PUBLIC_SATELLITE_ATTRIBUTION
 ARG NEXT_PUBLIC_SATELLITE_MAX_ZOOM
 ARG NEXT_PUBLIC_SATELLITE_LICENCE
 ARG NEXT_PUBLIC_GEOCODER_LICENCE
-ENV NEXT_PUBLIC_SITE_URL=${NEXT_PUBLIC_SITE_URL} \
+ENV SITE_URL=${SITE_URL} \
+    RENDER_EXTERNAL_URL=${RENDER_EXTERNAL_URL} \
+    NEXT_PUBLIC_SITE_URL=${NEXT_PUBLIC_SITE_URL} \
     NEXT_PUBLIC_SATELLITE_TILE_URL=${NEXT_PUBLIC_SATELLITE_TILE_URL} \
     NEXT_PUBLIC_SATELLITE_ATTRIBUTION=${NEXT_PUBLIC_SATELLITE_ATTRIBUTION} \
     NEXT_PUBLIC_SATELLITE_MAX_ZOOM=${NEXT_PUBLIC_SATELLITE_MAX_ZOOM} \

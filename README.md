@@ -27,13 +27,13 @@ not negotiable.
 | Design system | ✅ done — tokens in `app/globals.css`, one font pairing, primitives, loading/empty/error states |
 | Photos off an iPhone | ✅ done — HEIC → JPEG, EXIF orientation baked in, GPS stripped, long edge capped |
 | Rate limiting | ✅ done — per-IP token buckets at the app's edge, tightest on upload and vision |
-| Deployment configuration | ✅ done — Dockerfile, `fly.toml`, `docs/deploy.md`. **Not yet deployed** — see below |
+| Deployment configuration | ✅ done — Dockerfile, `render.yaml` (free), `fly.toml` (paid), `docs/deploy.md`. **Not yet deployed** |
 | The aerial leg (`/design/[id]/locate`) | ⛔ gated off — deliberately: no paid imagery or geocoder until there is a working MVP |
 
 All six phases are in, they run on Postgres, the contractor console is behind
 a login, the price book is editable, photos live in object storage when a
 bucket is configured, and the whole thing has been designed and opened on a
-phone. `npm test` runs 380 tests — with a database and without one.
+phone. `npm test` runs 386 tests — with a database and without one.
 
 **It has not been deployed.** The tenth session wrote the configuration —
 [`docs/deploy.md`](./docs/deploy.md) is the runbook, `Dockerfile` and
@@ -57,7 +57,7 @@ store, so a clean checkout runs the demo with nothing to provision.
 ## Commands
 
 ```sh
-npm test          # Vitest — 380 tests across every phase. No server, no network, no browser.
+npm test          # Vitest — 386 tests across every phase. No server, no network, no browser.
 npm run typecheck
 npm run dev
 npm run build
@@ -261,10 +261,19 @@ and both would have been live on day one.
 - `Dockerfile` — three stages, `output: "standalone"`, no `node_modules` in
   the runtime image, running as a non-root user. Nothing in it is
   Fly-specific: it is `node server.js` on `$PORT`.
-- `fly.toml` — Fly.io, Chicago, one always-on machine (auto-stop would spend
-  part of the thirty seconds on a cold start), 2 GB because
-  `lib/image/limits.ts` admits an 80-megapixel photo, and concurrency limits
-  that tell the truth about a decode that blocks the event loop for 1.5 s.
+- `render.yaml` — the free path: Render's free instance (no card), Neon's
+  free Postgres (no card), photos in `photo_objects` rows rather than a
+  bucket, and a GitHub Action (`.github/workflows/database-setup.yml`) that
+  runs the migrations, the seed and the first admin account, so a
+  deployment needs no laptop at all. What free costs is written down rather
+  than glossed: 0.1 CPU against a decode that wants a whole one, a
+  spin-down after 15 idle minutes, and a database with no real backup
+  retention. It is a demo real customers can use, not the product.
+- `fly.toml` — the paid path: Fly.io, Chicago, one always-on machine
+  (auto-stop would spend part of the thirty seconds on a cold start), 2 GB
+  because `lib/image/limits.ts` admits an 80-megapixel photo, and
+  concurrency limits that tell the truth about a decode that blocks the
+  event loop for 1.5 s.
 - **Why not Vercel**, the obvious answer for a Next app: its serverless
   functions cap a request body at 4.5 MB and `MAX_UPLOAD_BYTES` is 25 MB.
   The iPhone upload path — the entry to the whole funnel — would fail
@@ -272,6 +281,14 @@ and both would have been live on day one.
   that number is cheap to discover.
 - `package.json` now pins `engines.node` and `packageManager`; there is a
   `.nvmrc`. The deployment should not discover its Node version by accident.
+- **The site's own address is a build-time value**, and finding that out is
+  the third bug this session caught by running the real artifact:
+  `metadataBase` and `/robots.txt` are both prerendered, so a hostname set
+  on a dashboard after the build is silently ignored and every Open Graph
+  URL published says `http://localhost:3000`. `lib/site/url.ts` resolves it
+  from `SITE_URL`, the older `NEXT_PUBLIC_SITE_URL`, or whatever the host
+  already knows about itself — and says plainly, where somebody will read
+  it, that the value has to be present when the image is built.
 - `app/api/health/route.ts` — liveness only, deliberately shallow, and
   exempt from rate limiting so a flood cannot make the deployment look
   unhealthy and get itself restarted.

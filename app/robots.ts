@@ -1,5 +1,7 @@
 import type { MetadataRoute } from "next";
 
+import { siteUrl, siteUrlIsPlaceholder } from "@/lib/site/url";
+
 /**
  * What a crawler may look at.
  *
@@ -19,7 +21,7 @@ import type { MetadataRoute } from "next";
  * discovered some other way.
  */
 export default function robots(): MetadataRoute.Robots {
-  const base = process.env.NEXT_PUBLIC_SITE_URL;
+  const base = siteUrlIsPlaceholder() ? undefined : siteUrl();
   return {
     rules: [
       {

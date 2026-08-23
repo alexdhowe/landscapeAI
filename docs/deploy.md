@@ -14,10 +14,20 @@ says so.
 
 ---
 
-## 1. The host: Fly.io
+## 1. Two paths, and which one you are on
 
-Four constraints from `lib/` decide this, and only one of them is about
-preference.
+**Path A — free, and nothing runs on your machine.** Render's free instance
+(no card), Neon's free Postgres (no card), photos kept in Postgres rather
+than a bucket, your own Anthropic key, and a GitHub Action for the database
+work. Everything below happens in browser tabs. This is the path the repo
+is set up for; `render.yaml` is its whole configuration.
+
+**Path B — about $10–15/month, and it is a real deployment.** Fly.io, a
+paid Postgres with point-in-time recovery, photos in Cloudflare R2.
+`fly.toml` is its configuration and §11 is the migration path. Take it when
+the MVP has earned it.
+
+Four constraints from `lib/` decide both, and only one is about preference.
 
 **The request body must exceed 25 MB.** `MAX_UPLOAD_BYTES` in
 `lib/image/limits.ts` is 25 MB because a 48-megapixel iPhone photo does not
@@ -25,116 +35,135 @@ fit in less, and the customer most likely to be standing in their yard with
 a phone was the one most likely to be rejected. **This rules out Vercel**,
 whose serverless functions cap a request body at 4.5 MB — the iPhone upload
 path, which is the entry point to the whole funnel, would fail outright.
-That is worth stating plainly because Vercel is otherwise the default answer
-for a Next.js app, and the number is easy to discover after committing to
-the platform rather than before.
+That is worth stating plainly because Vercel is otherwise the default
+answer for a Next.js app, and the number is easy to discover after
+committing to a platform rather than before.
 
 **A Node runtime, not edge.** `lib/storage/s3.ts` signs requests with
 `node:crypto`, `lib/auth/password.ts` is scrypt from the same module, and
-`lib/image/normalize.ts` lazily loads a wasm HEIC decoder. None of that runs
-on an edge runtime.
+`lib/image/normalize.ts` lazily loads a wasm HEIC decoder. None of that
+runs on an edge runtime, which rules out the Workers-shaped free tiers.
 
 **CPU and memory for the decode.** Normalising a 12 MP HEIC is about 1.5 s
-of CPU-bound, pure-JavaScript work that blocks the event loop, and
-`lib/image/limits.ts` admits up to 80 megapixels — an RGB buffer for one of
-those is ~240 MB before the JPEG encoder allocates its own. So: a machine
-with real memory, a request timeout comfortably above a few seconds, and
-honest concurrency limits.
+of CPU-bound, pure-JavaScript work that blocks the event loop.
 
-**One long-lived process.** §2's thesis is a customer playing inside thirty
-seconds of landing. A scale-to-zero platform spends part of that budget on a
-cold start, which is the one budget this product cannot borrow from.
+**One long-lived process** is what §2's thirty seconds wants. A
+scale-to-zero platform spends part of that budget waking up.
 
-Fly.io meets all four, runs a plain container, bills for one small
-always-on machine, and has a region in Chicago (`ord`) — the closest one to
-the Wisconsin service area the seed data describes. `fly.toml` is the whole
-configuration.
+### What the free path actually costs you
 
-**The choice is cheap to reverse**, which is the other reason it is
-defensible: the artifact is a plain `Dockerfile` running `node server.js` on
-`$PORT`. Render, Railway, a DigitalOcean droplet or an ECS task all run it
-unchanged. If Fly turns out to be wrong, moving costs a `fly.toml`.
+Both of the last two constraints are the ones Path A bends, and it is
+better to know which:
 
-Managed services, none of them Fly-specific:
-
-| Need | Suggested | Why |
+| | Free (Render) | Paid (Fly) |
 |---|---|---|
-| Postgres | Neon or Supabase | project-map §3 names both; either gives point-in-time recovery, which §5 below makes a hard requirement |
-| Object storage | Cloudflare R2 | S3-compatible, no egress fee, and `lib/storage/s3.ts` speaks SigV4 without an SDK |
-| Vision | Anthropic API | already the only model dependency |
+| CPU | **0.1 CPU.** A decode that wants ~1.5 s of a whole core takes many times that. Expect an upload to sit for **10–20 s** rather than 1.5. | 1–2 shared cores; ~1.5 s |
+| Cold start | **Spins down after 15 minutes idle**; the next visitor waits ~1 minute for a loading page | Always on |
+| RAM | 512 MB. Fine for the 12 MP photos iPhones shoot by default; a 48 MP "HEIF Max" capture may exhaust it | 2 GB |
+| Photos | In Postgres, inside Neon's 0.5 GB — roughly 4,000 photos at ~120 KB each | R2, effectively unlimited |
+| Postgres | Neon free: 0.5 GB, 100 compute-hours/month, sleeps after 5 min idle | Paid tier with PITR |
 
----
+**So do not measure the thirty seconds on the free tier.** It is a place to
+put the product in front of ten people and collect leads, not a place to
+learn what the funnel costs in latency. §9 says the same thing where the
+measurement is described.
+
+The honest summary: Path A is a demo that real customers can use. Path B is
+the product. The artifact is the same `Dockerfile` either way, so moving is
+a redeploy, not a rewrite.
 
 ## 2. What has to exist before the first deploy
 
-All of these are currently unset. `.env.example` documents every one and
-the optional ones too; this is the subset a production deployment cannot
-open without.
+| Variable | Free path | Why it is not optional |
+|---|---|---|
+| `AUTH_SECRET` | **Render generates it** (`render.yaml`) | The app refuses to serve in production without it, on purpose: a predictable secret means anyone can mint a contractor session, and the console shows cost, margin and every lead's contact details. |
+| `DATABASE_URL` | Neon, free | Without it the app runs on the local file store — which in a container means writing to a filesystem that disappears on the next deploy. |
+| `ANTHROPIC_API_KEY` | your own key | Without it segmentation falls back to a demo overlay that the UI labels as such. Shipping the demo overlay to a customer is not an option; shipping it *labelled* is the difference between a demo and a lie, and it must stay labelled. |
+| `SITE_URL` | set after the first deploy | The absolute base for Open Graph and icon URLs. **Build-time** — see below. |
+| `S3_BUCKET`, `S3_ENDPOINT`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` | **skip all four** | Only for Path B. All four or none: half-configured is a deliberate fatal error, never a quiet fall back to keeping photos in this deployment. With none set and a database configured, photo bytes live in `photo_objects` rows, which is exactly what the free path wants. |
 
-| Variable | Why it is not optional |
-|---|---|
-| `AUTH_SECRET` | The app refuses to serve in production without it, on purpose: a predictable secret means anyone can mint a contractor session, and the console shows cost, margin and every lead's contact details. `openssl rand -base64 32`. |
-| `DATABASE_URL` | Without it the app runs on the local file store, which in a container means writing to a filesystem that disappears on the next deploy. |
-| `S3_BUCKET`, `S3_ENDPOINT`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` | All four or none. Half-configured is a deliberate fatal error (503 with the reason in the log), never a quiet fall back to keeping photos in this deployment. |
-| `ANTHROPIC_API_KEY` | Without it segmentation falls back to a demo overlay that the UI labels as such. Shipping the demo overlay to a customer is not an option; shipping it *labelled* is the difference between a demo and a lie, and it must stay labelled. |
-| `NEXT_PUBLIC_SITE_URL` | The absolute base for OG and icon URLs. Build-time — see the note below. |
+**Two of these are build-time values, not runtime ones**, and getting that
+wrong is silent rather than loud:
 
-**`NEXT_PUBLIC_*` are build-time, not runtime.** Next inlines them into the
-client bundle when the image is built, so they are `--build-arg` values (see
-`Dockerfile` and the `[build.args]` block in `fly.toml`) and changing one
-means rebuilding, not restarting. Set them in **both** places: the server
-reads the runtime value and the browser reads the baked one, and a
-deployment that sets only one shows customers a button that 404s.
+- `SITE_URL` — the root layout's metadata and `/robots.txt` are prerendered
+  during the build, so a value set afterwards is ignored and every OG image
+  URL you publish says `http://localhost:3000`. Verified both ways against
+  a production build.
+- `NEXT_PUBLIC_SATELLITE_LICENCE` and `NEXT_PUBLIC_GEOCODER_LICENCE` — the
+  aerial leg's gate, inlined into the client bundle.
 
-Nothing secret belongs in `fly.toml`, in a build arg, or in this
-repository. Secrets go in the platform's secret store:
+Render turns a service's environment variables into Docker build arguments
+automatically and the `Dockerfile` declares them, so on Render these are
+just dashboard entries followed by a redeploy. Elsewhere they are
+`--build-arg`.
+
+Nothing secret belongs in `render.yaml`, `fly.toml`, a build argument, or
+this repository. Secrets go in the platform's own secret store, typed into
+its dashboard.
+
+## 3. The free deploy, in order, from a browser
+
+Nothing here runs on your machine. Roughly 30 minutes, most of it signup
+forms.
+
+**1. Postgres — [neon.com](https://neon.com), no card.** Create a project,
+copy the connection string it shows you (the pooled one). Keep the tab.
+
+**2. GitHub secrets.** In this repository → Settings → Secrets and
+variables → Actions → New repository secret:
+
+- `DATABASE_URL` — the string from step 1.
+- `CONTRACTOR_ADMIN_PASSWORD` — a long password you choose for your own
+  console login. **Delete this secret once step 3 has run.**
+
+**3. Create the schema and your login.** Actions → **Database setup** → Run
+workflow. Tick "Also create/update a contractor admin login", fill in your
+email and name, run it. It applies the migrations, seeds the price book as
+revision 1, and creates your admin account. It is safe to re-run: the seed
+refuses to overwrite an org that already exists.
+
+Then delete the `CONTRACTOR_ADMIN_PASSWORD` secret. The password is now a
+scrypt hash in your database and the secret has no further use.
+
+**4. Deploy — [render.com](https://render.com), no card.** New → Blueprint →
+connect this repository → it reads `render.yaml` and asks for:
+
+- `DATABASE_URL` — the same string.
+- `ANTHROPIC_API_KEY` — your key. Type it into Render's field; it does not
+  belong in this repository, in a chat message, or in a commit.
+- `SITE_URL` — you do not know it yet. Put anything valid, or leave it and
+  fix it in step 5.
+
+Apply, and watch the first build. It builds the Dockerfile, which takes a
+few minutes.
+
+**5. Tell it its own address.** Render names the service something like
+`https://landscapeai.onrender.com`. Put that in the service's `SITE_URL`
+environment variable and redeploy (Manual Deploy → Deploy latest commit).
+It is a build-time value, so the redeploy is the point.
+
+**6. Check it.** §8 is the list. Start with `/api/health`, then do the whole
+funnel from your phone.
+
+A custom domain is free on Render (Settings → Custom Domains) if you have
+one; set `SITE_URL` to it and redeploy.
+
+### If you would rather do it on Fly (Path B)
+
+Same repository, `fly.toml` instead of `render.yaml`, and it needs a card:
 
 ```sh
+fly launch --no-deploy          # decline its offer to write its own Dockerfile/fly.toml
 fly secrets set AUTH_SECRET="$(openssl rand -base64 32)"
-fly secrets set DATABASE_URL='<the connection string your Postgres provider gave you>'
+fly secrets set DATABASE_URL='<connection string>' ANTHROPIC_API_KEY='<key>'
 fly secrets set S3_BUCKET='<bucket>' S3_ENDPOINT='<endpoint>' \
                 S3_ACCESS_KEY_ID='<key id>' S3_SECRET_ACCESS_KEY='<secret>'
-fly secrets set ANTHROPIC_API_KEY='<key>'
-```
-
----
-
-## 3. First deploy, in order
-
-```sh
-# 0. Prerequisites: a Postgres, a private R2 bucket, an Anthropic key, a
-#    hostname. The bucket must be private — nothing hands a browser an
-#    object URL, and lib/storage/index.ts explains why every read is
-#    streamed by the app.
-
-# 1. Create the app without deploying, then set the secrets above.
-fly launch --no-deploy            # edit the app name in fly.toml if you like
-fly secrets set …                 # section 2
-
-# 2. Schema and price book, from a checkout on your machine, pointed at the
-#    production database. drizzle-kit and tsx are devDependencies and are
-#    deliberately not in the runtime image.
-export DATABASE_URL='<the same connection string>'
-npm ci
-npm run db:migrate
-npm run db:seed        # writes seed/pricebook.seed.ts as revision 1, published;
-                       # refuses to overwrite an existing org
-
-# 3. The first contractor account. Prompts for the password so it stays out
-#    of shell history. There is no default password anywhere in this repo
-#    and there must not be one.
-npm run db:user -- --email <you@yourdomain> --name "<Your Name>" --role admin
-
-# 4. Build and deploy. NEXT_PUBLIC_* are build args.
-fly deploy --build-arg NEXT_PUBLIC_SITE_URL=https://<your hostname>
-
-# 5. Point the hostname at it and let Fly issue the certificate.
+fly deploy --build-arg SITE_URL=https://<your hostname>
 fly certs add <your hostname>
 ```
 
-Then run the smoke tests in §8 before telling anyone the address.
-
----
+The database work is still the GitHub Action — that part does not change,
+and it is still the only way to run migrations without a checkout.
 
 ## 4. What is deliberately switched off
 
@@ -195,6 +224,19 @@ provide PITR on their paid tiers; a `pg_dump` on a cron is an acceptable
 second copy but is not a substitute, because it loses everything since the
 last run.
 
+**On the free path you do not have this**, and pretending otherwise is
+worse than knowing it. Neon's free plan gives a short restore window and no
+long retention, and the free path also keeps every customer photo in that
+same 0.5 GB. So while you are free:
+
+- Treat the corpus as **at risk**. It is a demo with real people in it.
+- Take a manual export before anything you would not want to redo — from
+  Neon's console, or by running the "Database setup" Action pattern with a
+  `pg_dump` step you add for the purpose.
+- **The first $19/month this product earns should buy database retention**,
+  ahead of a bigger web instance. A slow deployment annoys people; a lost
+  `measurement_deltas` table is the one loss the product cannot absorb.
+
 The drill, which is the part people skip:
 
 ```sh
@@ -226,8 +268,9 @@ operable.
 
 What that means concretely, and what to do about it:
 
-- **Logs go to stdout and stderr**, which Fly collects (`fly logs`) and
-  keeps for a short window. Route handler exceptions are logged by Next
+- **Logs go to stdout and stderr**, which the host collects — Render shows
+  them in the service's Logs tab, Fly in `fly logs` — and keeps for a short
+  window. Route handler exceptions are logged by Next
   with a stack; the two deliberate operational logs are the storage
   misconfiguration error in `app/api/projects/route.ts` and the migration
   failures.
@@ -278,6 +321,9 @@ that is honoured even when a URL is discovered some other way.
 Run these in order, from a phone on cellular where it says so. Anything
 that fails here fails before the address is given to a customer.
 
+0. On the free tier, wake it first: open the URL and wait out the ~1 minute
+   cold start. Everything below assumes a warm instance, and the first
+   request after 15 idle minutes is not a fair test of anything.
 1. `GET /api/health` → `{"status":"ok"}`.
 2. `GET /` renders, and `/robots.txt` allows `/` and disallows the rest.
 3. **From a real iPhone, on cellular**: open `/start`, take a photo of a
@@ -303,6 +349,12 @@ that fails here fails before the address is given to a customer.
 ---
 
 ## 9. Measuring the thirty seconds
+
+**Not on the free tier.** A 0.1-CPU instance turns a 1.5 s decode into
+10–20 s and a cold start adds a minute; measuring there tells you about
+Render's free plan, not about this product. Measure on Path B, or on a
+warm paid instance, and treat any free-tier number as an upper bound with
+no diagnostic value.
 
 The table in the README was measured on a local production build **without**
 an `ANTHROPIC_API_KEY`, so it excludes the vision call — which is the whole
@@ -340,6 +392,12 @@ order:
 1. **Set `RATE_LIMIT_CLIENT_IP_HEADER`** to the one header your platform
    writes (`fly-client-ip`; `cf-connecting-ip` behind Cloudflare). Without
    it the limiter guesses, and the fallback is a header a client can forge.
+   On Render, leave it unset unless you have confirmed which header their
+   proxy writes — the default order tries the single-valued proxy headers
+   before falling back to `x-forwarded-for`. On the free tier the budgets
+   matter less as a defence against a determined attacker than as a
+   guarantee that one script cannot spend your whole Anthropic balance
+   while you sleep, and they do that either way.
 2. **Put the platform's own limiter in front** if there is one. Cloudflare's
    rate limiting rules run before the request reaches the app at all, which
    is strictly better than anything in-process; the buckets here stay as the
@@ -365,7 +423,15 @@ would delete the product: §2's whole thesis is no address and no form.
 - **One machine, so a deploy is a brief interruption.** Fine at this size;
   two machines and a rolling deploy is a `fly scale count 2` away, with the
   rate limiter caveat above.
-- **Migrations run from an operator's checkout**, not from a release
-  command, because `drizzle-kit` and `tsx` are devDependencies and the
-  runtime image deliberately has neither. That is the right trade at one
-  deployment and the wrong one at ten.
+- **Migrations run from a GitHub Action**, not from a release command,
+  because `drizzle-kit` and `tsx` are devDependencies and the runtime image
+  deliberately has neither. The Action is also what makes a laptop
+  unnecessary. It is a manual trigger on purpose: a migration that runs
+  itself on every deploy is a migration that can take the site down without
+  anyone deciding to.
+- **No CI on push.** Nothing runs `npm test` when you commit; a broken
+  build is discovered by Render failing to deploy, which costs build
+  minutes and time. A CI workflow is a small addition when you want it.
+- **The free tier's numbers are in §1** and are not defects to be fixed
+  here: 0.1 CPU, a cold start, 512 MB, and a database with no real backup
+  retention. They are what free costs.
