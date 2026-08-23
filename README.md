@@ -33,7 +33,7 @@ not negotiable.
 All six phases are in, they run on Postgres, the contractor console is behind
 a login, the price book is editable, photos live in object storage when a
 bucket is configured, and the whole thing has been designed and opened on a
-phone. `npm test` runs 389 tests — with a database and without one.
+phone. `npm test` runs 397 tests — with a database and without one.
 
 **It has not been deployed.** The tenth session wrote the configuration —
 [`docs/deploy.md`](./docs/deploy.md) is the runbook, `Dockerfile` and
@@ -57,7 +57,9 @@ store, so a clean checkout runs the demo with nothing to provision.
 ## Commands
 
 ```sh
-npm test          # Vitest — 389 tests across every phase. No server, no network, no browser.
+npm run doctor    # is this machine set up? checks .env.local, the API key (against the
+                  # real API), and the console login — and says what to fix, in English.
+npm test          # Vitest — 397 tests across every phase. No server, no network, no browser.
 npm run typecheck
 npm run dev
 npm run build
@@ -103,6 +105,13 @@ ANTHROPIC_API_KEY=…            # without it you get the labelled demo overlay
 AUTH_SECRET=…                  # any long random string; only needed by `npm start`
 CONTRACTOR_EMAIL=you@example.com     # so you can sign in to the console
 CONTRACTOR_PASSWORD=…                # with no database, this is the whole user table
+```
+
+Check the setup before you start — this catches every way the key can be
+wrong, and prints the absolute path of the file it is reading:
+
+```sh
+npm run doctor
 ```
 
 Then build and run it:
@@ -155,6 +164,28 @@ thirty seconds, ran on the demo overlay because no key was available:
    seconds is real.
 3. **Does the swapped material look convincing** over a photograph rather
    than over the four-colour test fixture nobody would mistake for a yard?
+
+### When the key is the problem
+
+It usually is, and it used to be needlessly hard to tell — a stray quote, a
+trailing space, the placeholder still in the file, a key with no credit and
+a genuinely wrong key all produced one 401, rendered to the customer as raw
+JSON. Three things changed:
+
+- **`npm run doctor`** distinguishes them, and asks the API directly.
+- **The key is cleaned before use** (`lib/vision/credentials.ts`) —
+  surrounding quotes and whitespace are what a paste brings with it, not a
+  reason to fail. A placeholder value now yields the labelled demo overlay
+  and one loud line in the terminal, rather than an error at the customer.
+- **The customer and the operator get different messages.** A customer is
+  told they can try another photo or send the design anyway, which is true
+  and actionable; the terminal gets the real error and the one-line fix. In
+  development the detail appears on the page too, because whoever is
+  looking at the screen is also the person who can fix it.
+
+**The key is read once, when the server boots.** Editing `.env.local` while
+it runs changes nothing until you stop it and start it again — that alone
+accounts for a good share of "the key is right and it still fails".
 
 If the answer to 2 is bad, the first lever is `lib/vision/classify.ts` —
 and the cheapest one is not a smaller model. That call currently runs at

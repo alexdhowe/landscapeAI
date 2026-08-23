@@ -5,6 +5,7 @@
  */
 import Anthropic from "@anthropic-ai/sdk";
 
+import { readCredential } from "./credentials";
 import { demoSegmentation } from "./demo";
 import type { VisionImageMediaType } from "./mediaTypes";
 import { parseSegmentation } from "./parse";
@@ -50,9 +51,7 @@ Respond with ONLY a JSON object, no other text:
 
 If the photo shows no yard at all, return {"regions": [], "vertical_elements": [], "cannot_see": ["no landscape visible in photo"]}.`;
 
-export function hasVisionCredentials(): boolean {
-  return Boolean(process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN);
-}
+export { hasVisionCredentials } from "./credentials";
 
 /**
  * Segment a yard photo into labeled regions. Returns the demo overlay
@@ -62,11 +61,21 @@ export async function classifyPhoto(
   imageData: Buffer,
   mediaType: VisionImageMediaType,
 ): Promise<SegmentationResult> {
-  if (!hasVisionCredentials()) {
+  const credential = readCredential();
+  if (credential.status !== "present") {
+    // A half-finished setup gets the labelled demo overlay rather than a
+    // 401 rendered at a customer — but the operator hears about it, once,
+    // where they are already looking.
+    if (credential.note) console.warn(`[vision] ${credential.note}`);
     return demoSegmentation();
   }
 
-  const client = new Anthropic();
+  // The cleaned key, when there is one: quotes and stray whitespace from a
+  // paste are not worth a 401. With no key but an auth token or a signed-in
+  // profile, the SDK resolves credentials itself.
+  const client = credential.apiKey
+    ? new Anthropic({ apiKey: credential.apiKey })
+    : new Anthropic();
   const response = await client.messages.create({
     model: "claude-opus-5",
     max_tokens: 16000,
