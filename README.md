@@ -78,6 +78,88 @@ See `.env.example` for what is configurable — all of it optional for local
 work, and not for a deployment: [`docs/deploy.md`](./docs/deploy.md) says
 which variables a production instance cannot open without.
 
+## Running it on your own machine, and letting someone else try it
+
+The fastest way to find out whether this product works is not a
+deployment. It is your laptop, a real API key, and a photograph of a real
+yard — and a link you can text to someone while you watch the logs.
+
+**What you need:** Node 22 (`.nvmrc` pins it), and an `ANTHROPIC_API_KEY`.
+Nothing else — no database, no bucket, no accounts. Projects and photos
+land in `.data/` on your disk, and the only thing that leaves the machine
+is the photo, to the Anthropic API, for segmentation.
+
+```sh
+git clone https://github.com/alexdhowe/landscapeAI.git
+cd landscapeAI
+npm ci
+```
+
+Create `.env.local` (it is gitignored, and nothing in it is ever
+committed):
+
+```sh
+ANTHROPIC_API_KEY=…            # without it you get the labelled demo overlay
+AUTH_SECRET=…                  # any long random string; only needed by `npm start`
+CONTRACTOR_EMAIL=you@example.com     # so you can sign in to the console
+CONTRACTOR_PASSWORD=…                # with no database, this is the whole user table
+```
+
+Then build and run it:
+
+```sh
+npm run build && npm start     # http://localhost:3000
+```
+
+Use `npm run dev` instead when you want to edit code — it recompiles as you
+go, at the cost of a few seconds on the first hit of each page. `npm start`
+serves in a few milliseconds, which is what you want when somebody else is
+looking.
+
+### A link to send someone
+
+While it is running, open a second terminal:
+
+```sh
+brew install cloudflared                                  # once
+cloudflared tunnel --url http://localhost:3000
+```
+
+It prints a public `https://….trycloudflare.com` address. No account, no
+card, no signup, and it works on a phone — which matters, because the
+camera path is the one that cannot be tested any other way. Close the
+terminal and the link is gone. (`npx cloudflared tunnel --url
+http://localhost:3000` works too if you would rather not install anything;
+ngrok is the alternative if Cloudflare is blocked on your network.)
+
+Two things to know while a tunnel is up:
+
+- **Every visitor shares your laptop's rate limit buckets** unless the
+  tunnel forwards a per-client address. If a tester sees "Too many
+  requests", put `RATE_LIMIT=off` in `.env.local` and restart — it is the
+  one setting meant for exactly this.
+- **This is a demo, not a deployment.** The link dies with the terminal,
+  the data is on your disk, and real customer photos should not go through
+  it. `docs/deploy.md` is for when it should stay up without you.
+
+### What you are actually testing
+
+These three are the open questions, and none of them has ever been
+answered — every session to date, including the one that measured the
+thirty seconds, ran on the demo overlay because no key was available:
+
+1. **Does segmentation find the right things?** Upload a photo of a real
+   yard and look at where the polygons land. This is the product.
+2. **How long does it take?** The README's table below excludes the model
+   call entirely. This is the number that decides whether §2's thirty
+   seconds is real.
+3. **Does the swapped material look convincing** over a photograph rather
+   than over the four-colour test fixture nobody would mistake for a yard?
+
+If the answer to 2 is bad, the first lever is `lib/vision/classify.ts` —
+and the cheapest one is not a smaller model. That call currently runs at
+default effort with thinking on, for a response that is a list of polygons.
+
 ## Three decisions that gate the launch — answered
 
 None of these is a coding decision and all three were researched rather
