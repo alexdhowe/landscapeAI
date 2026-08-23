@@ -148,6 +148,13 @@ on two licensing decisions that are not a build session's to make:
 - **Geocoding.** `lib/geo/geocode.ts` is Nominatim, whose usage policy does
   not cover production commercial traffic.
 
+**The owner's standing decision is to hold on both** until there is a
+working MVP — neither licence is worth paying for before the funnel has
+proved itself. So the aerial leg ships dark on purpose, and the first
+release is the photo → design → band → lead path with the band at typology
+width. Treat a bug report of "the address step is missing" as this
+decision, not a regression.
+
 Until both are declared `permitted`, the gate answers 404 on the routes and
 redirects a bookmarked `/locate` URL back to the design; the price rail does
 not offer the button. The rest of the funnel is unaffected — the customer

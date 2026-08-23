@@ -28,7 +28,7 @@ not negotiable.
 | Photos off an iPhone | ✅ done — HEIC → JPEG, EXIF orientation baked in, GPS stripped, long edge capped |
 | Rate limiting | ✅ done — per-IP token buckets at the app's edge, tightest on upload and vision |
 | Deployment configuration | ✅ done — Dockerfile, `fly.toml`, `docs/deploy.md`. **Not yet deployed** — see below |
-| The aerial leg (`/design/[id]/locate`) | ⛔ gated off — waits on the imagery and geocoder licences |
+| The aerial leg (`/design/[id]/locate`) | ⛔ gated off — deliberately: no paid imagery or geocoder until there is a working MVP |
 
 All six phases are in, they run on Postgres, the contractor console is behind
 a login, the price book is editable, photos live in object storage when a
@@ -78,10 +78,24 @@ See `.env.example` for what is configurable — all of it optional for local
 work, and not for a deployment: [`docs/deploy.md`](./docs/deploy.md) says
 which variables a production instance cannot open without.
 
-## Three decisions that gate the launch
+## Three decisions that gate the launch — answered
 
-None of these is a coding decision, all three were researched rather than
-guessed at, and none of them is answered here.
+None of these is a coding decision and all three were researched rather
+than guessed at. The owner answered all three at the end of the deployment
+session; each finding is kept below, with the decision it produced, so the
+next session does not re-open a settled question or mistake a deliberate
+gap for an oversight.
+
+| Decision | Answer | What would reopen it |
+|---|---|---|
+| Imagery licence | **Hold** — no paid imagery until there is a working MVP. The aerial leg stays gated. | An MVP that earns it, then a licence that permits derivative measurement. |
+| Geocoder | **Hold** — same reasoning. Gates the same surface, so answering one alone would change nothing. | Same. |
+| `libheif-js` (LGPL-3.0) | **Accepted** on the hosted-only reading: server-side, unmodified, nothing conveyed. | Shipping an on-prem build, a native or Electron app, or moving decode into the browser — each is distribution, and §4 then applies. |
+
+A fourth question was re-asked rather than decided fresh: the customer
+photo read stays **open to whoever holds the project UUID**, affirmed by
+the owner with the deployment in view. See
+[who may read a photo](#who-may-read-a-photo).
 
 **1. The imagery licence — project-map §3 calls it "the real one."** Some
 tile licences prohibit deriving and reselling measurements, which is
@@ -92,12 +106,17 @@ candidates that licence derivative measurement cleanly, per property.
 **Until a licence is declared `permitted`, `/design/[projectId]/locate` does
 not go live**, and that is now enforced rather than noted: see
 [the aerial leg is licensed, not built](#the-aerial-leg-is-licensed-not-built).
+**Decided: hold.** No paid imagery until there is a working MVP — so the
+aerial leg ships dark, deliberately, and the funnel runs on the typology
+band alone.
 
 **2. The geocoder.** `lib/geo/geocode.ts` is Nominatim, whose usage policy
 does not cover production commercial traffic — it asks for a single thread,
 attribution, and no heavy or commercial use of the public endpoint. Mapbox
 and Google are the paid candidates §3 names. Same class of decision, same
-surface, and it gates the same leg.
+surface, and it gates the same leg. **Decided: hold**, for the same reason
+— and holding on one alone would change nothing, since either undeclared
+term keeps the leg off.
 
 **3. `libheif-js` is LGPL-3.0**, and it decodes every iPhone photo. What was
 actually checked, rather than assumed:
@@ -135,9 +154,10 @@ actually checked, rather than assumed:
 
 The practical reading is that this is fine as deployed and cheap to keep
 fine: keep the decode server-side, keep the library unmodified, and keep
-the licence files that ship in the package. But it wants a real answer from
-someone with authority before real customers' photos go through it, which
-is the same standing as the two licences above.
+the licence files that ship in the package. **Decided: accepted** on that
+reading. The three things that would reverse it are in the table above, and
+the HEVC patent question is separate, unanswered by any of this, and
+belongs to whoever signs.
 
 ## Putting it in front of people
 
@@ -854,12 +874,16 @@ that assumption is wrong, the fix is a per-project token required by **every**
 customer-facing project route, not by this one. The contractor split is what
 makes that change cheap: the console is already off the open route.
 
-**Raised again before launch, and unchanged.** That reasoning was written
+**Raised again before launch, and affirmed.** That reasoning was written
 when the only photos in existence were generated test fixtures, and the next
 photo through this path is of somebody's actual house. The deployment session
 put the assumption back in front of the owner rather than quietly
 re-affirming it or quietly changing it — neither read moved while the
-deployment was wired up.
+deployment was wired up — and the answer was to keep it open on the UUID.
+It is now a decision somebody made with real photos in view, not an
+inherited default. If it is ever overruled, the change is still the
+per-project token described above, applied to every customer-facing project
+route.
 
 ### Tests need no bucket
 
