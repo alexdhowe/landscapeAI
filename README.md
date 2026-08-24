@@ -38,7 +38,7 @@ All six phases are in, they run on Postgres, the contractor console is behind
 a login, the price book is editable, photos live in object storage when a
 bucket is configured, and the whole thing has been designed and opened on a
 phone — on a phone *branch*, for the first time in the twelfth session,
-which is its own story. `npm test` runs 497 tests — with a database and
+which is its own story. `npm test` runs 506 tests — with a database and
 without one.
 
 **It has not been deployed.** The tenth session wrote the configuration —
@@ -65,7 +65,7 @@ store, so a clean checkout runs the demo with nothing to provision.
 ```sh
 npm run doctor    # is this machine set up? checks .env.local, the API key (against the
                   # real API), and the console login — and says what to fix, in English.
-npm test          # Vitest — 497 tests across every phase. No server, no network, no browser.
+npm test          # Vitest — 506 tests across every phase. No server, no network, no browser.
 npm run typecheck
 npm run dev
 npm run build
@@ -574,6 +574,65 @@ architecture, not a plant-specific gap, and it closes when the aerial leg
 does. The spacing validation in `lib/growth/spacing.ts` knows how to warn
 about crowding at year five and is not wired to this yet: it needs a scale
 in feet, which one photograph cannot give.
+
+## The bed edge, and the border around it
+
+Two things about an outline that a third photo made specific: it did not
+follow the full curve of the bed, and it ran across the river-rock border
+around the bed rather than stopping inside it.
+
+### A polygon is not a curve
+
+The graph stores a region as a list of vertices. That list is the artifact
+— every quantity and every downstream reader uses it, untouched. But a
+polyline through twenty points is the wrong *view* of a bed edge: a real
+bed curves, and a chain of straight chords reads as faceted however many
+vertices the model returns. More vertices is a losing race against that.
+
+So the drawn path is smoothed (`lib/design/outline.ts`), and the choice of
+scheme is decided by the second complaint rather than by taste:
+
+- **It may never bulge outward.** A spline through the points — Catmull-Rom
+  or similar — overshoots on convex turns, which would push the swapped
+  material *further* over the bed's stone border. Corner cutting (Chaikin)
+  stays strictly inside the polygon it cuts, so smoothing can only ever
+  pull the fill off the edging.
+- **A real corner stays a corner.** A driveway is a rectangle and a step is
+  square. A vertex is only cut where the turn is shallow enough to belong
+  to a curve, so a bed that runs into a square porch gets a smooth edge and
+  a sharp corner in the same outline.
+
+One path does the tint, the stroke, the selection ring, the material mask
+and the hit target, so what the customer sees and what they can tap cannot
+drift apart. The rep's canvas draws the same path — they are reviewing the
+design the customer was shown.
+
+### The border is not part of the bed
+
+Most beds are edged: river-rock cobbles, steel edging, brick, a paver
+course, a concrete curb. **That border is not bed.** The region is what
+gets re-surfaced when the homeowner swaps mulch for stone, so an outline
+drawn across a cobble border paints gravel over the border they already
+have.
+
+Both prompts now say so, and the refinement pass — which can see its own
+outline against the photograph — checks it as a named fault: *if the
+outline sits on the border or outside it, move it to the inner edge, where
+the mulch actually stops*. The first-pass prompt also names the curve
+failure directly rather than only asking for vertices: *if any part of your
+outline is a straight line where the real edge curves, that part needs more
+vertices.*
+
+Smoothing helps here too, in the same direction. Cutting corners inward
+means the painted material lands a hair short of the traced line rather
+than a hair past it, and short of a stone border is invisible where past it
+is not.
+
+**Verified here:** the smoothing properties are unit-tested against the
+shapes they exist for — a sampled curve never escapes its source polygon, a
+square is returned unchanged, and a shape with both gets both. **Not
+verified here:** whether the model now stops inside the edging. That needs
+a key and a yard with a border in it.
 
 ## "Nothing is lining up"
 

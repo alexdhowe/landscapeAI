@@ -5,6 +5,7 @@ import { useState } from "react";
 import { getOption } from "@/lib/catalog/options";
 import type { PlantOption } from "@/lib/catalog/plants";
 import { layoutRegionMarkers } from "@/lib/design/markers";
+import { closedPathData, smoothOutline } from "@/lib/design/outline";
 import type { RegionSelection } from "@/lib/design/types";
 import type { SegmentedRegion } from "@/lib/vision/types";
 import { REGION_KIND_LABELS } from "@/lib/vision/types";
@@ -54,6 +55,26 @@ type Props = {
  * real number, not one padded for masking.
  */
 const PLANTING_MARGIN = 1.18;
+
+/**
+ * The path drawn for a region.
+ *
+ * Smoothed, because the graph stores a bed edge as a list of vertices and
+ * a chain of straight chords is the wrong view of a curve. The smoothing
+ * only ever cuts inward (see lib/design/outline.ts), so the material can
+ * land short of the bed's stone border but never further across it, and a
+ * genuine corner — a driveway, a step — is left square.
+ *
+ * The polygon itself is untouched: it is what every quantity and every
+ * downstream reader uses. This is only what gets painted.
+ */
+function outlinePath(
+  polygon: SegmentedRegion["polygon"],
+  w: number,
+  h: number,
+): string {
+  return closedPathData(smoothOutline(polygon), w, h);
+}
 
 /** What the photo called this plant, when it managed to name it. */
 function plantName(label?: string): string {
@@ -182,10 +203,7 @@ export function PhotoCanvas({
             // shrubs alone. Before this the texture covered the whole
             // polygon and every plant in the bed turned grey with it.
             <mask key={region.id} id={`swap-${region.id}`}>
-              <polygon
-                points={region.polygon.map(([x, y]) => `${x * w},${y * h}`).join(" ")}
-                fill="#ffffff"
-              />
+              <path d={outlinePath(region.polygon, w, h)} fill="#ffffff" />
               {/* Only the plants that are STAYING are punched out. One
                   the customer has replaced is covered by the new material
                   and then drawn over, which is what makes a swap look like
@@ -208,9 +226,10 @@ export function PhotoCanvas({
           ))}
         </defs>
         {regions.map((region) => {
-          const points = region.polygon
-            .map(([x, y]) => `${x * w},${y * h}`)
-            .join(" ");
+          // One path, used for the tint, the stroke, the selection ring and
+          // the hit target, so what the customer sees and what they can tap
+          // cannot drift apart.
+          const d = outlinePath(region.polygon, w, h);
           const surfaceOption = selections[region.id]?.surfaceOptionId
             ? getOption(selections[region.id].surfaceOptionId!)
             : undefined;
@@ -225,8 +244,8 @@ export function PhotoCanvas({
                 // ground and the planting stays photographic.
                 <g mask={`url(#swap-${region.id})`}>
                   {/* Textured material, feather-edged into the photo. */}
-                  <polygon
-                    points={points}
+                  <path
+                    d={d}
                     fill="#ffffff"
                     filter={`url(#tex-${surfaceOption.swatch})`}
                     opacity={0.96}
@@ -246,19 +265,20 @@ export function PhotoCanvas({
                   />
                 </g>
               ) : (
-                <polygon
-                  points={points}
+                <path
+                  d={d}
                   fill={kindColor}
                   fillOpacity={isSelected || isActive ? 0.34 : 0.16}
                   stroke={kindColor}
                   strokeWidth={w * 0.002}
                   strokeDasharray={`${w * 0.008} ${w * 0.005}`}
+                  strokeLinejoin="round"
                 />
               )}
               {/* Selection ring drawn separately so it never gets textured. */}
               {(isSelected || isActive) && (
-                <polygon
-                  points={points}
+                <path
+                  d={d}
                   fill="none"
                   stroke="#ffffff"
                   strokeOpacity={isSelected ? 0.95 : 0.6}
@@ -269,8 +289,8 @@ export function PhotoCanvas({
               {/* Pointer convenience only: the label chip below is the
                   control, and it is what a keyboard and a screen reader
                   reach. */}
-              <polygon
-                points={points}
+              <path
+                d={d}
                 fill="transparent"
                 className="pointer-events-auto cursor-pointer"
                 onClick={() => onSelectRegion(region.id)}

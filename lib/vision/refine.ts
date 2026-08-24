@@ -33,10 +33,11 @@ ${lines.join("\n")}
 
 Look at where each coloured outline actually falls against the photograph, and correct it. What to look for, in order:
 
-1. **Edges cut across curves.** A bed boundary is usually a curve and a few vertices cannot follow one — the outline ends up inside the bed in places and out on the lawn in others. Add vertices and put them on the real edge. 20-40 along a curved bed edge is normal.
-2. **Outlines that overlap each other**, or that include ground belonging to a different region. Each piece of ground belongs to exactly one region.
-3. **Outlines that ride up a vertical surface** — a wall, a step face, a fence — instead of stopping where it meets the ground.
-4. **Whole edges in the wrong place**: an outline that stops short of the real boundary, or runs past it.
+1. **A straight line where the real edge curves.** This is the most common fault and the easiest to see: look along each outline and find any segment that cuts a chord across a curving bed edge, leaving bed on one side of the line and lawn on the other. Add vertices there and put them on the real edge. 20-40 along a curved bed edge is normal.
+2. **An outline running across the bed's hard border.** Most beds are edged with river-rock cobbles, steel edging, brick or a paver course. That border is not part of the bed. If the outline sits on top of the border or outside it, move it to the INNER edge — where the mulch actually stops — so the border sits outside the outline. An outline drawn across a cobble border paints gravel over the border the homeowner already has.
+3. **Outlines that overlap each other**, or that include ground belonging to a different region. Each piece of ground belongs to exactly one region.
+4. **Outlines that ride up a vertical surface** — a wall, a step face, a fence — instead of stopping where it meets the ground.
+5. **Whole edges in the wrong place**: an outline that stops short of the real boundary, or runs past it.
 
 The rings inside each outline are the plants you found, in the same colour as the region they stand in. Correct these too, and be strict about them: a ring that is a few percent off is the difference between a plant staying put when the homeowner swaps the mulch and gravel being painted across its leaves. Move each ring onto its plant and size it to cover the whole visible mass including the outer foliage. Keep the same ids — you are moving the plants you already found, not finding new ones.
 

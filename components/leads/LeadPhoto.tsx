@@ -8,6 +8,7 @@ import { KIND_COLORS } from "@/components/configurator/regionColors";
 import { getOption } from "@/lib/catalog/options";
 import type { PlantOption } from "@/lib/catalog/plants";
 import { layoutRegionMarkers } from "@/lib/design/markers";
+import { closedPathData, smoothOutline } from "@/lib/design/outline";
 import type { RegionSelection } from "@/lib/design/types";
 import type { SegmentedRegion } from "@/lib/vision/types";
 import { REGION_KIND_LABELS } from "@/lib/vision/types";
@@ -43,18 +44,18 @@ export function LeadPhoto({
         preserveAspectRatio="none"
       >
         {regions.map((region) => {
-          const points = region.polygon
-            .map(([x, y]) => `${x * 100},${y * 100}`)
-            .join(" ");
           const color = KIND_COLORS[region.kind];
           return (
-            <polygon
+            <path
               key={region.id}
-              points={points}
+              // The same smoothed path the customer's canvas draws — the
+              // rep is reviewing the design they were shown.
+              d={closedPathData(smoothOutline(region.polygon), 100, 100)}
               fill={color}
               fillOpacity={0.18}
               stroke={color}
               strokeWidth={0.35}
+              strokeLinejoin="round"
               vectorEffect="non-scaling-stroke"
             />
           );
