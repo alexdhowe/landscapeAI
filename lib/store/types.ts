@@ -21,6 +21,7 @@ import type {
 import type { EstimateSnapshot, LeadContact } from "../lead/types";
 import type { MarketContext } from "../pricing/typology";
 import type { PhotoLocator } from "../storage";
+import type { NormalizedPoint } from "../vision/types";
 
 export class ProjectNotFoundError extends Error {
   constructor(id: string) {
@@ -102,6 +103,15 @@ export type ProjectStore = {
     id: string,
     plantingId: string,
     optionId: string | null,
+  ): Promise<DesignProject>;
+  /**
+   * Correct a region's outline, or pass null to go back to the one the
+   * segmentation produced.
+   */
+  setRegionOutline(
+    id: string,
+    regionId: string,
+    polygon: NormalizedPoint[] | null,
   ): Promise<DesignProject>;
   setLocation(id: string, location: ProjectLocation): Promise<DesignProject>;
   declineAddress(id: string): Promise<DesignProject>;

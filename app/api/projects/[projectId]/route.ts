@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { getOption } from "@/lib/catalog/options";
 import { plantOptionsForRegion } from "@/lib/catalog/plants";
+import { MAX_OUTLINE_POINTS, isUsableOutline } from "@/lib/design/outline";
 import type { RegionSelection } from "@/lib/design/types";
 import { resolveOrg } from "@/lib/org/resolve";
 import { regionOfPlanting } from "@/lib/store/gates";
@@ -9,11 +10,13 @@ import {
   ProjectLockedError,
   ProjectNotFoundError,
   UnknownPlantingError,
+  UnknownRegionError,
   declineAddress,
   getProject,
   setLocation,
   setMarketContext,
   setPlantSelection,
+  setRegionOutline,
   setSelection,
 } from "@/lib/store/projects";
 
@@ -34,6 +37,11 @@ export async function GET(_request: Request, { params }: Params) {
 /**
  * PATCH body is one of:
  *   { regionId, selection: { surfaceOptionId?, addonOptionIds } }
+ *   { regionId, polygon }                         — the customer's own
+ *                                                   correction to an
+ *                                                   outline, or null to
+ *                                                   put back the one the
+ *                                                   segmentation produced
  *   { plantingId, plantOptionId }                 — swap one plant, or
  *                                                   null to put back what
  *                                                   is growing there
@@ -54,6 +62,7 @@ export async function PATCH(request: Request, { params }: Params) {
     selection?: unknown;
     plantingId?: unknown;
     plantOptionId?: unknown;
+    polygon?: unknown;
     marketContext?: unknown;
     location?: unknown;
     addressDeclined?: unknown;
@@ -109,6 +118,32 @@ export async function PATCH(request: Request, { params }: Params) {
         return NextResponse.json({ error: "Invalid marketContext" }, { status: 400 });
       }
       return NextResponse.json(await setMarketContext(projectId, patch.marketContext));
+    }
+
+    // An outline correction. Checked before the selection branch, which
+    // also carries a regionId.
+    if (patch.polygon !== undefined) {
+      if (typeof patch.regionId !== "string" || !patch.regionId.trim()) {
+        return NextResponse.json({ error: "regionId must be a string" }, { status: 400 });
+      }
+      if (patch.polygon === null) {
+        return NextResponse.json(
+          await setRegionOutline(projectId, patch.regionId, null),
+        );
+      }
+      // The browser is not trusted with this: an outline reaches the rep's
+      // screen and the frozen snapshot.
+      if (!isUsableOutline(patch.polygon)) {
+        return NextResponse.json(
+          {
+            error: `polygon must be 3-${MAX_OUTLINE_POINTS} points inside the image that enclose an area`,
+          },
+          { status: 400 },
+        );
+      }
+      return NextResponse.json(
+        await setRegionOutline(projectId, patch.regionId, patch.polygon),
+      );
     }
 
     if (patch.plantingId !== undefined) {
@@ -200,6 +235,11 @@ export async function PATCH(request: Request, { params }: Params) {
   } catch (error) {
     if (error instanceof ProjectNotFoundError) {
       return NextResponse.json({ error: "Project not found" }, { status: 404 });
+    }
+    if (error instanceof UnknownRegionError) {
+      // Most likely a stale tab after a re-segmentation. The customer's
+      // problem to see, not a 500.
+      return NextResponse.json({ error: "Unknown region" }, { status: 400 });
     }
     if (error instanceof UnknownPlantingError) {
       // A choice about a plant this design does not have. Most likely a

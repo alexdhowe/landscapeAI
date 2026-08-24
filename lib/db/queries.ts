@@ -44,7 +44,7 @@ import type {
   MarginConfig,
   PriceBook,
 } from "../pricing/types";
-import type { SegmentedRegion } from "../vision/types";
+import type { NormalizedPoint, SegmentedRegion } from "../vision/types";
 
 import type { Database } from "./client";
 import {
@@ -215,6 +215,12 @@ export function toDesignProject(row: ProjectBundle): DesignProject {
     marketContext: row.marketContext,
   };
 
+  const adjusted = row.regions.filter((r) => r.adjustedPolygon !== null);
+  if (adjusted.length > 0) {
+    project.regionOutlines = Object.fromEntries(
+      adjusted.map((r) => [r.regionId, r.adjustedPolygon!]),
+    );
+  }
   if (row.plantSelections.length > 0) {
     project.plantSelections = Object.fromEntries(
       row.plantSelections.map((p) => [p.plantingId, p.optionId]),
@@ -416,6 +422,24 @@ export async function replaceSegmentation(
  * a project nobody has replanted round-trips identically to one from
  * before plants were swappable.
  */
+/**
+ * Store the customer's correction to a region's outline, or clear it.
+ *
+ * Clearing writes null rather than deleting the row: the row is the
+ * region, and only the correction is being taken back.
+ */
+export async function setRegionAdjustedPolygon(
+  db: Database,
+  projectId: string,
+  regionId: string,
+  polygon: NormalizedPoint[] | null,
+): Promise<void> {
+  await db
+    .update(regions)
+    .set({ adjustedPolygon: polygon })
+    .where(and(eq(regions.projectId, projectId), eq(regions.regionId, regionId)));
+}
+
 export async function upsertPlantSelection(
   db: Database,
   projectId: string,

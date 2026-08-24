@@ -33,6 +33,7 @@ import {
   assertPlanting,
   assertRegion,
 } from "./gates";
+import type { NormalizedPoint } from "../vision/types";
 import {
   ProjectNotFoundError,
   type NewProjectPhoto,
@@ -169,6 +170,19 @@ export function createFileStore(): ProjectStore {
       return edit(id, (project) => {
         assertRegion(project, regionId);
         project.selections[regionId] = selection;
+      });
+    },
+
+    setRegionOutline(id: string, regionId: string, polygon: NormalizedPoint[] | null) {
+      return edit(id, (project) => {
+        assertRegion(project, regionId);
+        const outlines = { ...(project.regionOutlines ?? {}) };
+        if (polygon === null) delete outlines[regionId];
+        else outlines[regionId] = polygon;
+        // Absent rather than empty, so an untouched design round-trips
+        // identically to one from before outlines were adjustable.
+        if (Object.keys(outlines).length === 0) delete project.regionOutlines;
+        else project.regionOutlines = outlines;
       });
     },
 

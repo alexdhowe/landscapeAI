@@ -50,6 +50,13 @@
       "when": 1787540358302,
       "tag": "0006_plant_selections",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1787597473170,
+      "tag": "0007_adjusted_outlines",
+      "breakpoints": true
     }
   ]
 }

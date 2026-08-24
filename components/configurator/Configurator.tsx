@@ -4,8 +4,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { PlantOption } from "@/lib/catalog/plants";
 import { plantOptionsForRegion } from "@/lib/catalog/plants";
+import { effectiveOutline } from "@/lib/design/outline";
 import { renderModeForProject } from "@/lib/design/render";
 import type { DesignProject, RegionSelection } from "@/lib/design/types";
+import type { NormalizedPoint } from "@/lib/vision/types";
 import type { MarketContext } from "@/lib/pricing/typology";
 
 import { Badge } from "@/components/ui/Badge";
@@ -14,6 +16,7 @@ import { Skeleton, SkeletonText } from "@/components/ui/Skeleton";
 
 import { CatalogPicker } from "./CatalogPicker";
 import { PhotoCanvas, RegionStrip } from "./PhotoCanvas";
+import { OutlineControls } from "./OutlineControls";
 import { PlantPicker, PlantStrip } from "./PlantPicker";
 import { PriceRail, type BandPayload } from "./PriceRail";
 import { SubmitLead } from "./SubmitLead";
@@ -33,6 +36,7 @@ export function Configurator({ projectId }: { projectId: string }) {
   const [selectedRegionId, setSelectedRegionId] = useState<string | null>(null);
   const [selectedPlantingId, setSelectedPlantingId] = useState<string | null>(null);
   const [plantCatalog, setPlantCatalog] = useState<PlantOption[]>([]);
+  const [adjustingRegionId, setAdjustingRegionId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const segmentationStarted = useRef(false);
@@ -138,6 +142,23 @@ export function Configurator({ projectId }: { projectId: string }) {
     [projectId, refreshBand],
   );
 
+  const applyOutline = useCallback(
+    async (regionId: string, polygon: NormalizedPoint[] | null) => {
+      setBusy(true);
+      try {
+        const res = await fetch(`/api/projects/${projectId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ regionId, polygon }),
+        });
+        if (res.ok) setProject((await res.json()) as DesignProject);
+      } finally {
+        setBusy(false);
+      }
+    },
+    [projectId],
+  );
+
   // After submit the server has locked the project — reload so the UI
   // reflects the submitted status everywhere.
   const reloadProject = useCallback(async () => {
@@ -179,6 +200,9 @@ export function Configurator({ projectId }: { projectId: string }) {
     (regionId: string) => {
       setSelectedRegionId(regionId);
       setSelectedPlantingId(null);
+      // Adjusting is per region and one at a time; moving to another area
+      // is leaving the one you were adjusting.
+      setAdjustingRegionId((current) => (current === regionId ? current : null));
       revealPicker();
     },
     [revealPicker],
@@ -272,6 +296,9 @@ export function Configurator({ projectId }: { projectId: string }) {
             plantSelections={project.plantSelections}
             plantCatalog={plantCatalog}
             selectedPlantingId={selectedPlantingId}
+            regionOutlines={project.regionOutlines}
+            adjustingRegionId={locked ? null : adjustingRegionId}
+            onAdjustOutline={(regionId, polygon) => void applyOutline(regionId, polygon)}
             onSelectPlanting={
               locked
                 ? undefined
@@ -378,13 +405,29 @@ export function Configurator({ projectId }: { projectId: string }) {
                   onClose={() => setSelectedPlantingId(null)}
                 />
               ) : selectedRegion ? (
-                <CatalogPicker
-                  region={selectedRegion}
-                  selection={project.selections[selectedRegion.id]}
-                  busy={busy}
-                  onChange={(selection) => applySelection(selectedRegion.id, selection)}
-                  onClose={() => setSelectedRegionId(null)}
-                />
+                <>
+                  <CatalogPicker
+                    region={selectedRegion}
+                    selection={project.selections[selectedRegion.id]}
+                    busy={busy}
+                    onChange={(selection) => applySelection(selectedRegion.id, selection)}
+                    onClose={() => setSelectedRegionId(null)}
+                  />
+                  <OutlineControls
+                    regionLabel={selectedRegion.label}
+                    polygon={effectiveOutline(selectedRegion, project.regionOutlines)}
+                    adjusted={Boolean(project.regionOutlines?.[selectedRegion.id])}
+                    busy={busy}
+                    editing={adjustingRegionId === selectedRegion.id}
+                    onToggleEditing={() =>
+                      setAdjustingRegionId((current) =>
+                        current === selectedRegion.id ? null : selectedRegion.id,
+                      )
+                    }
+                    onChange={(polygon) => void applyOutline(selectedRegion.id, polygon)}
+                    onReset={() => void applyOutline(selectedRegion.id, null)}
+                  />
+                </>
               ) : null}
 
               {/* Under whichever picker is open, so moving from one plant

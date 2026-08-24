@@ -292,6 +292,38 @@ async function uploadAndDesign(page: Page, viewport: Viewport): Promise<string |
     break;
   }
 
+  // Correcting the edge, which is the only path to an exact outline and
+  // therefore the one that must not quietly break.
+  const adjust = page.getByRole("button", { name: "Adjust the edge" });
+  if (await adjust.count()) {
+    await adjust.click();
+    await page.waitForTimeout(250);
+    const handles = page.locator("figure svg circle[stroke]");
+    if ((await handles.count()) === 0) {
+      findings.push({
+        where: `design-adjust @ ${viewport.name}`,
+        what: "adjusting the edge showed no handles to drag",
+      });
+    }
+    await shoot(page, viewport, "design-adjust");
+    // The keyboard path: one press moves the whole edge.
+    await page.getByRole("button", { name: "Pull the edge in" }).click();
+    await page.waitForTimeout(600);
+    const reset = page.getByRole("button", { name: /Put back the edge/ });
+    if ((await reset.count()) === 0) {
+      findings.push({
+        where: `design-adjust @ ${viewport.name}`,
+        what: "nudging the edge did not record a correction to put back",
+      });
+    } else {
+      await reset.click();
+      await page.waitForTimeout(500);
+    }
+    // The toggle relabels itself when it is on, which is the point of it.
+    await page.getByRole("button", { name: "Done adjusting" }).click();
+    await page.waitForTimeout(200);
+  }
+
   // Swap a plant too — the per-plant path has its own picker, its own
   // persistence and its own line items, and none of that is exercised by
   // a surface swap. The ellipses on the photo are pointer affordances

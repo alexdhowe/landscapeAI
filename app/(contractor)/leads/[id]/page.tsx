@@ -187,7 +187,20 @@ export default async function LeadPage({
               selections={project.selections}
               plantSelections={project.plantSelections}
               plantCatalog={org.plantCatalog}
+              regionOutlines={project.regionOutlines}
             />
+            {project.regionOutlines && Object.keys(project.regionOutlines).length > 0 && (
+              // Signal, not decoration: the customer stood in the yard and
+              // moved the line, which says both that the segmentation was
+              // off there and that they cared enough to fix it.
+              <p className="mt-2 text-xs text-survey-800">
+                The customer corrected the edge of{" "}
+                {Object.keys(project.regionOutlines).length === 1
+                  ? "one area"
+                  : `${Object.keys(project.regionOutlines).length} areas`}
+                {" "}on this photo.
+              </p>
+            )}
             <p className="mt-2 text-xs text-bark-500">
               {project.location?.address
                 ? `Address: ${project.location.address}`

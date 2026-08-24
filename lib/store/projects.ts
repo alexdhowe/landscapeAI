@@ -39,6 +39,7 @@ import {
   type StoredPhoto,
 } from "../storage";
 import type { ProjectStore } from "./types";
+import type { NormalizedPoint } from "../vision/types";
 
 export {
   ProjectLockedError,
@@ -125,6 +126,15 @@ export async function setSelection(
  * Put a different plant where one of the photo's plants is standing, or
  * pass null to go back to what is actually there.
  */
+/** Correct a region's outline, or pass null to restore the segmented one. */
+export async function setRegionOutline(
+  id: string,
+  regionId: string,
+  polygon: NormalizedPoint[] | null,
+): Promise<DesignProject> {
+  return (await store()).setRegionOutline(id, regionId, polygon);
+}
+
 export async function setPlantSelection(
   id: string,
   plantingId: string,

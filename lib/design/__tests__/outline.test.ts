@@ -7,7 +7,7 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { closedPathData, smoothOutline } from "../outline";
+import { closedPathData, insetOutline, smoothOutline } from "../outline";
 import type { NormalizedPoint } from "../../vision/types";
 
 /** A regular n-gon sampled on a circle — a stand-in for a curved bed edge. */
@@ -144,5 +144,76 @@ describe("closedPathData", () => {
 
   it("is empty for an empty ring", () => {
     expect(closedPathData([], 100, 100)).toBe("");
+  });
+});
+
+describe("insetOutline", () => {
+  // Used for the material fill, not the outline: material stopping a hair
+  // short of a stone border is what a real bed looks like, and material
+  // painted across the border is the thing a customer notices at once.
+  it("moves every point inward", () => {
+    const source = circle(24, 0.3);
+    for (const [x, y] of insetOutline(source, 0.01)) {
+      expect(Math.hypot(x - 0.5, y - 0.5)).toBeLessThan(0.3);
+    }
+  });
+
+  it("insets by roughly the distance asked for", () => {
+    const inset = insetOutline(circle(48, 0.3), 0.01);
+    for (const [x, y] of inset) {
+      expect(Math.hypot(x - 0.5, y - 0.5)).toBeCloseTo(0.29, 2);
+    }
+  });
+
+  it("works the same whichever way the ring winds", () => {
+    // The model does not promise a winding order, and getting this wrong
+    // pushes the fill outward — the exact opposite of the job.
+    const clockwise = circle(20, 0.3);
+    const counter = [...clockwise].reverse();
+    const a = insetOutline(clockwise, 0.01);
+    const b = insetOutline(counter, 0.01);
+    for (const ring of [a, b]) {
+      for (const [x, y] of ring) {
+        expect(Math.hypot(x - 0.5, y - 0.5)).toBeLessThan(0.3);
+      }
+    }
+  });
+
+  it("keeps a rectangle a rectangle", () => {
+    const inset = insetOutline(SQUARE, 0.02);
+    const xs = inset.map(([x]) => x).sort((p, q) => p - q);
+    const ys = inset.map(([, y]) => y).sort((p, q) => p - q);
+    expect(xs[0]).toBeCloseTo(0.22, 2);
+    expect(xs[3]).toBeCloseTo(0.78, 2);
+    expect(ys[0]).toBeCloseTo(0.22, 2);
+    expect(ys[3]).toBeCloseTo(0.78, 2);
+  });
+
+  it("refuses to inset further than a fill ever should", () => {
+    // A bisector offset is exact on a convex corner and approximate
+    // elsewhere; past a couple of percent it wants a real polygon offset
+    // with self-intersection handling, so the amount is capped.
+    const huge = insetOutline(circle(20, 0.3), 5);
+    for (const [x, y] of huge) {
+      expect(Math.hypot(x - 0.5, y - 0.5)).toBeGreaterThan(0.2);
+    }
+  });
+
+  it("does nothing when asked for nothing", () => {
+    expect(insetOutline(SQUARE, 0)).toEqual(SQUARE);
+    expect(insetOutline([[0.1, 0.1], [0.2, 0.2]], 0.01)).toEqual([[0.1, 0.1], [0.2, 0.2]]);
+  });
+
+  it("survives duplicated points", () => {
+    const ring: NormalizedPoint[] = [
+      [0.2, 0.2],
+      [0.8, 0.2],
+      [0.8, 0.2],
+      [0.8, 0.8],
+      [0.2, 0.8],
+    ];
+    expect(
+      insetOutline(ring, 0.01).every(([x, y]) => Number.isFinite(x) && Number.isFinite(y)),
+    ).toBe(true);
   });
 });

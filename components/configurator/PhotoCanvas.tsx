@@ -1,12 +1,18 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import { getOption } from "@/lib/catalog/options";
 import type { PlantOption } from "@/lib/catalog/plants";
 import { layoutRegionMarkers } from "@/lib/design/markers";
-import { closedPathData, smoothOutline } from "@/lib/design/outline";
+import {
+  closedPathData,
+  effectiveOutline,
+  insetOutline,
+  smoothOutline,
+} from "@/lib/design/outline";
 import type { RegionSelection } from "@/lib/design/types";
+import type { NormalizedPoint } from "@/lib/vision/types";
 import type { SegmentedRegion } from "@/lib/vision/types";
 import { REGION_KIND_LABELS } from "@/lib/vision/types";
 
@@ -37,6 +43,14 @@ type Props = {
   /** Tapping a plant on the photo opens its picker. */
   onSelectPlanting?: (plantingId: string, regionId: string) => void;
   selectedPlantingId?: string | null;
+  /** regionId → the outline after the customer corrected it. */
+  regionOutlines?: Record<string, NormalizedPoint[]>;
+  /**
+   * The customer is adjusting this region's edge: drag anywhere on the
+   * outline to move it. Only ever one region at a time.
+   */
+  adjustingRegionId?: string | null;
+  onAdjustOutline?: (regionId: string, polygon: NormalizedPoint[]) => void;
 };
 
 /**
@@ -57,6 +71,17 @@ type Props = {
 const PLANTING_MARGIN = 1.18;
 
 /**
+ * How far inside its outline a swapped material is painted, as a fraction
+ * of the frame.
+ *
+ * Small on purpose. Enough to keep gravel off the row of cobbles a bed is
+ * edged with, not enough to read as the bed having shrunk. The outline
+ * itself does not move — this is only the fill, so what the customer sees
+ * as the region's boundary is still where the boundary is.
+ */
+const MATERIAL_INSET = 0.006;
+
+/**
  * The path drawn for a region.
  *
  * Smoothed, because the graph stores a bed edge as a list of vertices and
@@ -74,6 +99,20 @@ function outlinePath(
   h: number,
 ): string {
   return closedPathData(smoothOutline(polygon), w, h);
+}
+
+/** The vertex a grab at `at` should move. */
+function nearestVertex(polygon: readonly NormalizedPoint[], at: NormalizedPoint): number {
+  let best = 0;
+  let bestDistance = Infinity;
+  polygon.forEach(([x, y], i) => {
+    const distance = Math.hypot(x - at[0], y - at[1]);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      best = i;
+    }
+  });
+  return best;
 }
 
 /** What the photo called this plant, when it managed to name it. */
@@ -122,10 +161,43 @@ export function PhotoCanvas({
   plantCatalog,
   onSelectPlanting,
   selectedPlantingId = null,
+  regionOutlines,
+  adjustingRegionId = null,
+  onAdjustOutline,
 }: Props) {
   const [dims, setDims] = useState<{ w: number; h: number } | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [hoveredPlantId, setHoveredPlantId] = useState<string | null>(null);
+  const frameRef = useRef<HTMLElement | null>(null);
+  /**
+   * The outline being dragged right now, held locally so the edge follows
+   * the finger at frame rate. The server hears about it once, on release.
+   */
+  const [dragging, setDragging] = useState<{
+    regionId: string;
+    polygon: NormalizedPoint[];
+    index: number;
+  } | null>(null);
+
+  /**
+   * The outline a region is drawn with right now: the one being dragged if
+   * it is this one, otherwise the customer's correction, otherwise what
+   * the segmentation produced.
+   */
+  const liveOutline = (region: SegmentedRegion): NormalizedPoint[] =>
+    dragging?.regionId === region.id
+      ? dragging.polygon
+      : effectiveOutline(region, regionOutlines);
+
+  /** Pointer position as a fraction of the photo. */
+  const atPointer = (event: { clientX: number; clientY: number }): NormalizedPoint | null => {
+    const box = frameRef.current?.getBoundingClientRect();
+    if (!box || box.width === 0 || box.height === 0) return null;
+    return [
+      Math.min(1, Math.max(0, (event.clientX - box.left) / box.width)),
+      Math.min(1, Math.max(0, (event.clientY - box.top) / box.height)),
+    ];
+  };
 
   const catalogById = new Map((plantCatalog ?? []).map((o) => [o.id, o]));
   /** The plant the customer put here, if they put one here. */
@@ -147,10 +219,15 @@ export function PhotoCanvas({
     Boolean(selections[region.id]?.surfaceOptionId) ||
     (region.plantings ?? []).some((plant) => chosenPlant(plant.id));
   const named = regions.filter((region) => !acted(region));
-  const markers = layoutRegionMarkers(named);
+  const markers = layoutRegionMarkers(
+    named.map((region) => ({ id: region.id, polygon: liveOutline(region) })),
+  );
 
   return (
-    <figure className="relative overflow-hidden rounded-xl bg-bark-900 shadow-e3 sm:rounded-2xl">
+    <figure
+      ref={frameRef}
+      className="relative overflow-hidden rounded-xl bg-bark-900 shadow-e3 sm:rounded-2xl"
+    >
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
         src={photoUrl}
@@ -203,7 +280,21 @@ export function PhotoCanvas({
             // shrubs alone. Before this the texture covered the whole
             // polygon and every plant in the bed turned grey with it.
             <mask key={region.id} id={`swap-${region.id}`}>
-              <path d={outlinePath(region.polygon, w, h)} fill="#ffffff" />
+              {/* Inset, so the material lands just inside the line rather
+                  than just outside it. A bed is edged with cobbles or
+                  steel or brick, the traced boundary lands on or near that
+                  edging, and the two ways to be wrong are not equal:
+                  material stopping a hair short is what a real bed looks
+                  like, and material painted across the customer's own
+                  stone border is what they notice. */}
+              <path
+                d={closedPathData(
+                  insetOutline(smoothOutline(liveOutline(region)), MATERIAL_INSET),
+                  w,
+                  h,
+                )}
+                fill="#ffffff"
+              />
               {/* Only the plants that are STAYING are punched out. One
                   the customer has replaced is covered by the new material
                   and then drawn over, which is what makes a swap look like
@@ -229,7 +320,9 @@ export function PhotoCanvas({
           // One path, used for the tint, the stroke, the selection ring and
           // the hit target, so what the customer sees and what they can tap
           // cannot drift apart.
-          const d = outlinePath(region.polygon, w, h);
+          const outline = liveOutline(region);
+          const d = outlinePath(outline, w, h);
+          const isAdjusting = region.id === adjustingRegionId;
           const surfaceOption = selections[region.id]?.surfaceOptionId
             ? getOption(selections[region.id].surfaceOptionId!)
             : undefined;
@@ -297,6 +390,63 @@ export function PhotoCanvas({
                 onMouseEnter={() => setActiveId(region.id)}
                 onMouseLeave={() => setActiveId(null)}
               />
+              {isAdjusting && onAdjustOutline && (
+                <>
+                  {/* Every vertex, as a handle. Drawn from the raw outline
+                      rather than the smoothed one, because these are the
+                      points that actually move. */}
+                  {outline.map(([x, y], i) => (
+                    <circle
+                      key={i}
+                      cx={x * w}
+                      cy={y * h}
+                      r={w * (dragging?.index === i ? 0.011 : 0.007)}
+                      fill="#ffffff"
+                      stroke="#1c1b18"
+                      strokeWidth={w * 0.0018}
+                    />
+                  ))}
+                  {/* A fat invisible stroke over the edge: grab anywhere on
+                      the line, not just on a handle. On a phone the
+                      handles of a forty-point outline are smaller than a
+                      fingertip and closer together than one, so the line
+                      itself has to be the target. */}
+                  <path
+                    d={d}
+                    fill="none"
+                    stroke="transparent"
+                    strokeWidth={w * 0.05}
+                    className="pointer-events-auto cursor-grab touch-none"
+                    onPointerDown={(event) => {
+                      const at = atPointer(event);
+                      if (!at) return;
+                      event.currentTarget.setPointerCapture(event.pointerId);
+                      event.stopPropagation();
+                      setDragging({
+                        regionId: region.id,
+                        polygon: outline,
+                        index: nearestVertex(outline, at),
+                      });
+                    }}
+                    onPointerMove={(event) => {
+                      if (dragging?.regionId !== region.id) return;
+                      const at = atPointer(event);
+                      if (!at) return;
+                      const polygon = dragging.polygon.map((p, i) =>
+                        i === dragging.index ? at : p,
+                      );
+                      setDragging({ ...dragging, polygon });
+                    }}
+                    onPointerUp={(event) => {
+                      if (dragging?.regionId !== region.id) return;
+                      event.currentTarget.releasePointerCapture(event.pointerId);
+                      onAdjustOutline(region.id, dragging.polygon);
+                      setDragging(null);
+                    }}
+                    onPointerCancel={() => setDragging(null)}
+                  />
+                </>
+              )}
             </g>
           );
         })}

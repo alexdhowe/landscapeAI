@@ -1,0 +1,18 @@
+-- The customer's correction to a region's outline.
+--
+-- A model placing polygon vertices from a photograph gets close and not exact,
+-- and past a point that is what the technique does rather than a prompt that
+-- needs another round. The person holding the phone is standing in the yard and
+-- can see where the mulch stops, so they get to say.
+--
+-- Beside the model's polygon rather than overwriting it: what the model said and
+-- what the customer said are different facts, and only one of them can be
+-- improved by a better prompt. Keeping both is also what makes "put it back"
+-- possible, and what would let a later session ask how far off the model
+-- usually is -- the same reason the deltas table keeps the estimate a rep
+-- replaced.
+--
+-- Null for every region nobody has touched, which is nearly all of them.
+-- Re-segmenting replaces the row and takes the correction with it, which is
+-- right: it is a correction to *these* outlines.
+ALTER TABLE "regions" ADD COLUMN "adjusted_polygon" jsonb;

@@ -10,7 +10,7 @@ import type { EstimateSnapshot, LeadContact } from "../lead/types";
 import type { LngLat } from "../measure/area";
 import type { Quantity } from "../pricing/types";
 import type { MarketContext } from "../pricing/typology";
-import type { SegmentationResult } from "../vision/types";
+import type { NormalizedPoint, SegmentationResult } from "../vision/types";
 
 export type RegionSelection = {
   /** Surface option currently covering the region, if swapped. */
@@ -83,6 +83,17 @@ export type DesignProject = {
    * were swappable, so every reader must treat it as optional.
    */
   plantSelections?: Record<string, string>;
+  /**
+   * regionId → the outline after the customer corrected it.
+   *
+   * A model placing polygon vertices from a photograph gets close and not
+   * exact, and past a point that is what the technique does rather than a
+   * prompt that needs another round. The person holding the phone is
+   * standing in the yard and can see where the mulch stops, so they get to
+   * say. Absent for a region nobody has touched, which is nearly all of
+   * them.
+   */
+  regionOutlines?: Record<string, NormalizedPoint[]>;
   marketContext: MarketContext;
   /** Set once the customer shares and confirms an address. */
   location?: ProjectLocation;

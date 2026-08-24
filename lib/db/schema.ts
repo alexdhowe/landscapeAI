@@ -479,6 +479,16 @@ export const regions = pgTable(
      * for, which is why nothing may require them — see the type.
      */
     plantings: jsonb("plantings").$type<Planting[]>(),
+    /**
+     * The outline after the customer corrected it, or null for "as
+     * segmented". Kept beside the model's polygon rather than overwriting
+     * it: what the model said and what the person standing in the yard
+     * said are different facts, and only one of them can be improved by a
+     * better prompt. Re-segmenting replaces the row and takes the
+     * correction with it, which is right — it is a correction to *these*
+     * outlines.
+     */
+    adjustedPolygon: jsonb("adjusted_polygon").$type<NormalizedPoint[]>(),
     existingMaterial: text("existing_material"),
     condition: text("condition"),
     /**

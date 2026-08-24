@@ -206,6 +206,47 @@ describe("the store, over Drizzle", () => {
     expect((await store.getProject(created.id)).plantSelections).toBeUndefined();
   });
 
+  it("round-trips a corrected outline, and puts the original back", async () => {
+    // The model's polygon and the customer's correction are different
+    // facts. Both are kept: only one of them can be improved by a better
+    // prompt, and keeping both is what makes "put it back" possible.
+    const created = await store.createProject(PHOTO_BYTES, "image/jpeg", "jpg");
+    await store.setSegmentation(created.id, { status: "ready", ...demoSegmentation() });
+    expect((await store.getProject(created.id)).regionOutlines).toBeUndefined();
+
+    const corrected: [number, number][] = [
+      [0.06, 0.6],
+      [0.44, 0.57],
+      [0.46, 0.71],
+      [0.05, 0.74],
+    ];
+    await store.setRegionOutline(created.id, "demo_bed", corrected);
+    const after = await store.getProject(created.id);
+    expect(after.regionOutlines).toEqual({ demo_bed: corrected });
+    // The segmentation's own polygon is untouched.
+    const bed = after.segmentation.status === "ready"
+      ? after.segmentation.regions.find((r) => r.id === "demo_bed")!
+      : null;
+    expect(bed!.polygon).toEqual(
+      demoSegmentation().regions.find((r) => r.id === "demo_bed")!.polygon,
+    );
+
+    await store.setRegionOutline(created.id, "demo_bed", null);
+    expect((await store.getProject(created.id)).regionOutlines).toBeUndefined();
+  });
+
+  it("refuses a correction to a region the design does not have", async () => {
+    const created = await store.createProject(PHOTO_BYTES, "image/jpeg", "jpg");
+    await store.setSegmentation(created.id, { status: "ready", ...demoSegmentation() });
+    await expect(
+      store.setRegionOutline(created.id, "no_such_region", [
+        [0.1, 0.1],
+        [0.2, 0.1],
+        [0.2, 0.2],
+      ]),
+    ).rejects.toThrow(/not part of this design/i);
+  });
+
   it("refuses a choice about a plant the design does not have", async () => {
     const created = await store.createProject(PHOTO_BYTES, "image/jpeg", "jpg");
     await store.setSegmentation(created.id, { status: "ready", ...demoSegmentation() });

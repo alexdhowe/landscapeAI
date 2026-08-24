@@ -32,13 +32,14 @@ not negotiable.
 | Contractor login on a self-hosted deployment | ✅ fixed — `trustHost`; it threw `UntrustedHost` on every deployment target |
 | Segmentation against a real photo | ⚠️ improved, unverified — ground line, denser outlines, a self-correcting second pass. Needs a key and a yard to judge |
 | Plug-and-play plants | ✅ done — hover to identify, swap one plant for another, priced and frozen like any other choice |
+| Correcting an outline | ✅ done — drag the edge on the photo, or nudge the whole edge in or out; the model's polygon is kept alongside |
 | The aerial leg (`/design/[id]/locate`) | ⛔ gated off — deliberately: no paid imagery or geocoder until there is a working MVP |
 
 All six phases are in, they run on Postgres, the contractor console is behind
 a login, the price book is editable, photos live in object storage when a
 bucket is configured, and the whole thing has been designed and opened on a
 phone — on a phone *branch*, for the first time in the twelfth session,
-which is its own story. `npm test` runs 506 tests — with a database and
+which is its own story. `npm test` runs 526 tests — with a database and
 without one.
 
 **It has not been deployed.** The tenth session wrote the configuration —
@@ -65,7 +66,7 @@ store, so a clean checkout runs the demo with nothing to provision.
 ```sh
 npm run doctor    # is this machine set up? checks .env.local, the API key (against the
                   # real API), and the console login — and says what to fix, in English.
-npm test          # Vitest — 506 tests across every phase. No server, no network, no browser.
+npm test          # Vitest — 526 tests across every phase. No server, no network, no browser.
 npm run typecheck
 npm run dev
 npm run build
@@ -574,6 +575,73 @@ architecture, not a plant-specific gap, and it closes when the aerial leg
 does. The spacing validation in `lib/growth/spacing.ts` knows how to warn
 about crowding at year five and is not wired to this yet: it needs a scale
 in feet, which one photograph cannot give.
+
+## Letting the customer fix the edge
+
+Three rounds of prompt work got the outlines from "a few straight chords
+across a curve" to "follows the curve, still sits on the stone border."
+That is roughly where placing polygon vertices from a photograph lands, and
+a fourth round of wording was not going to close it. The person holding the
+phone is standing in the yard and can see exactly where the mulch stops, so
+now they get to say.
+
+### Two ways to say it, and the second is not the lesser one
+
+**Drag the edge.** With a region open, "Adjust the edge" puts a handle on
+every vertex and a fat invisible stroke along the line: grab anywhere on
+the outline, not just on a handle, because on a phone the handles of a
+forty-point outline are smaller than a fingertip and closer together than
+one. The edge follows the finger at frame rate and the server hears about
+it once, on release.
+
+**Nudge the whole edge in or out.** One press, no aiming. This is the
+keyboard and screen-reader path — which is why it is a pair of real buttons
+rather than a slider — and it also happens to fix the failure that actually
+gets reported: an outline sitting a little outside the bed's border all the
+way round. It reuses the same inward offset the material fill uses.
+
+Either way, "Put back the edge we found" restores the segmented outline.
+
+### The model's polygon is kept
+
+A correction is stored beside the segmentation's polygon, never over it
+(migration 0007). What the model said and what the customer said are
+different facts, and only one of them can be improved by a better prompt.
+Keeping both is what makes "put it back" possible, and it is what would let
+a later session ask how far off the model usually is — the same reason the
+deltas table keeps the estimate a rep replaced. Re-segmenting replaces the
+region row and takes the correction with it, which is right: it was a
+correction to *those* outlines.
+
+One function resolves which outline to draw, because five places draw a
+region — the customer's canvas, its material mask, its hit target, the
+rep's canvas, and the marker placement — and a correction that reached four
+of them would be worse than one that reached none. The rep's lead view says
+when a customer corrected an outline, because that is signal: it says both
+that the segmentation was off there and that the customer cared enough to
+fix it.
+
+The browser is not trusted with the geometry. An outline reaches a rep's
+screen and a frozen snapshot, so a correction has to be 3–400 points, all
+inside the picture, enclosing an actual area — checked at the route, with
+the refusals tested.
+
+### And the fill sits inside the line
+
+Independently of any of that: a swapped material is now painted a fraction
+of a percent *inside* the region's outline rather than right up to it. A
+bed is edged with cobbles or steel or brick, the traced boundary lands on
+or near that edging, and the two ways to be wrong are not equal — material
+stopping a hair short is what a real bed looks like, and material painted
+across the customer's own stone border is what they notice immediately. The
+outline itself does not move; only the fill.
+
+That inward offset had one bug worth recording, because a test caught it
+the moment it was written and a screenshot would not have: image
+coordinates put y downward, so the normal that is "left of travel" in maths
+is the *outward* one here. With the sign flipped it pushed the fill further
+over the border it exists to keep off. The test that catches it insets a
+ring wound each way and checks both got smaller.
 
 ## The bed edge, and the border around it
 

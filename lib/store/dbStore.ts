@@ -33,6 +33,7 @@ import {
   assertPlanting,
   assertRegion,
 } from "./gates";
+import type { NormalizedPoint } from "../vision/types";
 import {
   ProjectNotFoundError,
   type NewProjectPhoto,
@@ -98,6 +99,13 @@ export function createDbStore(): ProjectStore {
       return edit(id, async (project) => {
         assertRegion(project, regionId);
         await q.upsertSelection(await getDb(), id, regionId, selection);
+      });
+    },
+
+    setRegionOutline(id: string, regionId: string, polygon: NormalizedPoint[] | null) {
+      return edit(id, async (project) => {
+        assertRegion(project, regionId);
+        await q.setRegionAdjustedPolygon(await getDb(), id, regionId, polygon);
       });
     },
 

@@ -8,9 +8,9 @@ import { KIND_COLORS } from "@/components/configurator/regionColors";
 import { getOption } from "@/lib/catalog/options";
 import type { PlantOption } from "@/lib/catalog/plants";
 import { layoutRegionMarkers } from "@/lib/design/markers";
-import { closedPathData, smoothOutline } from "@/lib/design/outline";
+import { closedPathData, effectiveOutline, smoothOutline } from "@/lib/design/outline";
 import type { RegionSelection } from "@/lib/design/types";
-import type { SegmentedRegion } from "@/lib/vision/types";
+import type { NormalizedPoint, SegmentedRegion } from "@/lib/vision/types";
 import { REGION_KIND_LABELS } from "@/lib/vision/types";
 
 
@@ -20,6 +20,7 @@ export function LeadPhoto({
   selections,
   plantSelections,
   plantCatalog = [],
+  regionOutlines,
 }: {
   photoUrl: string;
   regions: SegmentedRegion[];
@@ -27,6 +28,8 @@ export function LeadPhoto({
   /** plantingId → the plant the customer chose. */
   plantSelections?: Record<string, string>;
   plantCatalog?: readonly PlantOption[];
+  /** The customer's own corrections to the outlines, where they made any. */
+  regionOutlines?: Record<string, NormalizedPoint[]>;
 }) {
   const markers = layoutRegionMarkers(regions);
   const catalogById = new Map(plantCatalog.map((o) => [o.id, o]));
@@ -50,7 +53,13 @@ export function LeadPhoto({
               key={region.id}
               // The same smoothed path the customer's canvas draws — the
               // rep is reviewing the design they were shown.
-              d={closedPathData(smoothOutline(region.polygon), 100, 100)}
+              // The outline the customer actually saw and sent, which is
+              // theirs where they corrected it.
+              d={closedPathData(
+                smoothOutline(effectiveOutline(region, regionOutlines)),
+                100,
+                100,
+              )}
               fill={color}
               fillOpacity={0.18}
               stroke={color}
