@@ -40,6 +40,14 @@ export const OUTLINE_COLORS: readonly { name: string; rgb: [number, number, numb
 export type OutlineSubject = {
   id: string;
   polygon: NormalizedPoint[];
+  /**
+   * The plants inside it, drawn as rings in the same colour. These are the
+   * shapes that most need a second look — a shrub is small, so being a few
+   * percent out is the difference between covering it and painting gravel
+   * across it — and they cannot be corrected by a model that cannot see
+   * where the first attempt landed.
+   */
+  plantings?: { id: string; cx: number; cy: number; rx: number; ry: number }[];
 };
 
 /** Which colour each region was drawn in, so the prompt can name them. */
@@ -84,6 +92,23 @@ function line(
   for (let i = 0; i <= steps; i++) {
     const t = i / steps;
     stamp(raster, ax + (bx - ax) * t, ay + (by - ay) * t, r, rgb);
+  }
+}
+
+/** A hollow ellipse, walked by angle. Thin, so it frames rather than hides. */
+function ring(
+  raster: Raster,
+  cx: number,
+  cy: number,
+  rx: number,
+  ry: number,
+  r: number,
+  rgb: [number, number, number],
+) {
+  const steps = Math.max(24, Math.ceil((rx + ry) * 2));
+  for (let i = 0; i <= steps; i++) {
+    const a = (i / steps) * Math.PI * 2;
+    stamp(raster, cx + Math.cos(a) * rx, cy + Math.sin(a) * ry, r, rgb);
   }
 }
 
@@ -134,6 +159,18 @@ export async function annotateOutlines(
     // The vertices themselves, so "move this corner" has something to
     // refer to and the model can see how few of them there are.
     for (const [x, y] of points) stamp(raster, x, y, vertexRadius, swatch.rgb);
+
+    for (const plant of subject.plantings ?? []) {
+      ring(
+        raster,
+        plant.cx * raster.width,
+        plant.cy * raster.height,
+        plant.rx * raster.width,
+        plant.ry * raster.height,
+        Math.max(1, strokeRadius - 1),
+        swatch.rgb,
+      );
+    }
   });
 
   const jpeg = await import("jpeg-js");

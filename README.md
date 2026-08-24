@@ -38,7 +38,7 @@ All six phases are in, they run on Postgres, the contractor console is behind
 a login, the price book is editable, photos live in object storage when a
 bucket is configured, and the whole thing has been designed and opened on a
 phone — on a phone *branch*, for the first time in the twelfth session,
-which is its own story. `npm test` runs 488 tests — with a database and
+which is its own story. `npm test` runs 497 tests — with a database and
 without one.
 
 **It has not been deployed.** The tenth session wrote the configuration —
@@ -65,7 +65,7 @@ store, so a clean checkout runs the demo with nothing to provision.
 ```sh
 npm run doctor    # is this machine set up? checks .env.local, the API key (against the
                   # real API), and the console login — and says what to fix, in English.
-npm test          # Vitest — 488 tests across every phase. No server, no network, no browser.
+npm test          # Vitest — 497 tests across every phase. No server, no network, no browser.
 npm run typecheck
 npm run dev
 npm run build
@@ -575,6 +575,76 @@ does. The spacing validation in `lib/growth/spacing.ts` knows how to warn
 about crowding at year five and is not wired to this yet: it needs a scale
 in feet, which one photograph cannot give.
 
+## "Nothing is lining up"
+
+A third photo came back with outlines that followed the bed edges properly
+— the vertex cap was the binding constraint and raising it worked — and a
+report that the scale was still wrong and nothing lined up.
+
+Two different things were true, and separating them mattered more than
+guessing at either.
+
+### The rendering was exact. It was measured, not argued about
+
+The demo overlay has known coordinates, so where they land can be checked
+rather than eyeballed. Every plant rendered at precisely its stored
+position — `demo_bed_plant_1` is at (0.11, 0.645) in the data and rendered
+at (0.11, 0.645) — and the `<figure>`, the `<img>` and the SVG overlay were
+pixel-identical in position and size. Whatever was wrong, the transform
+from normalized coordinates to the picture was not it.
+
+### The labels pointed at the wrong plants
+
+The same measurement caught the real bug immediately. The hover label for a
+plant at cx **0.11** was rendering at cx **0.0235** — exactly half its own
+width to the left.
+
+The cause is a CSS composition rule, not a typo. Tailwind's translate
+utilities set the standalone `translate` property, and this element also
+carried an inline `transform: translate(-50%, …)`. Those are two different
+properties, so they do not override one another — **they add up**. The
+label was offset by half its width twice.
+
+On a photograph that is invisible as a bug and obvious as a symptom: the
+name of one plant appears over a different plant, and the honest conclusion
+from looking at it is "the scale is messed up". Which is what was reported,
+and it was a fair reading.
+
+`npm run shots` now measures this rather than hoping: every element drawn
+over the photo carries the coordinates it is supposed to be at, and the
+audit compares them against where it actually landed, including the hover
+label against its own plant. Reintroducing the bug produces
+`the label for demo_bed_plant_1 is at x=-0.053 but its plant is at x=0.110`
+and a non-zero exit.
+
+### The plants were never given a second look
+
+The rest of the misalignment was real, and it was a gap in the previous
+session's work rather than a bug in it. The refinement pass corrected
+region polygons and **explicitly preserved the plantings** — so the shapes
+that most need correcting were the ones excluded from the correction.
+
+They are in it now. The annotated photo carries a ring for every plant in
+its region's colour, so the model can see where each one landed, and the
+prompt is blunt about the stakes: a ring a few percent off is the
+difference between a plant staying put when the mulch is swapped and gravel
+being painted across its leaves.
+
+The merge stays conservative, and the bounds are the interesting part. A
+plant may be nudged and resized; it may not be moved more than 15% of the
+frame, because that is not a correction but a claim that the first pass
+matched ids to the wrong plants — and the pass that found the plants is the
+better authority on which is which. Radii may change by between 0.4× and
+2.5×, so covering foliage the first attempt clipped is allowed and a
+tenfold change is not. A plant cannot be invented or dropped, its id and
+label survive, and a region whose polygon correction is refused still keeps
+its good plant corrections.
+
+**Verified here:** the rendering measurement above, the label fix, the
+bounds, and that the audit rule fails when the bug is put back. **Not
+verified here:** whether the second pass actually moves the rings onto the
+plants. Still needs a key and a yard.
+
 ## The first real yard, through a real key
 
 Everything above this section was found against a stand-in image. Then the
@@ -923,10 +993,11 @@ primitives are what make them the same product.
 `scripts/screenshots.mts` (`npm run shots`) drives the whole customer flow in
 a real Chromium at 390×844 and 1440×900 — upload, segmentation wait, region
 swap, band, submit — then signs in and captures the console. It writes PNGs
-to `.shots/` and audits four rules that are easy to state and easy to break:
+to `.shots/` and audits five rules that are easy to state and easy to break:
 no horizontal scroll at 390px, no interactive element under 44 CSS px,
-nothing visible that the markup says is hidden, and a sign-in that reaches
-the dashboard. It exits non-zero on a finding.
+nothing visible that the markup says is hidden, a sign-in that reaches the
+dashboard, and **anything drawn over the photo landing where its
+coordinates say**. It exits non-zero on a finding.
 
 It drives the plant swap as well as the surface swap, because the per-plant
 path has its own picker, its own persistence and its own line items and a

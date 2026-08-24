@@ -379,6 +379,10 @@ export function PhotoCanvas({
                   type="button"
                   tabIndex={-1}
                   data-plant={plant.id}
+                  // What this element's position is supposed to be, so the
+                  // browser pass can check where it actually landed.
+                  data-cx={plant.cx}
+                  data-cy={plant.cy}
                   onClick={() => onSelectPlanting(plant.id, region.id)}
                   onMouseEnter={() => setHoveredPlantId(plant.id)}
                   onMouseLeave={() => setHoveredPlantId(null)}
@@ -407,7 +411,17 @@ export function PhotoCanvas({
               return (
                 <p
                   key={plant.id}
-                  className="pointer-events-none absolute z-10 -translate-x-1/2 whitespace-nowrap rounded-full bg-bark-950/85 px-2.5 py-1 text-2xs font-medium text-white shadow-e2 sm:text-xs"
+                  data-plant-label={plant.id}
+                  // No `-translate-x-1/2` class here, and that is not an
+                  // oversight. Tailwind's translate utilities set the
+                  // standalone CSS `translate` property, so a class and an
+                  // inline `transform` do not override one another — they
+                  // compose. This label carried both and was drawn half
+                  // its own width to the left of the plant it names, which
+                  // on a bed of shrubs means it points at a different
+                  // plant. Everything positional for this element is in
+                  // the one inline transform.
+                  className="pointer-events-none absolute z-10 whitespace-nowrap rounded-full bg-bark-950/85 px-2.5 py-1 text-2xs font-medium text-white shadow-e2 sm:text-xs"
                   style={{
                     left: `${plant.cx * 100}%`,
                     top: `${Math.max(0, plant.cy - plant.ry * PLANTING_MARGIN) * 100}%`,

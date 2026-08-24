@@ -77,7 +77,7 @@ describe("mergeRefinement", () => {
       [0.79, 0.88],
       [0.21, 0.89],
     ];
-    const [merged] = mergeRefinement([region()], { polygons: new Map([["bed", tighter]]) });
+    const [merged] = mergeRefinement([region()], { plantings: new Map(), polygons: new Map([["bed", tighter]]) });
     expect(merged.polygon).toEqual(tighter);
     expect(merged.kind).toBe("bed");
     expect(merged.label).toBe("Bed along front walk");
@@ -105,13 +105,14 @@ describe("mergeRefinement", () => {
       [0.0, 1.0],
     ];
     for (const polygon of [tiny, huge]) {
-      const [merged] = mergeRefinement([region()], { polygons: new Map([["bed", polygon]]) });
+      const [merged] = mergeRefinement([region()], { plantings: new Map(), polygons: new Map([["bed", polygon]]) });
       expect(merged.polygon).toEqual(SQUARE);
     }
   });
 
   it("cannot invent a region or drop one", () => {
     const merged = mergeRefinement([region({ id: "a" }), region({ id: "b" })], {
+      plantings: new Map(),
       polygons: new Map([
         ["a", [[0.25, 0.62], [0.75, 0.62], [0.75, 0.88], [0.25, 0.88]] as NormalizedPoint[]],
         ["ghost", SQUARE],
@@ -122,7 +123,7 @@ describe("mergeRefinement", () => {
 
   it("leaves everything alone when nothing came back", () => {
     const regions = [region({ id: "a" }), region({ id: "b" })];
-    expect(mergeRefinement(regions, { polygons: new Map() })).toEqual(regions);
+    expect(mergeRefinement(regions, { polygons: new Map(), plantings: new Map() })).toEqual(regions);
   });
 
   it("holds the corrected outlines to the ground line it reports", () => {
@@ -134,11 +135,131 @@ describe("mergeRefinement", () => {
     ];
     const [merged] = mergeRefinement([region()], {
       polygons: new Map([["bed", climbing]]),
+      plantings: new Map(),
       groundLine: [
         [0, 0.55],
         [1, 0.55],
       ],
     });
     for (const [, y] of merged.polygon) expect(y).toBeGreaterThanOrEqual(0.55);
+  });
+});
+
+describe("mergeRefinement, on the plants", () => {
+  // These are the shapes that most need the second look. A shrub is small,
+  // so a few percent out is the difference between the plant staying put
+  // when the mulch is swapped and gravel being painted across its leaves.
+  const plants = () =>
+    region({
+      plantings: [
+        { id: "bed_plant_1", cx: 0.4, cy: 0.7, rx: 0.05, ry: 0.05, label: "azalea" },
+        { id: "bed_plant_2", cx: 0.6, cy: 0.72, rx: 0.04, ry: 0.04 },
+      ],
+    });
+
+  it("nudges a ring onto its plant and resizes it", () => {
+    const [merged] = mergeRefinement([plants()], {
+      polygons: new Map(),
+      plantings: new Map([["bed_plant_1", { cx: 0.44, cy: 0.73, rx: 0.075, ry: 0.07 }]]),
+    });
+    expect(merged.plantings![0]).toEqual({
+      id: "bed_plant_1",
+      cx: 0.44,
+      cy: 0.73,
+      rx: 0.075,
+      ry: 0.07,
+      // Identity and label survive: the customer's choice about this plant
+      // is keyed by the id, and a correction is not a new plant.
+      label: "azalea",
+    });
+    expect(merged.plantings![1].cx).toBe(0.6);
+  });
+
+  it("refuses a move across the bed", () => {
+    // Most likely the model matching ids to the wrong plants. The pass
+    // that found them is the better authority on which is which.
+    const [merged] = mergeRefinement([plants()], {
+      polygons: new Map(),
+      plantings: new Map([["bed_plant_1", { cx: 0.85, cy: 0.75, rx: 0.05, ry: 0.05 }]]),
+    });
+    expect(merged.plantings![0].cx).toBe(0.4);
+  });
+
+  it("refuses a tenfold change in size", () => {
+    const [merged] = mergeRefinement([plants()], {
+      polygons: new Map(),
+      plantings: new Map([
+        ["bed_plant_1", { cx: 0.4, cy: 0.7, rx: 0.5, ry: 0.5 }],
+        ["bed_plant_2", { cx: 0.6, cy: 0.72, rx: 0.002, ry: 0.002 }],
+      ]),
+    });
+    expect(merged.plantings![0].rx).toBe(0.05);
+    expect(merged.plantings![1].rx).toBe(0.04);
+  });
+
+  it("cannot invent a plant or drop one", () => {
+    const [merged] = mergeRefinement([plants()], {
+      polygons: new Map(),
+      plantings: new Map([["bed_plant_99", { cx: 0.5, cy: 0.5, rx: 0.05, ry: 0.05 }]]),
+    });
+    expect(merged.plantings!.map((p) => p.id)).toEqual(["bed_plant_1", "bed_plant_2"]);
+  });
+
+  it("corrects the plants even when the region's own outline is refused", () => {
+    // The two are judged separately: a bad polygon correction must not
+    // cost the good plant ones.
+    const huge: NormalizedPoint[] = [
+      [0, 0],
+      [1, 0],
+      [1, 1],
+      [0, 1],
+    ];
+    const [merged] = mergeRefinement([plants()], {
+      polygons: new Map([["bed", huge]]),
+      plantings: new Map([["bed_plant_1", { cx: 0.43, cy: 0.72, rx: 0.06, ry: 0.06 }]]),
+    });
+    expect(merged.polygon).toEqual(SQUARE);
+    expect(merged.plantings![0].cx).toBe(0.43);
+  });
+});
+
+describe("parseRefinement, on the plants", () => {
+  it("reads corrected ellipses keyed by plant id", () => {
+    const { plantings } = parse(
+      JSON.stringify({
+        regions: [
+          {
+            id: "bed",
+            polygon: [[0.1, 0.5], [0.9, 0.5], [0.9, 0.95]],
+            plantings: [{ id: "bed_plant_1", cx: 0.42, cy: 0.71, rx: 0.06, ry: 0.055 }],
+          },
+        ],
+      }),
+    );
+    expect(plantings.get("bed_plant_1")).toEqual({
+      cx: 0.42,
+      cy: 0.71,
+      rx: 0.06,
+      ry: 0.055,
+    });
+  });
+
+  it("skips an ellipse with no id or no numbers", () => {
+    const { plantings } = parse(
+      JSON.stringify({
+        regions: [
+          {
+            id: "bed",
+            polygon: [[0.1, 0.5], [0.9, 0.5], [0.9, 0.95]],
+            plantings: [
+              { cx: 0.4, cy: 0.7, rx: 0.05, ry: 0.05 },
+              { id: "bed_plant_2", cx: "middle", cy: 0.7, rx: 0.05, ry: 0.05 },
+              { id: "bed_plant_3", cx: 0.4, cy: 0.7, rx: 0, ry: 0.05 },
+            ],
+          },
+        ],
+      }),
+    );
+    expect(plantings.size).toBe(0);
   });
 });

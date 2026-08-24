@@ -133,6 +133,60 @@ async function audit(page: Page, where: string, viewport: Viewport) {
   }, DISPLAY_VARIANTS);
   for (const item of shown) findings.push({ where, what: item });
 
+  // Anything positioned over the photo has to land where its coordinates
+  // say. This is measured, not eyeballed: a label naming a plant that sits
+  // half its own width to the left points at a different plant, and on a
+  // photograph nobody can tell that from the model having placed the plant
+  // badly — which is exactly how it survived a review.
+  //
+  // The cause was a composition rule, not a typo: Tailwind's translate
+  // utilities set the standalone CSS `translate` property, so a
+  // `-translate-x-1/2` class and an inline `transform: translate(-50%, …)`
+  // do not override each other, they add up.
+  // NOTE: no named inner functions in here. tsx compiles this file with
+  // esbuild, which annotates named function expressions with a `__name`
+  // helper; the helper does not exist in the page, so a serialized
+  // evaluate that declares one dies with "__name is not defined".
+  const misplaced = await page.evaluate(() => {
+    const results: string[] = [];
+    const figure = document.querySelector("figure");
+    const img = figure?.querySelector("img");
+    if (!figure || !img) return results;
+    const frame = img.getBoundingClientRect();
+    if (frame.width === 0) return results;
+
+    for (const el of figure.querySelectorAll<HTMLElement>("[data-plant]")) {
+      const expected = el.dataset.cx === undefined ? NaN : Number(el.dataset.cx);
+      if (Number.isNaN(expected)) continue;
+      const r = el.getBoundingClientRect();
+      const x = (r.left + r.width / 2 - frame.left) / frame.width;
+      if (Math.abs(x - expected) > 0.005) {
+        results.push(
+          `plant ${el.dataset.plant} renders at x=${x.toFixed(3)}, data says ${expected}`,
+        );
+      }
+    }
+
+    // The hover label, when one is showing, has to share its plant's x.
+    const label = figure.querySelector<HTMLElement>("[data-plant-label]");
+    const owner = label
+      ? figure.querySelector<HTMLElement>(`[data-plant="${label.dataset.plantLabel}"]`)
+      : null;
+    if (label && owner) {
+      const a = label.getBoundingClientRect();
+      const b = owner.getBoundingClientRect();
+      const ax = (a.left + a.width / 2 - frame.left) / frame.width;
+      const bx = (b.left + b.width / 2 - frame.left) / frame.width;
+      if (Math.abs(ax - bx) > 0.01) {
+        results.push(
+          `the label for ${label.dataset.plantLabel} is at x=${ax.toFixed(3)} but its plant is at x=${bx.toFixed(3)}`,
+        );
+      }
+    }
+    return results;
+  });
+  for (const item of misplaced) findings.push({ where, what: item });
+
   const small = await page.evaluate(() => {
     const MIN = 44;
     const results: string[] = [];
@@ -245,6 +299,10 @@ async function uploadAndDesign(page: Page, viewport: Viewport): Promise<string |
   // rather than a name to find them by.
   const plants = page.locator("figure button[data-plant]");
   if ((await plants.count()) > 0) {
+    // Hover first, so the label is on screen when the alignment rule runs.
+    await plants.first().hover();
+    await page.waitForTimeout(250);
+    await shoot(page, viewport, "design-plant-hover");
     await plants.first().click();
     await page.waitForTimeout(300);
     const plantOptions = page.locator('input[type="radio"][name^="plant-"]');

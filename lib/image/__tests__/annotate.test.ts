@@ -96,3 +96,30 @@ describe("annotateOutlines", () => {
     ])).toBeNull();
   });
 });
+
+describe("annotateOutlines, on the plants", () => {
+  it("rings each plant in its region's colour", async () => {
+    // The plants are the shapes the second pass most needs to correct, and
+    // it cannot correct what it cannot see.
+    const result = (await annotateOutlines(plainJpeg(), "image/jpeg", [
+      {
+        id: "bed",
+        polygon: BOX,
+        plantings: [{ id: "bed_plant_1", cx: 0.5, cy: 0.5, rx: 0.12, ry: 0.12 }],
+      },
+    ]))!;
+    const red = OUTLINE_COLORS[0].rgb;
+    // On the ring: one radius to the right of its centre.
+    expect(near(pixel(result.bytes, Math.round(0.62 * W), Math.round(0.5 * H)), red)).toBe(true);
+    // Inside it — the plant is framed, not covered.
+    expect(near(pixel(result.bytes, Math.round(0.5 * W), Math.round(0.5 * H)), [128, 128, 128])).toBe(true);
+  });
+
+  it("draws the outline the same whether or not a region has plants", async () => {
+    const without = (await annotateOutlines(plainJpeg(), "image/jpeg", [
+      { id: "bed", polygon: BOX },
+    ]))!;
+    const red = OUTLINE_COLORS[0].rgb;
+    expect(near(pixel(without.bytes, Math.round(0.5 * W), Math.round(0.25 * H)), red)).toBe(true);
+  });
+});

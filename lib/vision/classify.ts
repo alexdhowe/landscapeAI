@@ -145,7 +145,15 @@ export async function classifyPhoto(
   // improvement, never a requirement — and never a reason to fail a
   // segmentation that already succeeded.
   try {
-    const annotated = await annotateOutlines(imageData, mediaType, first.regions);
+    const annotated = await annotateOutlines(
+      imageData,
+      mediaType,
+      first.regions.map((region) => ({
+        id: region.id,
+        polygon: region.polygon,
+        plantings: region.plantings,
+      })),
+    );
     if (!annotated) return first;
     const second = await client.messages.create({
       model: MODEL,
@@ -168,7 +176,7 @@ export async function classifyPhoto(
       ],
     });
     const refined = parseRefinement(textOf(second), extractJson);
-    if (refined.polygons.size === 0) return first;
+    if (refined.polygons.size === 0 && refined.plantings.size === 0) return first;
     return { ...first, regions: mergeRefinement(first.regions, refined) };
   } catch (error) {
     console.warn(
