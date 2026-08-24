@@ -3,8 +3,10 @@
  * Server-rendered: plain SVG polygons in percent coordinates, no
  * interactivity — the rep is reviewing the design, not editing it.
  */
+import { PlantGlyph } from "@/components/configurator/plantGlyphs";
 import { KIND_COLORS } from "@/components/configurator/regionColors";
 import { getOption } from "@/lib/catalog/options";
+import type { PlantOption } from "@/lib/catalog/plants";
 import { layoutRegionMarkers } from "@/lib/design/markers";
 import type { RegionSelection } from "@/lib/design/types";
 import type { SegmentedRegion } from "@/lib/vision/types";
@@ -15,12 +17,22 @@ export function LeadPhoto({
   photoUrl,
   regions,
   selections,
+  plantSelections,
+  plantCatalog = [],
 }: {
   photoUrl: string;
   regions: SegmentedRegion[];
   selections: Record<string, RegionSelection>;
+  /** plantingId → the plant the customer chose. */
+  plantSelections?: Record<string, string>;
+  plantCatalog?: readonly PlantOption[];
 }) {
   const markers = layoutRegionMarkers(regions);
+  const catalogById = new Map(plantCatalog.map((o) => [o.id, o]));
+  const chosenPlant = (plantingId: string) => {
+    const optionId = plantSelections?.[plantingId];
+    return optionId ? catalogById.get(optionId) : undefined;
+  };
   return (
     <div className="relative min-w-0 overflow-hidden rounded-xl bg-bark-900">
       {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -47,6 +59,23 @@ export function LeadPhoto({
             />
           );
         })}
+        {/* What the customer chose to plant, drawn the same way their own
+            canvas drew it — the rep is reviewing the design they were
+            shown, so it has to be the same picture. */}
+        {regions.map((region) =>
+          (region.plantings ?? []).map((plant) => {
+            const option = chosenPlant(plant.id);
+            if (!option) return null;
+            return (
+              <g
+                key={plant.id}
+                transform={`translate(${plant.cx * 100} ${plant.cy * 100}) scale(${plant.rx * 100} ${plant.ry * 100})`}
+              >
+                <PlantGlyph kind={option.glyph} />
+              </g>
+            );
+          }),
+        )}
       </svg>
       {/* Same placement rule as the customer's canvas: clamped inside the
           frame and pushed apart where two centroids land together. The

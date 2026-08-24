@@ -12,8 +12,14 @@
  * Server-only.
  */
 import type { DesignProject } from "../design/types";
+import type { SegmentedRegion } from "../vision/types";
 
-import { ProjectLockedError, ProjectStageError, UnknownRegionError } from "./types";
+import {
+  ProjectLockedError,
+  ProjectStageError,
+  UnknownPlantingError,
+  UnknownRegionError,
+} from "./types";
 
 /** Reject anything that isn't a UUID we minted — ids reach the filesystem. */
 export const UUID_RE =
@@ -32,6 +38,23 @@ export function assertRegion(project: DesignProject, regionId: string): void {
     !project.segmentation.regions.some((r) => r.id === regionId)
   ) {
     throw new UnknownRegionError(regionId);
+  }
+}
+
+/** The region a plant stands in, or undefined if the design has no such plant. */
+export function regionOfPlanting(
+  project: DesignProject,
+  plantingId: string,
+): SegmentedRegion | undefined {
+  if (project.segmentation.status !== "ready") return undefined;
+  return project.segmentation.regions.find((region) =>
+    (region.plantings ?? []).some((plant) => plant.id === plantingId),
+  );
+}
+
+export function assertPlanting(project: DesignProject, plantingId: string): void {
+  if (!regionOfPlanting(project, plantingId)) {
+    throw new UnknownPlantingError(plantingId);
   }
 }
 

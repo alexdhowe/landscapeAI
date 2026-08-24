@@ -23,7 +23,9 @@ import type {
   Quantity,
 } from "../pricing/types";
 import type { JobType, MarketContext, TypologyConfig } from "../pricing/typology";
+import type { PlantOption } from "../catalog/plants";
 import { bandForSelections } from "./band";
+import { resolvePlantChoices } from "./plants";
 import {
   designEngineInput,
   measuredBandForSelections,
@@ -155,11 +157,24 @@ export function quoteProject(
   config: TypologyConfig,
   basePolicy: DisclosurePolicy,
   now: () => string = () => new Date().toISOString(),
+  plantCatalog: readonly PlantOption[] = [],
 ): ProjectQuote | null {
+  // Resolved once, against this project's CURRENT segmentation and this
+  // org's own price book, and then used by every branch below — the
+  // customer's band, the internal estimate and the frozen snapshot all
+  // read the same list, so none of them can disagree about which plants
+  // the customer chose.
+  const plantChoices = resolvePlantChoices(
+    project.segmentation.status === "ready" ? project.segmentation.regions : [],
+    project.plantSelections,
+    plantCatalog,
+  );
+
   const typology = bandForSelections(
     project.selections,
     project.marketContext,
     config,
+    plantChoices,
   );
   if (!typology) return null;
 
@@ -204,6 +219,7 @@ export function quoteProject(
     config,
     policy,
     now,
+    plantChoices,
   );
 
   if (measured) {
@@ -257,6 +273,7 @@ export function quoteProject(
     project.marketContext,
     config,
     now(),
+    plantChoices,
   );
   const estimate =
     input.engineSelections.length > 0

@@ -5,10 +5,12 @@
  */
 import Anthropic from "@anthropic-ai/sdk";
 
+import { annotateOutlines } from "../image/annotate";
 import { readCredential } from "./credentials";
 import { demoSegmentation } from "./demo";
 import type { VisionImageMediaType } from "./mediaTypes";
-import { parseSegmentation } from "./parse";
+import { extractJson, parseSegmentation } from "./parse";
+import { mergeRefinement, parseRefinement, refinementPrompt } from "./refine";
 import type { SegmentationResult } from "./types";
 
 const SEGMENTATION_PROMPT = `You are analyzing a homeowner's photo of their yard for a landscape design tool.
@@ -19,7 +21,11 @@ Most photos of a front yard are taken standing up, so the top third is sky and h
 
 FIRST, report the ground line: the line where vertical surfaces meet the ground, left to right across the whole photo — the base of the house, of a fence, of a retaining wall. Give 2-8 points ordered by increasing x, spanning as much of the image width as the photo shows. Everything on the ground plane lies BELOW this line. If the photo shows no vertical surface meeting the ground, return an empty array.
 
-THEN identify the distinct landscape regions visible in the photo. For each region return a polygon outlining it, 4-12 vertices. Only outline ground-plane landscape areas — never the house walls, roof, sky, cars, or people. Every vertex of every region must be at or below the ground line you just reported.
+THEN identify the distinct landscape regions visible in the photo. Only outline ground-plane landscape areas — never the house walls, roof, sky, cars, or people. Every vertex of every region must be at or below the ground line you just reported.
+
+TRACE THE EDGES. Landscape beds are curved, and a polygon of a few vertices cuts straight chords across a curve — the outline then covers lawn on one side and misses bed on the other, which is exactly what the customer sees when they swap the material. Use as many vertices as the edge needs: 6 is fine for a rectangular driveway, and a curved bed edge usually wants 20-40. Put them where the edge changes direction, not at even intervals. Follow the real boundary — the mulch/lawn line, the edge of the concrete — rather than drawing a convex hull around the area; regions are often long, thin, or crescent-shaped, and that is fine.
+
+REGIONS DO NOT OVERLAP. Each part of the ground belongs to exactly one region. Where a bed sits inside a lawn, the lawn's outline goes around the bed rather than under it.
 
 Allowed region kinds (use exactly these strings):
 - "turf" — lawn / grass areas
@@ -27,7 +33,9 @@ Allowed region kinds (use exactly these strings):
 - "hardscape" — patios, walkways, driveways, steps
 - "foundation_planting" — planted strips directly against the house foundation
 
-For each region, also report the individual plants standing in it — shrubs, ornamental grasses, perennial clumps — as ellipses: "cx"/"cy" for the centre and "rx"/"ry" for the radii, all as fractions of image width and height. These are what stays when the homeowner swaps the mulch for stone, so cover the plant's visible mass rather than outlining it precisely, and skip ground cover and lawn grass. Return at most a dozen per region; an empty array is a fine answer for a bed with nothing growing in it.
+For each region, also report the individual plants standing in it — every shrub, ornamental grass, perennial clump and flowering mass you can see — as ellipses: "cx"/"cy" for the centre and "rx"/"ry" for the radii, all as fractions of image width and height.
+
+Be thorough and be generous with the size. These ellipses are what the homeowner's plants stay inside when they swap the mulch for stone: a plant you leave out, or draw too small, gets gravel painted across its leaves. Cover the plant's whole visible mass including the outer foliage, and where two shrubs of the same kind grow into each other, one ellipse over the pair is better than two that each miss an edge. Erring large is nearly free — a little extra bed around a plant is what a real bed looks like. Skip lawn grass and low ground cover. An empty array is still the right answer for a bed with nothing growing in it.
 
 Also report vertical elements — things visible in the photo that an aerial view cannot show. Allowed kinds (use exactly these strings): "retaining_wall", "steps", "fence", "grade_change", "raised_bed", "other".
 
@@ -65,6 +73,25 @@ If the photo shows no yard at all, return {"ground_line": [], "regions": [], "ve
 
 export { hasVisionCredentials } from "./credentials";
 
+const MODEL = "claude-opus-5";
+
+/**
+ * The refinement pass costs a second vision call, which is real latency
+ * against section 2's thirty seconds and real money per upload. On by
+ * default because the outlines are the product; `VISION_REFINE=off` turns
+ * it off without touching code, for anyone measuring one against the other.
+ */
+function refinementEnabled(): boolean {
+  return (process.env.VISION_REFINE ?? "").trim().toLowerCase() !== "off";
+}
+
+function textOf(response: { content: { type: string }[] }): string {
+  return response.content
+    .filter((block): block is { type: "text"; text: string } => block.type === "text")
+    .map((block) => block.text)
+    .join("\n");
+}
+
 /**
  * Segment a yard photo into labeled regions. Returns the demo overlay
  * (clearly marked source: "demo") when no Anthropic credentials are set.
@@ -89,7 +116,7 @@ export async function classifyPhoto(
     ? new Anthropic({ apiKey: credential.apiKey })
     : new Anthropic();
   const response = await client.messages.create({
-    model: "claude-opus-5",
+    model: MODEL,
     max_tokens: 16000,
     messages: [
       {
@@ -109,10 +136,44 @@ export async function classifyPhoto(
     ],
   });
 
-  const text = response.content
-    .filter((block) => block.type === "text")
-    .map((block) => block.text)
-    .join("\n");
+  const first = parseSegmentation(textOf(response), "claude");
+  if (first.regions.length === 0 || !refinementEnabled()) return first;
 
-  return parseSegmentation(text, "claude");
+  // The second look. Everything about it is best-effort: if the image
+  // cannot be annotated, if the call fails, or if what comes back is
+  // unusable, the first pass is the answer. A refinement is an
+  // improvement, never a requirement — and never a reason to fail a
+  // segmentation that already succeeded.
+  try {
+    const annotated = await annotateOutlines(imageData, mediaType, first.regions);
+    if (!annotated) return first;
+    const second = await client.messages.create({
+      model: MODEL,
+      max_tokens: 16000,
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "image",
+              source: {
+                type: "base64",
+                media_type: annotated.mediaType,
+                data: annotated.bytes.toString("base64"),
+              },
+            },
+            { type: "text", text: refinementPrompt(annotated.legend) },
+          ],
+        },
+      ],
+    });
+    const refined = parseRefinement(textOf(second), extractJson);
+    if (refined.polygons.size === 0) return first;
+    return { ...first, regions: mergeRefinement(first.regions, refined) };
+  } catch (error) {
+    console.warn(
+      `[vision] outline refinement skipped: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return first;
+  }
 }

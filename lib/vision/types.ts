@@ -33,6 +33,14 @@ export type NormalizedPoint = [number, number];
  * calls these PointElements.
  */
 export type Planting = {
+  /**
+   * Stable within the project, assigned by the parser rather than by the
+   * model — a customer's choice of what to replace this plant with is
+   * keyed by it, so it has to survive a page reload and a trip through the
+   * store. Derived from the region id and the plant's position in the
+   * list, both of which the same segmentation always reports the same way.
+   */
+  id: string;
   /** Centre, in normalized image coordinates. */
   cx: number;
   cy: number;

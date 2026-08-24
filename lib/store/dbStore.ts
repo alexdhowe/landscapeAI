@@ -30,6 +30,7 @@ import {
   assertConfirmable,
   assertEditable,
   assertQuotable,
+  assertPlanting,
   assertRegion,
 } from "./gates";
 import {
@@ -97,6 +98,13 @@ export function createDbStore(): ProjectStore {
       return edit(id, async (project) => {
         assertRegion(project, regionId);
         await q.upsertSelection(await getDb(), id, regionId, selection);
+      });
+    },
+
+    setPlantSelection(id: string, plantingId: string, optionId: string | null) {
+      return edit(id, async (project) => {
+        assertPlanting(project, plantingId);
+        await q.upsertPlantSelection(await getDb(), id, plantingId, optionId);
       });
     },
 

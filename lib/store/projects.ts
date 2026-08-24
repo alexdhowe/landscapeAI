@@ -44,6 +44,7 @@ export {
   ProjectLockedError,
   ProjectNotFoundError,
   ProjectStageError,
+  UnknownPlantingError,
   UnknownRegionError,
 } from "./types";
 export type { ProjectStore } from "./types";
@@ -118,6 +119,18 @@ export async function setSelection(
   selection: RegionSelection,
 ): Promise<DesignProject> {
   return (await store()).setSelection(id, regionId, selection);
+}
+
+/**
+ * Put a different plant where one of the photo's plants is standing, or
+ * pass null to go back to what is actually there.
+ */
+export async function setPlantSelection(
+  id: string,
+  plantingId: string,
+  optionId: string | null,
+): Promise<DesignProject> {
+  return (await store()).setPlantSelection(id, plantingId, optionId);
 }
 
 /** Sharing an address supersedes any earlier decline. */

@@ -238,6 +238,29 @@ async function uploadAndDesign(page: Page, viewport: Viewport): Promise<string |
     break;
   }
 
+  // Swap a plant too — the per-plant path has its own picker, its own
+  // persistence and its own line items, and none of that is exercised by
+  // a surface swap. The ellipses on the photo are pointer affordances
+  // hidden from assistive technology, so they carry a data attribute
+  // rather than a name to find them by.
+  const plants = page.locator("figure button[data-plant]");
+  if ((await plants.count()) > 0) {
+    await plants.first().click();
+    await page.waitForTimeout(300);
+    const plantOptions = page.locator('input[type="radio"][name^="plant-"]');
+    if ((await plantOptions.count()) > 0) {
+      await shoot(page, viewport, "design-plant-picker");
+      await plantOptions.first().click({ force: true });
+      await page.waitForTimeout(800);
+      await shoot(page, viewport, "design-plant-swapped");
+    } else {
+      findings.push({
+        where: `design-plant-picker @ ${viewport.name}`,
+        what: "tapping a plant opened no picker — the plant catalog did not load",
+      });
+    }
+  }
+
   // Send it, so the console downstream has a lead to render.
   const nameField = page.getByLabel("Your name");
   if (await nameField.count()) {

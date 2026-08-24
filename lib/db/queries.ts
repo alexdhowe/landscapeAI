@@ -16,6 +16,8 @@
  */
 import { and, asc, desc, eq, isNotNull, lte, sql } from "drizzle-orm";
 
+import type { PlantOption } from "../catalog/plants";
+import { plantOptionsFor } from "../catalog/plants";
 import type { ErrorStats } from "../confirm/analytics";
 import type { MeasurementDelta } from "../confirm/types";
 import type {
@@ -60,6 +62,7 @@ import {
   projects,
   properties,
   regions,
+  plantSelections,
   selections,
   typologyDistributions,
   typologyRecipes,
@@ -74,6 +77,7 @@ const iso = (value: Date): string => value.toISOString();
 type ProjectRow = typeof projects.$inferSelect;
 type RegionRow = typeof regions.$inferSelect;
 type SelectionRow = typeof selections.$inferSelect;
+type PlantSelectionRow = typeof plantSelections.$inferSelect;
 type SnapshotRow = typeof estimateSnapshots.$inferSelect;
 type DeltaRow = typeof measurementDeltas.$inferSelect;
 type PropertyRow = typeof properties.$inferSelect;
@@ -83,6 +87,7 @@ type ProjectBundle = ProjectRow & {
   photos: { fileName: string; mediaType: string }[];
   regions: RegionRow[];
   selections: SelectionRow[];
+  plantSelections: PlantSelectionRow[];
   snapshots: SnapshotRow[];
   deltas: DeltaRow[];
 };
@@ -210,6 +215,11 @@ export function toDesignProject(row: ProjectBundle): DesignProject {
     marketContext: row.marketContext,
   };
 
+  if (row.plantSelections.length > 0) {
+    project.plantSelections = Object.fromEntries(
+      row.plantSelections.map((p) => [p.plantingId, p.optionId]),
+    );
+  }
   if (row.property) project.location = toLocation(row.property);
   if (row.addressDeclined) project.addressDeclined = true;
   if (aerialRegions.length > 0) project.aerialRegions = aerialRegions;
@@ -232,6 +242,7 @@ const projectWith = {
   photos: { columns: { fileName: true as const, mediaType: true as const } },
   regions: { orderBy: [asc(regions.position)] },
   selections: { orderBy: [asc(selections.regionId)] },
+  plantSelections: { orderBy: [asc(plantSelections.plantingId)] },
   snapshots: { orderBy: [asc(estimateSnapshots.seq)] },
   deltas: { orderBy: [asc(measurementDeltas.correctedAt), asc(measurementDeltas.seq)] },
 };
@@ -395,6 +406,40 @@ export async function replaceSegmentation(
       })),
     );
   });
+}
+
+/**
+ * Choose a plant for one of the plants the photo found, or clear it.
+ *
+ * Clearing deletes the row rather than storing a null: "no choice" and
+ * "chose nothing" are the same state, and one representation of it means
+ * a project nobody has replanted round-trips identically to one from
+ * before plants were swappable.
+ */
+export async function upsertPlantSelection(
+  db: Database,
+  projectId: string,
+  plantingId: string,
+  optionId: string | null,
+): Promise<void> {
+  if (optionId === null) {
+    await db
+      .delete(plantSelections)
+      .where(
+        and(
+          eq(plantSelections.projectId, projectId),
+          eq(plantSelections.plantingId, plantingId),
+        ),
+      );
+    return;
+  }
+  await db
+    .insert(plantSelections)
+    .values({ projectId, plantingId, optionId })
+    .onConflictDoUpdate({
+      target: [plantSelections.projectId, plantSelections.plantingId],
+      set: { optionId },
+    });
 }
 
 export async function upsertSelection(
@@ -690,6 +735,14 @@ export type OrgPricing = {
   bandPolicy: DisclosurePolicy;
   finalQuotePolicy: DisclosurePolicy;
   typology: TypologyConfig;
+  /**
+   * The plants this org can actually install, derived from the revision's
+   * own book. Resolved here rather than in each route so the customer's
+   * browser, the band and the rep's line items all see one list at one
+   * revision — a plant that stopped being stocked stops being offerable
+   * everywhere at once.
+   */
+  plantCatalog: PlantOption[];
 };
 
 export class OrganizationNotFoundError extends Error {
@@ -997,6 +1050,7 @@ function assemble(
     bandPolicy: config.bandPolicy,
     finalQuotePolicy: config.finalQuotePolicy,
     typology: toTypologyConfig(config),
+    plantCatalog: plantOptionsFor(config.priceBook, config.plantMeta),
   };
 }
 

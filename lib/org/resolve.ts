@@ -19,6 +19,7 @@
  *
  * Server-only.
  */
+import { plantOptionsFor } from "../catalog/plants";
 import { isDatabaseConfigured } from "../db/client";
 import type { OrgPricing } from "../db/queries";
 import {
@@ -81,6 +82,7 @@ function seedOrg(): OrgPricing {
     bandPolicy: wiBandPolicy,
     finalQuotePolicy: wiFinalQuotePolicy,
     typology: wiTypologyConfig,
+    plantCatalog: plantOptionsFor(wiPriceBook, plantMetaBySku),
   };
 }
 

@@ -30,14 +30,15 @@ not negotiable.
 | Deployment configuration | ✅ done — Dockerfile, `render.yaml` (free), `fly.toml` (paid), `docs/deploy.md`. **Not yet deployed** |
 | Design pass on a photograph | ✅ done — customer copy on customer surfaces, region names that do not cover the swap, `npm run shots` actually rendering the phone |
 | Contractor login on a self-hosted deployment | ✅ fixed — `trustHost`; it threw `UntrustedHost` on every deployment target |
-| Segmentation against a real photo | ⚠️ improved, unverified — regions held to a reported ground line, plants kept out of a material swap. Needs a key and a yard to judge |
+| Segmentation against a real photo | ⚠️ improved, unverified — ground line, denser outlines, a self-correcting second pass. Needs a key and a yard to judge |
+| Plug-and-play plants | ✅ done — hover to identify, swap one plant for another, priced and frozen like any other choice |
 | The aerial leg (`/design/[id]/locate`) | ⛔ gated off — deliberately: no paid imagery or geocoder until there is a working MVP |
 
 All six phases are in, they run on Postgres, the contractor console is behind
 a login, the price book is editable, photos live in object storage when a
 bucket is configured, and the whole thing has been designed and opened on a
 phone — on a phone *branch*, for the first time in the twelfth session,
-which is its own story. `npm test` runs 435 tests — with a database and
+which is its own story. `npm test` runs 488 tests — with a database and
 without one.
 
 **It has not been deployed.** The tenth session wrote the configuration —
@@ -64,7 +65,7 @@ store, so a clean checkout runs the demo with nothing to provision.
 ```sh
 npm run doctor    # is this machine set up? checks .env.local, the API key (against the
                   # real API), and the console login — and says what to fix, in English.
-npm test          # Vitest — 435 tests across every phase. No server, no network, no browser.
+npm test          # Vitest — 488 tests across every phase. No server, no network, no browser.
 npm run typecheck
 npm run dev
 npm run build
@@ -107,6 +108,8 @@ committed):
 
 ```sh
 ANTHROPIC_API_KEY=…            # without it you get the labelled demo overlay
+VISION_REFINE=off              # optional: skip the outline-correcting second
+                               # vision call, which costs latency per upload
 AUTH_SECRET=…                  # any long random string; only needed by `npm start`
 CONTRACTOR_EMAIL=you@example.com     # so you can sign in to the console
 CONTRACTOR_PASSWORD=…                # with no database, this is the whole user table
@@ -451,6 +454,127 @@ picker filtered to the clicked region's kind, and a budget band that reads
   storage is always upright, metadata-free and capped at 1600px on the long
   edge. See [a photo straight off an iPhone](#a-photo-straight-off-an-iphone).
 
+## Plug-and-play plants
+
+Tap a plant on your own photo, see what it is, put a different one there,
+and watch the range move. The unit of choice is **one plant** — swapping
+the boxwood by the door leaves the four shrubs beside it exactly as they
+are, which is what makes this different from swapping a bed's surface.
+
+### Most of it already existed
+
+The previous session's README said this was blocked on seed data. **That
+was wrong, and worth correcting rather than quietly fixing**: the seed
+carries ~20 plant SKUs with the full section 3.5 metadata — install size,
+mature height and spread, growth-rate class, form, hardiness zone,
+deciduous vs evergreen — because the time slider could not have shipped
+without it. And `seed/pricebook.seed.ts` already builds an
+`install_<sku>` assembly for every one of them: the plant, its soil, crew
+time from its size class, and a skidsteer where the size class needs one.
+Pricing a single-plant swap was a solved problem nobody had called.
+
+What was missing was the path between them.
+
+### The catalog is derived, not written
+
+`lib/catalog/plants.ts` builds the offerable list from the org's own price
+book: a plant is offerable exactly when the book holds a cost item for it,
+an install assembly that plants it, and the metadata to say how big it
+gets. Nothing is hardcoded, which makes the guardrail structural rather
+than asserted — remove the assembly and the offer disappears, with no list
+to remember to edit. A contractor who adds a plant at `/pricebook` can
+offer it without a deploy.
+
+It is served from `GET /api/plants` rather than bundled, because the price
+book is editable and revisioned and a list compiled into the browser goes
+stale the moment somebody publishes. **It carries no cost, rate or
+margin** — a test asserts that, because this list is the newest thing to
+cross the disclosure boundary in section 1.
+
+Two rules the catalog enforces on its own:
+
+- **No tree against the house.** A 40-foot maple two feet from the siding
+  is a callback, not a design, so `foundation_planting` regions are
+  offered everything except trees. The route enforces it too — the browser
+  is not what decides this.
+- **Nothing offerable is unpriceable.** An option id a browser invented,
+  or one for a plant this contractor stopped stocking, buys nothing at the
+  route and prices nothing in the engine.
+
+### What a choice is worth
+
+One plant swapped is `install_<sku>` at 1 EA, with provenance `photo` —
+the plant is in the estimate because the segmentation found it standing
+there. Those line items reach the rep's quote like any other, and the
+plant's name reaches the customer's scope list, counted rather than
+repeated ("3 × Boxwood 'Green Velvet'", because three identical lines is
+what a bug looks like).
+
+Replanting is a job type in its own right, so **a customer who only swaps
+plants still gets a band and can still send the design**: against the
+house it prices as a foundation refresh, in a bed as bed renovation. Both
+distributions already existed. The band is still typology — "projects like
+this typically run" — so one daylily shows the range for the job a
+contractor would actually roll a truck for, which is the honest answer
+even though it is not the intuitive one.
+
+A stored choice is resolved against the **current** segmentation every
+time it is read. Re-segmenting a photo produces new plants and can leave a
+choice pointing at one that no longer exists; that choice is ignored, never
+priced. Nothing puts a line item on a rep's quote for a shrub nobody can
+point at.
+
+### Drawn, not pasted
+
+A swapped plant is an SVG shape generated from the catalog entry
+(`components/configurator/plantGlyphs.tsx`) — five habits, because that is
+what the catalog distinguishes and what reads differently at a glance on a
+phone. Not a photograph of that plant composited into the yard: section 1
+says the image is a view and never the artifact, and the same rule that
+makes a swapped surface a generated texture makes a swapped plant a
+generated shape.
+
+It is scaled to the footprint the photo's plant occupies. We know where
+the plant is and how big it looks from here, and a single photograph gives
+no scale in feet — so the picture says "this plant, here" and the picker
+says how big it gets, on every row, before the customer picks four of them
+for a two-foot gap.
+
+The mask changed with it: a plant that is **staying** is punched out of
+the material so the photograph shows through, and a plant that has been
+**replaced** is covered by the material and drawn over, so a swap reads as
+the old plant coming out rather than being hidden.
+
+### Reaching a plant
+
+The ellipses on the photo are a pointer affordance and are hidden from
+assistive technology — a shape has no accessible name, and four shrubs in
+one bed on a 390px photo overlap enough to steal each other's taps. The
+accessible path is a **plant strip** in the picker panel: real buttons, in
+document order, 44px, no overlap. Exactly the split the region markers and
+the region strip already use, for exactly the same reasons.
+
+Two things the browser pass caught that review would not have:
+
+- **A region's name pill swallowed the taps of the plants underneath it.**
+  Between the two the plant is the more specific target, so the plant layer
+  now stacks above the labels; the region is still reachable from anywhere
+  else in its polygon and from the strip under the photo.
+- **A `<fieldset>` pushed the whole 390px page sideways** — 511px of
+  horizontal scroll from one plant list. A fieldset takes its minimum width
+  from its contents and ignores the grid track it sits in unless it is told
+  `min-width: 0`. It is the only fieldset in the app and it now carries the
+  fix and the reason.
+
+### Still open
+
+Swapping a plant does not move the band beyond its job type, because the
+band is typology until something is measured — that is the existing
+architecture, not a plant-specific gap, and it closes when the aerial leg
+does. The spacing validation in `lib/growth/spacing.ts` knows how to warn
+about crowding at year five and is not wired to this yet: it needs a scale
+in feet, which one photograph cannot give.
+
 ## The first real yard, through a real key
 
 Everything above this section was found against a stand-in image. Then the
@@ -526,6 +650,65 @@ geometry of the observed failure; whether the model reports a good ground
 line, and whether the anchoring paragraph moves the polygons, needs a key
 and a yard.
 
+### The outlines, tried again with a real photo
+
+A second real yard showed the ground line was not the whole problem. The
+outlines sat in roughly the right place and followed nothing: a curved bed
+edge came back as a handful of straight chords, so the same polygon covered
+lawn along one side and missed bed along the other — visible the moment the
+customer swapped the material and the gravel landed on the grass.
+
+Two of the three fixes are cheap and one is not.
+
+**The prompt was asking for it.** It capped polygons at "4-12 vertices".
+That is a fine budget for a driveway and a plain mistake for a bed: a curve
+cannot be followed with eight points. It now says to use as many as the
+edge needs, that 20-40 along a curved bed edge is normal, to put them where
+the edge changes direction, and that regions do not overlap — where a bed
+sits inside a lawn, the lawn's outline goes around it.
+
+**The model gets to see its own work.** After the first pass, the outlines
+are drawn onto a copy of the photograph — one colour per region, vertices
+marked — and sent back with the question "look at where each coloured
+outline actually falls, and correct it" (`lib/image/annotate.ts`,
+`lib/vision/refine.ts`). Correcting an outline you can see is a much easier
+task than producing coordinates blind, and it is the one lever here that
+does not depend on a model getting better at a hard thing.
+
+It costs a second vision call, which is real latency against section 2's
+thirty seconds and real money per upload. `VISION_REFINE=off` turns it off
+without touching code, for measuring one against the other.
+
+**The merge is deliberately timid**, because a second look at a picture
+with coloured lines drawn on it is not better placed to judge *what* a
+region is than the pass that saw the clean photograph. A refinement may
+replace a region's shape and nothing else — not its kind, label, material,
+condition, footprint estimate, confidence, or the plants standing in it —
+it cannot invent a region or drop one, and a correction that more than
+halves or more than doubles a region's area is refused as a disagreement
+rather than a tightening. If anything comes back unusable, the first pass
+stands. A second look is an improvement, never a requirement, and never a
+reason to fail a segmentation that already succeeded.
+
+**Also not verified.** The annotator is unit-tested — the outline lands
+where the polygon says, the photo keeps its dimensions, unhandled input
+comes back as "no second look" rather than an error — and the merge rules
+are tested against the shapes they exist to refuse. Whether the second pass
+actually moves the outlines onto the bed edges needs a key and a yard.
+
+### Plants, drawn bigger than reported
+
+The same photo showed granite landing on shrubs the first version had
+missed. Two changes: the prompt now asks for **every** visible plant and
+says to err large, with one ellipse over a pair of shrubs that grow into
+each other rather than two that each miss an edge; and the cut-outs are
+drawn 18% larger than reported. The two ways to be wrong here are not
+equally bad — too small puts gravel across a shrub's outer leaves, and too
+big leaves a ring of bed around a plant, which is what a real bed looks
+like. The margin is display-only: the stored ellipse stays exactly what the
+model reported, because that is the plant's extent and the per-plant swap
+needs the real number, not one padded for masking.
+
 ### Gravel over the shrubs
 
 Swapping a bed's surface filled the whole region polygon with the new
@@ -550,27 +733,15 @@ overlay carries plantings too, so the no-key path exercises the same code —
 without that, "swap mulch for stone" looks correct in development and paints
 over every shrub in production.
 
-### Product gap — swapping the plants themselves
+### Product gap — swapping the plants themselves — **built**
 
-The other half of that request is a feature, and it is worth being precise
-about what is now in place and what is not. **Identifying the plants is
-done**: they are in the object graph, per region, with a label. **Swapping
-one for another is not**, and it is not a rendering problem — it needs two
-things this repository does not have:
-
-- **Plant SKUs with the metadata section 3.5 requires** — install size,
-  mature height and spread, growth-rate class, form, hardiness zone,
-  deciduous vs evergreen. Section 7 lists this as seed data only the owner
-  can produce, and the time slider already depends on it.
-- **One image per SKU**, per section 3.5's asset strategy — scaled for
-  shrubs, grasses and perennials, and two or three states for trees, where a
-  juvenile is not a small mature specimen.
-
-With those, the per-plant swap is the configurator pattern that already
-works for surfaces: tap a plant, pick from a catalog filtered to its region
-kind, price it through an assembly. Without them there is nothing to offer
-and nothing to price, and the catalog is the guardrail — nothing may be
-offered that cannot be priced.
+This section used to say the swap was blocked on plant SKU metadata and
+per-SKU imagery that the repository did not have. **The first half was
+wrong** — the metadata has been in `seed/pricebook.seed.ts` since Phase
+3.5, along with an install assembly per plant — and the second half was the
+wrong requirement, because section 1 wants a shape generated from the graph
+rather than a photograph pasted onto the yard. See
+[plug-and-play plants](#plug-and-play-plants) for what shipped.
 
 ## What a photograph showed
 
@@ -752,10 +923,15 @@ primitives are what make them the same product.
 `scripts/screenshots.mts` (`npm run shots`) drives the whole customer flow in
 a real Chromium at 390×844 and 1440×900 — upload, segmentation wait, region
 swap, band, submit — then signs in and captures the console. It writes PNGs
-to `.shots/` and audits three rules that are easy to state and easy to break:
-no horizontal scroll at 390px, no interactive element under 44 CSS px, and
-nothing visible that the markup says is hidden. It exits non-zero on a
-finding.
+to `.shots/` and audits four rules that are easy to state and easy to break:
+no horizontal scroll at 390px, no interactive element under 44 CSS px,
+nothing visible that the markup says is hidden, and a sign-in that reaches
+the dashboard. It exits non-zero on a finding.
+
+It drives the plant swap as well as the surface swap, because the per-plant
+path has its own picker, its own persistence and its own line items and a
+surface swap exercises none of them. That is how the `<fieldset>` that
+pushed a 390px page 121px sideways was found.
 
 **The phone viewport was not a phone until the twelfth session.** Playwright's
 `isMobile` + `hasTouch` report `pointer: coarse` for the first page load and

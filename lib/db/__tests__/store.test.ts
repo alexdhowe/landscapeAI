@@ -164,6 +164,56 @@ describe("the store, over Drizzle", () => {
     ).toEqual({ unit: "SF", p25: 150, p50: 300, p75: 550 });
   });
 
+  it("round-trips a per-plant choice, and clears it back to nothing", async () => {
+    // Plant choices live beside the segmentation rather than inside it: on
+    // Postgres they are their own table, on the file store a map on the
+    // project. Both backends have to agree, including about what "no
+    // choice" looks like — a project nobody has replanted must come back
+    // identical to one from before plants were swappable.
+    const created = await store.createProject(PHOTO_BYTES, "image/jpeg", "jpg");
+    await store.setSegmentation(created.id, { status: "ready", ...demoSegmentation() });
+    expect((await store.getProject(created.id)).plantSelections).toBeUndefined();
+
+    await store.setPlantSelection(
+      created.id,
+      "demo_foundation_plant_2",
+      "plantsku_plant_boxwood_green_velvet",
+    );
+    await store.setPlantSelection(
+      created.id,
+      "demo_bed_plant_1",
+      "plantsku_plant_hosta_patriot",
+    );
+    expect((await store.getProject(created.id)).plantSelections).toEqual({
+      demo_bed_plant_1: "plantsku_plant_hosta_patriot",
+      demo_foundation_plant_2: "plantsku_plant_boxwood_green_velvet",
+    });
+
+    // Changing one leaves the other alone — that is the whole point of
+    // keying by plant rather than by region.
+    await store.setPlantSelection(
+      created.id,
+      "demo_foundation_plant_2",
+      "plantsku_plant_mugo_pine",
+    );
+    expect((await store.getProject(created.id)).plantSelections).toEqual({
+      demo_bed_plant_1: "plantsku_plant_hosta_patriot",
+      demo_foundation_plant_2: "plantsku_plant_mugo_pine",
+    });
+
+    await store.setPlantSelection(created.id, "demo_bed_plant_1", null);
+    await store.setPlantSelection(created.id, "demo_foundation_plant_2", null);
+    expect((await store.getProject(created.id)).plantSelections).toBeUndefined();
+  });
+
+  it("refuses a choice about a plant the design does not have", async () => {
+    const created = await store.createProject(PHOTO_BYTES, "image/jpeg", "jpg");
+    await store.setSegmentation(created.id, { status: "ready", ...demoSegmentation() });
+    await expect(
+      store.setPlantSelection(created.id, "no_such_plant_1", "plantsku_plant_hosta_patriot"),
+    ).rejects.toThrow(/not part of this design/i);
+  });
+
   it("round-trips a design with full provenance on every quantity", async () => {
     const created = await store.createProject(PHOTO_BYTES, "image/jpeg", "jpg");
     await store.setSegmentation(created.id, {

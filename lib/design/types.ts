@@ -73,6 +73,16 @@ export type DesignProject = {
   segmentation: SegmentationState;
   /** regionId → selection. */
   selections: Record<string, RegionSelection>;
+  /**
+   * plantingId → plant catalog option id.
+   *
+   * Keyed by the plant rather than by the region, because the unit of
+   * choice here is one plant: the customer taps the boxwood by the door
+   * and puts a hydrangea in its place, and the four other shrubs in the
+   * same bed are unaffected. Absent on projects created before plants
+   * were swappable, so every reader must treat it as optional.
+   */
+  plantSelections?: Record<string, string>;
   marketContext: MarketContext;
   /** Set once the customer shares and confirms an address. */
   location?: ProjectLocation;

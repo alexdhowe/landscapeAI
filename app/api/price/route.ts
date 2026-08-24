@@ -32,7 +32,13 @@ export async function POST(request: Request) {
       getProject(body.projectId),
       resolveOrg(),
     ]);
-    const quote = quoteProject(project, org.typology, org.bandPolicy);
+    const quote = quoteProject(
+      project,
+      org.typology,
+      org.bandPolicy,
+      undefined,
+      org.plantCatalog,
+    );
     if (!quote) {
       return NextResponse.json({ band: null });
     }

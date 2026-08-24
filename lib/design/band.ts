@@ -14,6 +14,8 @@ import type {
 } from "../pricing/typology";
 import { getTypologyBand } from "../pricing/typology";
 import { getOption } from "../catalog/options";
+import type { ResolvedPlantChoice } from "./plants";
+import { plantScopeLines } from "./plants";
 import type { RegionSelection } from "./types";
 
 /**
@@ -45,12 +47,17 @@ export function chosenOptionIds(
  */
 export function inferJobType(
   selections: Record<string, RegionSelection>,
+  plantChoices: readonly ResolvedPlantChoice[] = [],
 ): JobType | null {
   const jobTypes = new Set<JobType>();
   for (const id of chosenOptionIds(selections)) {
     const option = getOption(id);
     if (option) jobTypes.add(option.jobType);
   }
+  // Replanting is a job type too: against the house it is a foundation
+  // refresh, in a bed it is bed renovation. So a customer who swaps only
+  // plants still gets a band, from the same distributions.
+  for (const choice of plantChoices) jobTypes.add(choice.jobType);
   for (const jobType of JOB_TYPE_PRIORITY) {
     if (jobTypes.has(jobType)) return jobType;
   }
@@ -69,15 +76,17 @@ export function bandForSelections(
   selections: Record<string, RegionSelection>,
   context: MarketContext,
   config: TypologyConfig,
+  plantChoices: readonly ResolvedPlantChoice[] = [],
 ): DesignBand | null {
-  const jobType = inferJobType(selections);
+  const jobType = inferJobType(selections, plantChoices);
   if (!jobType) return null;
   const scope = [
-    ...new Set(
-      chosenOptionIds(selections)
+    ...new Set([
+      ...chosenOptionIds(selections)
         .map((id) => getOption(id)?.label)
         .filter((label): label is string => Boolean(label)),
-    ),
+      ...plantScopeLines(plantChoices),
+    ]),
   ];
   return { band: getTypologyBand(jobType, context, config), jobType, scope };
 }

@@ -85,7 +85,7 @@ const MAX_PLANTINGS_PER_REGION = 24;
  */
 const MIN_PLANTING_RADIUS = 0.004;
 
-function parsePlantings(raw: unknown): Planting[] {
+function parsePlantings(raw: unknown, regionId: string): Planting[] {
   if (!Array.isArray(raw)) return [];
   const plantings: Planting[] = [];
   for (const item of raw) {
@@ -100,6 +100,7 @@ function parsePlantings(raw: unknown): Planting[] {
     const clampR = (r: number) => Math.min(0.5, Math.abs(r));
     if (clampR(rx) < MIN_PLANTING_RADIUS || clampR(ry) < MIN_PLANTING_RADIUS) continue;
     plantings.push({
+      id: `${regionId}_plant_${plantings.length + 1}`,
       cx: clamp01(cx),
       cy: clamp01(cy),
       rx: clampR(rx),
@@ -219,9 +220,10 @@ export function parseSegmentation(
       typeof r.confidence === "number" && Number.isFinite(r.confidence)
         ? clamp01(r.confidence)
         : 0.5;
-    const plantings = parsePlantings(r.plantings);
+    const regionId = asString(r.id) ?? `region_${i + 1}`;
+    const plantings = parsePlantings(r.plantings, regionId);
     regions.push({
-      id: asString(r.id) ?? `region_${i + 1}`,
+      id: regionId,
       kind,
       label: asString(r.label) ?? `Region ${i + 1}`,
       polygon,

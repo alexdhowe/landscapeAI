@@ -530,6 +530,35 @@ export const selections = pgTable(
   ],
 );
 
+/**
+ * What the customer chose to put in place of a plant the photo found.
+ *
+ * Keyed by the plant, not the region: the unit of choice is one plant, so
+ * swapping the boxwood by the door leaves the other four shrubs in the
+ * same bed alone.
+ *
+ * The plants themselves live in `regions.plantings` rather than in rows,
+ * because they are part of one segmentation result that is written and
+ * replaced whole. That is why the foreign key is on the project alone —
+ * there is no plant row to point at — and why re-segmenting has to be able
+ * to leave a selection behind. `regionOfPlanting` is what decides whether
+ * a stored selection still names a plant in the current design; one that
+ * does not is ignored by every reader rather than trusted.
+ */
+export const plantSelections = pgTable(
+  "plant_selections",
+  {
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    /** `${regionId}_plant_${n}`, assigned by the segmentation parser. */
+    plantingId: text("planting_id").notNull(),
+    /** A plant catalog option id — `plantsku_<skuId>`. */
+    optionId: text("option_id").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.projectId, t.plantingId] })],
+);
+
 // ---------------------------------------------------------------------------
 // The frozen record
 // ---------------------------------------------------------------------------
@@ -668,6 +697,7 @@ export const projectRelations = relations(projects, ({ one, many }) => ({
   photos: many(photos),
   regions: many(regions),
   selections: many(selections),
+  plantSelections: many(plantSelections),
   snapshots: many(estimateSnapshots),
   deltas: many(measurementDeltas),
 }));
@@ -689,6 +719,13 @@ export const regionRelations = relations(regions, ({ one }) => ({
 export const selectionRelations = relations(selections, ({ one }) => ({
   project: one(projects, {
     fields: [selections.projectId],
+    references: [projects.id],
+  }),
+}));
+
+export const plantSelectionRelations = relations(plantSelections, ({ one }) => ({
+  project: one(projects, {
+    fields: [plantSelections.projectId],
     references: [projects.id],
   }),
 }));

@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import type { PlantOption } from "@/lib/catalog/plants";
+import { plantOptionsForRegion } from "@/lib/catalog/plants";
 import { renderModeForProject } from "@/lib/design/render";
 import type { DesignProject, RegionSelection } from "@/lib/design/types";
 import type { MarketContext } from "@/lib/pricing/typology";
@@ -12,6 +14,7 @@ import { Skeleton, SkeletonText } from "@/components/ui/Skeleton";
 
 import { CatalogPicker } from "./CatalogPicker";
 import { PhotoCanvas, RegionStrip } from "./PhotoCanvas";
+import { PlantPicker, PlantStrip } from "./PlantPicker";
 import { PriceRail, type BandPayload } from "./PriceRail";
 import { SubmitLead } from "./SubmitLead";
 
@@ -28,6 +31,8 @@ export function Configurator({ projectId }: { projectId: string }) {
   const [project, setProject] = useState<DesignProject | null>(null);
   const [band, setBand] = useState<BandPayload | null>(null);
   const [selectedRegionId, setSelectedRegionId] = useState<string | null>(null);
+  const [selectedPlantingId, setSelectedPlantingId] = useState<string | null>(null);
+  const [plantCatalog, setPlantCatalog] = useState<PlantOption[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const segmentationStarted = useRef(false);
@@ -41,6 +46,22 @@ export function Configurator({ projectId }: { projectId: string }) {
     });
     if (res.ok) setBand((await res.json()) as BandPayload);
   }, [projectId]);
+
+  // What this contractor can plant. Fetched rather than bundled: the price
+  // book is editable and revisioned, so the offerable list belongs to the
+  // server. A failure here costs the plant picker and nothing else.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const res = await fetch("/api/plants").catch(() => null);
+      if (!res?.ok || cancelled) return;
+      const body = (await res.json()) as { plants: PlantOption[] };
+      if (!cancelled) setPlantCatalog(body.plants ?? []);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Load the project; kick off segmentation if it hasn't run yet.
   useEffect(() => {
@@ -97,6 +118,26 @@ export function Configurator({ projectId }: { projectId: string }) {
     [projectId, refreshBand],
   );
 
+  const applyPlant = useCallback(
+    async (plantingId: string, plantOptionId: string | null) => {
+      setBusy(true);
+      try {
+        const res = await fetch(`/api/projects/${projectId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ plantingId, plantOptionId }),
+        });
+        if (res.ok) {
+          setProject((await res.json()) as DesignProject);
+          await refreshBand();
+        }
+      } finally {
+        setBusy(false);
+      }
+    },
+    [projectId, refreshBand],
+  );
+
   // After submit the server has locked the project — reload so the UI
   // reflects the submitted status everywhere.
   const reloadProject = useCallback(async () => {
@@ -126,14 +167,22 @@ export function Configurator({ projectId }: { projectId: string }) {
   );
 
   /** On a phone the picker is below the fold — bring it to the customer. */
-  const selectRegion = useCallback((regionId: string) => {
-    setSelectedRegionId(regionId);
+  const revealPicker = useCallback(() => {
     if (typeof window !== "undefined" && window.matchMedia("(max-width: 1023px)").matches) {
       requestAnimationFrame(() =>
         pickerRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" }),
       );
     }
   }, []);
+
+  const selectRegion = useCallback(
+    (regionId: string) => {
+      setSelectedRegionId(regionId);
+      setSelectedPlantingId(null);
+      revealPicker();
+    },
+    [revealPicker],
+  );
 
   if (error) {
     return (
@@ -160,6 +209,13 @@ export function Configurator({ projectId }: { projectId: string }) {
   // from the design graph — may sit next to the numbers.
   const deterministic = renderModeForProject(project) === "deterministic";
   const demo = seg.status === "ready" && seg.source === "demo";
+  const openPlanting = selectedPlantingId
+    ? regions
+        .flatMap((region) =>
+          (region.plantings ?? []).map((plant) => ({ region, plant })),
+        )
+        .find(({ plant }) => plant.id === selectedPlantingId)
+    : undefined;
 
   return (
     // One column on a phone, in the order someone standing outside needs
@@ -213,6 +269,18 @@ export function Configurator({ projectId }: { projectId: string }) {
             onSelectRegion={selectRegion}
             pending={seg.status === "pending"}
             notice={demo ? "Example areas" : undefined}
+            plantSelections={project.plantSelections}
+            plantCatalog={plantCatalog}
+            selectedPlantingId={selectedPlantingId}
+            onSelectPlanting={
+              locked
+                ? undefined
+                : (plantingId, regionId) => {
+                    setSelectedRegionId(regionId);
+                    setSelectedPlantingId(plantingId);
+                    revealPicker();
+                  }
+            }
           />
 
           {regions.length > 0 && (
@@ -297,9 +365,19 @@ export function Configurator({ projectId }: { projectId: string }) {
           pending={seg.status === "pending"}
         />
         <div ref={pickerRef} className="scroll-mt-4">
-          {!locked &&
-            (selectedRegion ? (
-              <Card className="p-4">
+          {!locked && (openPlanting || selectedRegion) ? (
+            <Card className="p-4">
+              {openPlanting ? (
+                <PlantPicker
+                  region={openPlanting.region}
+                  planting={openPlanting.plant}
+                  options={plantOptionsForRegion(plantCatalog, openPlanting.region.kind)}
+                  chosenOptionId={project.plantSelections?.[openPlanting.plant.id]}
+                  busy={busy}
+                  onChoose={(optionId) => applyPlant(openPlanting.plant.id, optionId)}
+                  onClose={() => setSelectedPlantingId(null)}
+                />
+              ) : selectedRegion ? (
                 <CatalogPicker
                   region={selectedRegion}
                   selection={project.selections[selectedRegion.id]}
@@ -307,8 +385,26 @@ export function Configurator({ projectId }: { projectId: string }) {
                   onChange={(selection) => applySelection(selectedRegion.id, selection)}
                   onClose={() => setSelectedRegionId(null)}
                 />
-              </Card>
-            ) : null)}
+              ) : null}
+
+              {/* Under whichever picker is open, so moving from one plant
+                  to its neighbour does not mean going back out to the
+                  photo first. This is also the accessible path to the
+                  plants: the ellipses on the picture are hidden from
+                  assistive technology. */}
+              <PlantStrip
+                region={openPlanting?.region ?? selectedRegion!}
+                plantSelections={project.plantSelections}
+                catalog={plantCatalog}
+                selectedPlantingId={selectedPlantingId}
+                onSelectPlanting={(plantingId) =>
+                  setSelectedPlantingId(
+                    plantingId === selectedPlantingId ? null : plantingId,
+                  )
+                }
+              />
+            </Card>
+          ) : null}
         </div>
         <SubmitLead
           projectId={project.id}

@@ -74,7 +74,13 @@ export async function POST(request: Request, { params }: Params) {
     }
 
     const org = await resolveOrg();
-    const quote = quoteProject(project, org.typology, org.bandPolicy);
+    const quote = quoteProject(
+      project,
+      org.typology,
+      org.bandPolicy,
+      undefined,
+      org.plantCatalog,
+    );
     if (!quote || !quote.estimate) {
       return NextResponse.json(
         { error: "Pick at least one option before sending your design" },

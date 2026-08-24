@@ -38,9 +38,9 @@ export function demoSegmentation(): SegmentationResult {
         // does — without them, "swap mulch for stone" looks correct in
         // development and paints over every shrub in production.
         plantings: [
-          { cx: 0.11, cy: 0.645, rx: 0.035, ry: 0.033, label: "ornamental grass" },
-          { cx: 0.23, cy: 0.635, rx: 0.038, ry: 0.036, label: "ornamental grass" },
-          { cx: 0.36, cy: 0.63, rx: 0.032, ry: 0.03, label: "daylily clump" },
+          { id: "demo_bed_plant_1", cx: 0.11, cy: 0.645, rx: 0.035, ry: 0.033, label: "ornamental grass" },
+          { id: "demo_bed_plant_2", cx: 0.23, cy: 0.635, rx: 0.038, ry: 0.036, label: "ornamental grass" },
+          { id: "demo_bed_plant_3", cx: 0.36, cy: 0.63, rx: 0.032, ry: 0.03, label: "daylily clump" },
         ],
         existingMaterial: "hardwood mulch",
         condition: "faded, weeds coming through",
@@ -58,10 +58,10 @@ export function demoSegmentation(): SegmentationResult {
           [0.51, 0.66],
         ],
         plantings: [
-          { cx: 0.57, cy: 0.585, rx: 0.04, ry: 0.045, label: "boxwood" },
-          { cx: 0.67, cy: 0.58, rx: 0.042, ry: 0.048, label: "boxwood" },
-          { cx: 0.78, cy: 0.575, rx: 0.045, ry: 0.05, label: "yew" },
-          { cx: 0.89, cy: 0.57, rx: 0.04, ry: 0.045, label: "yew" },
+          { id: "demo_foundation_plant_1", cx: 0.57, cy: 0.585, rx: 0.04, ry: 0.045, label: "boxwood" },
+          { id: "demo_foundation_plant_2", cx: 0.67, cy: 0.58, rx: 0.042, ry: 0.048, label: "boxwood" },
+          { id: "demo_foundation_plant_3", cx: 0.78, cy: 0.575, rx: 0.045, ry: 0.05, label: "yew" },
+          { id: "demo_foundation_plant_4", cx: 0.89, cy: 0.57, rx: 0.04, ry: 0.045, label: "yew" },
         ],
         existingMaterial: "overgrown shrubs in mulch",
         condition: "overgrown, crowding the siding",

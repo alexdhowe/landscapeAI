@@ -20,6 +20,8 @@ import type {
 } from "../pricing/types";
 import type { JobType, MarketContext, TypologyConfig } from "../pricing/typology";
 import { inferJobType } from "./band";
+import type { ResolvedPlantChoice } from "./plants";
+import { plantAssemblyCounts, plantScopeLines } from "./plants";
 import type { RegionSelection } from "./types";
 
 /** The measured quantities for one photo region, from the drawn aerial ring. */
@@ -163,6 +165,7 @@ export function designEngineInput(
   context: MarketContext,
   config: TypologyConfig,
   capturedAt: string,
+  plantChoices: readonly ResolvedPlantChoice[] = [],
 ): DesignEngineInput {
   const selectedRegionIds = Object.keys(selections).filter((id) =>
     hasChoice(selections[id]),
@@ -199,6 +202,25 @@ export function designEngineInput(
     }
   }
 
+  // One plant swapped is one plant installed: the `install_<sku>`
+  // assembly at 1 EA, which is what the seed builds for every plant in
+  // the book. The quantity's provenance is the photo — the plant is there
+  // because the segmentation found it standing there — and it is a count,
+  // not an area, so it needs no measurement and narrows nothing.
+  for (const [assemblyId, count] of plantAssemblyCounts(plantChoices)) {
+    engineSelections.push({
+      assemblyId,
+      quantity: {
+        value: count,
+        unit: "EA",
+        source: "photo",
+        confidence: 0.9,
+        capturedAt,
+      },
+    });
+  }
+  for (const line of plantScopeLines(plantChoices)) scope.add(line);
+
   return {
     engineSelections,
     scope: [...scope],
@@ -220,11 +242,19 @@ export function measuredBandForSelections(
   config: TypologyConfig,
   policy: DisclosurePolicy,
   now: () => string = () => new Date().toISOString(),
+  plantChoices: readonly ResolvedPlantChoice[] = [],
 ): MeasuredDesignBand | null {
-  const jobType = inferJobType(selections);
+  const jobType = inferJobType(selections, plantChoices);
   if (!jobType) return null;
 
-  const input = designEngineInput(selections, measurements, context, config, now());
+  const input = designEngineInput(
+    selections,
+    measurements,
+    context,
+    config,
+    now(),
+    plantChoices,
+  );
   const { engineSelections, scope, measuredRegionIds, unmeasuredRegionIds } = input;
   if (measuredRegionIds.length === 0) return null;
   if (engineSelections.length === 0) return null;

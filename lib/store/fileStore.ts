@@ -30,6 +30,7 @@ import {
   assertConfirmable,
   assertEditable,
   assertQuotable,
+  assertPlanting,
   assertRegion,
 } from "./gates";
 import {
@@ -168,6 +169,20 @@ export function createFileStore(): ProjectStore {
       return edit(id, (project) => {
         assertRegion(project, regionId);
         project.selections[regionId] = selection;
+      });
+    },
+
+    setPlantSelection(id: string, plantingId: string, optionId: string | null) {
+      return edit(id, (project) => {
+        assertPlanting(project, plantingId);
+        const chosen = { ...(project.plantSelections ?? {}) };
+        if (optionId === null) delete chosen[plantingId];
+        else chosen[plantingId] = optionId;
+        // Absent rather than empty, so a project nobody has replanted
+        // round-trips identically to one created before plants were
+        // swappable — the store test compares the whole object.
+        if (Object.keys(chosen).length === 0) delete project.plantSelections;
+        else project.plantSelections = chosen;
       });
     },
 

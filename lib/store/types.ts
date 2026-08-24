@@ -58,6 +58,19 @@ export class UnknownRegionError extends Error {
 }
 
 /**
+ * Thrown when a write names a plant this project's segmentation did not
+ * find. Same reasoning as a region: a choice about a plant that is not in
+ * the design has nowhere to land, and silently accepting one would put a
+ * line item on the rep's quote for a shrub nobody can point at.
+ */
+export class UnknownPlantingError extends Error {
+  constructor(plantingId: string) {
+    super(`Plant "${plantingId}" is not part of this design`);
+    this.name = "UnknownPlantingError";
+  }
+}
+
+/**
  * A photo whose bytes lib/storage has already written. The store records
  * where they went; it never holds them, and neither backend below knows
  * whether "there" was a bucket, a row, or a file.
@@ -80,6 +93,15 @@ export type ProjectStore = {
     id: string,
     regionId: string,
     selection: RegionSelection,
+  ): Promise<DesignProject>;
+  /**
+   * Choose a plant for one of the plants the photo found, or clear the
+   * choice with null and go back to what is actually growing there.
+   */
+  setPlantSelection(
+    id: string,
+    plantingId: string,
+    optionId: string | null,
   ): Promise<DesignProject>;
   setLocation(id: string, location: ProjectLocation): Promise<DesignProject>;
   declineAddress(id: string): Promise<DesignProject>;

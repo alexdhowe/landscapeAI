@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest";
 
-import { wiBandPolicy, wiTypologyConfig } from "../../../seed/pricebook.seed";
+import {
+  plantMetaBySku,
+  wiBandPolicy,
+  wiPriceBook,
+  wiTypologyConfig,
+} from "../../../seed/pricebook.seed";
+import { plantOptionsFor } from "../../catalog/plants";
 import { demoSegmentation } from "../../vision/demo";
+import { INTERNAL_ONLY_MARKERS } from "../../lead/snapshot";
 import { isFinalQuotePayload, quoteProject } from "../quote";
 import type { AerialRegion, DesignProject } from "../types";
 
@@ -169,5 +176,95 @@ describe("quoteProject", () => {
     );
     expect(quote!.basis).toBe("typology");
     expect(quote!.estimate).not.toBeNull();
+  });
+});
+
+
+describe("a swapped plant", () => {
+  const CATALOG = plantOptionsFor(wiPriceBook, plantMetaBySku);
+  const BOXWOOD = "plantsku_plant_boxwood_green_velvet";
+
+  /** The demo overlay's foundation planting carries four shrubs. */
+  const withPlants = (plantSelections: Record<string, string>) =>
+    baseProject({ selections: {}, plantSelections });
+
+  it("earns a band on its own, with nothing else selected", () => {
+    // Replanting IS a job. A customer who only swaps plants still gets a
+    // range and can still send the design.
+    const quote = quoteProject(
+      withPlants({ demo_foundation_plant_1: BOXWOOD }),
+      wiTypologyConfig,
+      wiBandPolicy,
+      now,
+      CATALOG,
+    );
+    expect(quote).not.toBeNull();
+    expect(quote!.jobType).toBe("foundation_planting_refresh");
+    const payload = quote!.customerPayload;
+    expect(isFinalQuotePayload(payload)).toBe(false);
+    expect(payload.scope).toContain("Boxwood 'Green Velvet'");
+  });
+
+  it("puts one install line item per plant into the internal estimate", () => {
+    const quote = quoteProject(
+      withPlants({
+        demo_foundation_plant_1: BOXWOOD,
+        demo_foundation_plant_2: BOXWOOD,
+      }),
+      wiTypologyConfig,
+      wiBandPolicy,
+      now,
+      CATALOG,
+    )!;
+    const lines = quote.estimate!.lineItems.filter((l) =>
+      l.assemblyId.includes("boxwood"),
+    );
+    expect(lines).toHaveLength(1);
+    expect(lines[0].quantity.value).toBe(2);
+    expect(lines[0].quantity.unit).toBe("EA");
+    // The plant is there because the photo found it standing there.
+    expect(lines[0].quantity.source).toBe("photo");
+  });
+
+  it("leaks no rate, cost or margin to the customer", () => {
+    // Section 1: never render internal line items to a customer surface.
+    // A per-plant swap is the newest way to put a cost item into an
+    // estimate, so it is the newest way to leak one.
+    const quote = quoteProject(
+      withPlants({ demo_foundation_plant_1: BOXWOOD }),
+      wiTypologyConfig,
+      wiBandPolicy,
+      now,
+      CATALOG,
+    )!;
+    const bytes = JSON.stringify(quote.customerPayload);
+    for (const marker of INTERNAL_ONLY_MARKERS) {
+      expect(bytes, `customer payload contains "${marker}"`).not.toContain(marker);
+    }
+  });
+
+  it("counts nothing for a choice naming a plant the design does not have", () => {
+    const quote = quoteProject(
+      withPlants({ some_old_plant_7: BOXWOOD }),
+      wiTypologyConfig,
+      wiBandPolicy,
+      now,
+      CATALOG,
+    );
+    expect(quote).toBeNull();
+  });
+
+  it("prices a plant swap alongside a surface swap", () => {
+    const project = baseProject({
+      plantSelections: { demo_bed_plant_1: BOXWOOD },
+    });
+    const quote = quoteProject(project, wiTypologyConfig, wiBandPolicy, now, CATALOG)!;
+    // The stone conversion still wins the job type — it is the more
+    // specific job — and the plant is still in the scope and the estimate.
+    expect(quote.jobType).toBe("mulch_to_stone");
+    expect(quote.customerPayload.scope).toContain("Boxwood 'Green Velvet'");
+    expect(
+      quote.estimate!.lineItems.some((l) => l.assemblyId.includes("boxwood")),
+    ).toBe(true);
   });
 });

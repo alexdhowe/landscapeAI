@@ -3,11 +3,13 @@
 import { useState } from "react";
 
 import { getOption } from "@/lib/catalog/options";
+import type { PlantOption } from "@/lib/catalog/plants";
 import { layoutRegionMarkers } from "@/lib/design/markers";
 import type { RegionSelection } from "@/lib/design/types";
 import type { SegmentedRegion } from "@/lib/vision/types";
 import { REGION_KIND_LABELS } from "@/lib/vision/types";
 
+import { PlantGlyph } from "./plantGlyphs";
 import { KIND_COLORS } from "./regionColors";
 import { SwatchFilters } from "./swatches";
 
@@ -27,7 +29,36 @@ type Props = {
    * from the thing it labels is most of the way to not being one.
    */
   notice?: string;
+  /** plantingId → the plant the customer put there. */
+  plantSelections?: Record<string, string>;
+  /** The org's plant catalog, for resolving those choices to a glyph. */
+  plantCatalog?: readonly PlantOption[];
+  /** Tapping a plant on the photo opens its picker. */
+  onSelectPlanting?: (plantingId: string, regionId: string) => void;
+  selectedPlantingId?: string | null;
 };
+
+/**
+ * How much bigger than reported the plant cut-outs are drawn.
+ *
+ * The two ways to be wrong here are not equally bad. Too small and gravel
+ * lands across a shrub's outer leaves, which is the thing this exists to
+ * prevent and which is instantly visible. Too big and a little of the old
+ * bed shows in a ring around the plant — which is what a real bed looks
+ * like, since nothing is mulched right up to a stem. So the margin goes
+ * outward, and a model that draws an ellipse round the dense middle of a
+ * shrub still covers its edges.
+ *
+ * Display only. The stored ellipse stays exactly what the model reported,
+ * because that is the plant's extent and a later per-plant swap needs the
+ * real number, not one padded for masking.
+ */
+const PLANTING_MARGIN = 1.18;
+
+/** What the photo called this plant, when it managed to name it. */
+function plantName(label?: string): string {
+  return label?.trim() || "This plant";
+}
 
 function regionName(region: SegmentedRegion): string {
   return region.label || REGION_KIND_LABELS[region.kind];
@@ -66,19 +97,35 @@ export function PhotoCanvas({
   onSelectRegion,
   pending = false,
   notice,
+  plantSelections,
+  plantCatalog,
+  onSelectPlanting,
+  selectedPlantingId = null,
 }: Props) {
   const [dims, setDims] = useState<{ w: number; h: number } | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
+  const [hoveredPlantId, setHoveredPlantId] = useState<string | null>(null);
+
+  const catalogById = new Map((plantCatalog ?? []).map((o) => [o.id, o]));
+  /** The plant the customer put here, if they put one here. */
+  const chosenPlant = (plantingId: string): PlantOption | undefined => {
+    const optionId = plantSelections?.[plantingId];
+    return optionId ? catalogById.get(optionId) : undefined;
+  };
 
   const w = dims?.w ?? 1600;
   const h = dims?.h ?? 1200;
 
-  // A region that has been swapped shows its material; a name pinned over
-  // it hides the one thing the customer just did, and on a phone the pill
-  // is wider than a bed. The strip below carries both the name and the
-  // material, with room for them, so nothing is lost by getting out of the
-  // way here.
-  const named = regions.filter((region) => !selections[region.id]?.surfaceOptionId);
+  // A region the customer has acted on shows what they did; a name pinned
+  // over it hides the one thing they just changed, and on a phone the pill
+  // is wider than a bed. That covers a swapped surface and equally a
+  // swapped plant — a new shrub drawn under a big dark label is not a
+  // preview of anything. The strip below carries the name either way,
+  // with room for it, so nothing is lost by getting out of the way.
+  const acted = (region: SegmentedRegion) =>
+    Boolean(selections[region.id]?.surfaceOptionId) ||
+    (region.plantings ?? []).some((plant) => chosenPlant(plant.id));
+  const named = regions.filter((region) => !acted(region));
   const markers = layoutRegionMarkers(named);
 
   return (
@@ -139,20 +186,24 @@ export function PhotoCanvas({
                 points={region.polygon.map(([x, y]) => `${x * w},${y * h}`).join(" ")}
                 fill="#ffffff"
               />
-              {(region.plantings ?? []).length > 0 && (
-                <g filter="url(#planting-soften)">
-                  {region.plantings!.map((plant, i) => (
+              {/* Only the plants that are STAYING are punched out. One
+                  the customer has replaced is covered by the new material
+                  and then drawn over, which is what makes a swap look like
+                  the old plant was taken out rather than hidden. */}
+              <g filter="url(#planting-soften)">
+                {(region.plantings ?? [])
+                  .filter((plant) => !chosenPlant(plant.id))
+                  .map((plant) => (
                     <ellipse
-                      key={i}
+                      key={plant.id}
                       cx={plant.cx * w}
                       cy={plant.cy * h}
-                      rx={plant.rx * w}
-                      ry={plant.ry * h}
+                      rx={plant.rx * w * PLANTING_MARGIN}
+                      ry={plant.ry * h * PLANTING_MARGIN}
                       fill="#000000"
                     />
                   ))}
-                </g>
-              )}
+              </g>
             </mask>
           ))}
         </defs>
@@ -229,6 +280,28 @@ export function PhotoCanvas({
             </g>
           );
         })}
+        {/* The swapped plants, drawn last so no region's material can land
+            on top of one. Each is scaled to the footprint the photo's
+            plant occupies: we know where the plant is and how big it looks
+            from here, and we have no scale in feet from a single
+            photograph — so the picture says "this plant, here", and the
+            picker says how big it gets. */}
+        {regions.map((region) =>
+          (region.plantings ?? []).map((plant) => {
+            const option = chosenPlant(plant.id);
+            if (!option) return null;
+            const rx = plant.rx * w * PLANTING_MARGIN;
+            const ry = plant.ry * h * PLANTING_MARGIN;
+            return (
+              <g
+                key={plant.id}
+                transform={`translate(${plant.cx * w} ${plant.cy * h}) scale(${rx} ${ry})`}
+              >
+                <PlantGlyph kind={option.glyph} />
+              </g>
+            );
+          }),
+        )}
       </svg>
 
       {named.length > 0 && (
@@ -264,6 +337,95 @@ export function PhotoCanvas({
               </button>
             );
           })}
+        </div>
+      )}
+
+      {/* Pointer affordance over each plant: hovering names it, tapping
+          opens its picker. Hidden from assistive technology because the
+          picker panel lists the same plants as real buttons — the same
+          split the region markers and the region strip use.
+          
+          After the region markers in the DOM, and that ordering is load-
+          bearing: a region's name pill is a wide target that sits over the
+          middle of its region, so it covered the plants underneath it and
+          swallowed their taps. Between the two, the plant is the more
+          specific thing the customer is pointing at, and the region is
+          still reachable from anywhere else in its polygon and from the
+          strip under the photo. */}
+      {onSelectPlanting && (
+        <div aria-hidden>
+          {regions.map((region) =>
+            (region.plantings ?? []).map((plant) => {
+              const option = chosenPlant(plant.id);
+              const isOpen = plant.id === selectedPlantingId;
+              const isHovered = plant.id === hoveredPlantId;
+              // Quiet until it is relevant. A ring on every plant all the
+              // time turns the customer's photograph into a diagram —
+              // seven pale circles scattered over a yard read as an
+              // overlay, not as things you can touch. So: nothing until
+              // the pointer is on one, and a faint ring on the plants in
+              // the region the customer has actually opened, which is
+              // where they are looking for something to change.
+              const inOpenRegion = region.id === selectedRegionId;
+              const ring =
+                isOpen || isHovered
+                  ? "ring-2 ring-white/90 bg-white/10"
+                  : inOpenRegion
+                    ? "ring-1 ring-white/45 hover:ring-2 hover:ring-white/90"
+                    : "hover:ring-2 hover:ring-white/90";
+              return (
+                <button
+                  key={plant.id}
+                  type="button"
+                  tabIndex={-1}
+                  data-plant={plant.id}
+                  onClick={() => onSelectPlanting(plant.id, region.id)}
+                  onMouseEnter={() => setHoveredPlantId(plant.id)}
+                  onMouseLeave={() => setHoveredPlantId(null)}
+                  className={`absolute -translate-x-1/2 -translate-y-1/2 rounded-full transition-all ${ring}`}
+                  style={{
+                    left: `${plant.cx * 100}%`,
+                    top: `${plant.cy * 100}%`,
+                    width: `${plant.rx * 2 * PLANTING_MARGIN * 100}%`,
+                    height: `${plant.ry * 2 * PLANTING_MARGIN * 100}%`,
+                  }}
+                >
+                  <span className="sr-only">
+                    {option ? option.label : plantName(plant.label)}
+                  </span>
+                </button>
+              );
+            }),
+          )}
+          {/* What it is, on hover. One at a time, so a bed of eight shrubs
+              does not turn into eight labels the moment the pointer
+              crosses it. */}
+          {regions.map((region) =>
+            (region.plantings ?? []).map((plant) => {
+              if (plant.id !== hoveredPlantId || plant.id === selectedPlantingId) return null;
+              const option = chosenPlant(plant.id);
+              return (
+                <p
+                  key={plant.id}
+                  className="pointer-events-none absolute z-10 -translate-x-1/2 whitespace-nowrap rounded-full bg-bark-950/85 px-2.5 py-1 text-2xs font-medium text-white shadow-e2 sm:text-xs"
+                  style={{
+                    left: `${plant.cx * 100}%`,
+                    top: `${Math.max(0, plant.cy - plant.ry * PLANTING_MARGIN) * 100}%`,
+                    transform: "translate(-50%, -120%)",
+                  }}
+                >
+                  {option ? (
+                    <>
+                      {option.label}
+                      <span className="font-normal text-canopy-200"> · replacing {plantName(plant.label)}</span>
+                    </>
+                  ) : (
+                    plantName(plant.label)
+                  )}
+                </p>
+              );
+            }),
+          )}
         </div>
       )}
 

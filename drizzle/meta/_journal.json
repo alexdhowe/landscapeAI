@@ -43,6 +43,13 @@
       "when": 1787533174102,
       "tag": "0005_plantings_in_regions",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1787540358302,
+      "tag": "0006_plant_selections",
+      "breakpoints": true
     }
   ]
 }

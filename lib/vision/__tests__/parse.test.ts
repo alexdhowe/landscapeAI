@@ -235,7 +235,7 @@ describe("plantings", () => {
       withPlantings([{ cx: 0.3, cy: 0.7, rx: 0.04, ry: 0.05, label: "boxwood" }]),
     );
     expect(regions[0].plantings).toEqual([
-      { cx: 0.3, cy: 0.7, rx: 0.04, ry: 0.05, label: "boxwood" },
+      { id: "region_1_plant_1", cx: 0.3, cy: 0.7, rx: 0.04, ry: 0.05, label: "boxwood" },
     ]);
   });
 
@@ -256,7 +256,25 @@ describe("plantings", () => {
       ]),
     );
     // The speck and the unparseable one go; the giant is clamped, not lost.
-    expect(regions[0].plantings).toEqual([{ cx: 0.5, cy: 0.7, rx: 0.5, ry: 0.05, label: undefined }]);
+    expect(regions[0].plantings).toEqual([
+      { id: "region_1_plant_1", cx: 0.5, cy: 0.7, rx: 0.5, ry: 0.05, label: undefined },
+    ]);
+  });
+
+  it("gives each plant an id that survives the store, so a choice can name it", () => {
+    // The id is the parser's, not the model's: a customer's choice of what
+    // to put here is keyed by it and has to mean the same thing after a
+    // reload.
+    const { regions } = parseSegmentation(
+      withPlantings([
+        { cx: 0.3, cy: 0.7, rx: 0.04, ry: 0.05 },
+        { cx: 0.6, cy: 0.7, rx: 0.04, ry: 0.05 },
+      ]),
+    );
+    expect(regions[0].plantings!.map((p) => p.id)).toEqual([
+      "region_1_plant_1",
+      "region_1_plant_2",
+    ]);
   });
 
   it("stops counting well before a model enumerates ground cover", () => {

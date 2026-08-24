@@ -185,6 +185,8 @@ export default async function LeadPage({
               photoUrl={`/api/leads/${project.id}/photo`}
               regions={regions}
               selections={project.selections}
+              plantSelections={project.plantSelections}
+              plantCatalog={org.plantCatalog}
             />
             <p className="mt-2 text-xs text-bark-500">
               {project.location?.address

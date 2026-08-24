@@ -1,14 +1,19 @@
 import { NextResponse } from "next/server";
 
 import { getOption } from "@/lib/catalog/options";
+import { plantOptionsForRegion } from "@/lib/catalog/plants";
 import type { RegionSelection } from "@/lib/design/types";
+import { resolveOrg } from "@/lib/org/resolve";
+import { regionOfPlanting } from "@/lib/store/gates";
 import {
   ProjectLockedError,
   ProjectNotFoundError,
+  UnknownPlantingError,
   declineAddress,
   getProject,
   setLocation,
   setMarketContext,
+  setPlantSelection,
   setSelection,
 } from "@/lib/store/projects";
 
@@ -29,6 +34,9 @@ export async function GET(_request: Request, { params }: Params) {
 /**
  * PATCH body is one of:
  *   { regionId, selection: { surfaceOptionId?, addonOptionIds } }
+ *   { plantingId, plantOptionId }                 — swap one plant, or
+ *                                                   null to put back what
+ *                                                   is growing there
  *   { marketContext: "residential" | "hoa_commercial" }
  *   { location: { address, lat, lng, source } }   — confirmed geocode pick
  *   { addressDeclined: true }                     — the no-address path
@@ -44,6 +52,8 @@ export async function PATCH(request: Request, { params }: Params) {
   const patch = body as {
     regionId?: unknown;
     selection?: unknown;
+    plantingId?: unknown;
+    plantOptionId?: unknown;
     marketContext?: unknown;
     location?: unknown;
     addressDeclined?: unknown;
@@ -101,9 +111,46 @@ export async function PATCH(request: Request, { params }: Params) {
       return NextResponse.json(await setMarketContext(projectId, patch.marketContext));
     }
 
+    if (patch.plantingId !== undefined) {
+      if (typeof patch.plantingId !== "string" || !patch.plantingId.trim()) {
+        return NextResponse.json({ error: "plantingId must be a string" }, { status: 400 });
+      }
+      // null puts back whatever is actually growing there.
+      if (patch.plantOptionId === null) {
+        return NextResponse.json(
+          await setPlantSelection(projectId, patch.plantingId, null),
+        );
+      }
+      if (typeof patch.plantOptionId !== "string") {
+        return NextResponse.json(
+          { error: "plantOptionId must be a string, or null to clear it" },
+          { status: 400 },
+        );
+      }
+      // The catalog is the guardrail, and it is the ORG's catalog: an
+      // option id the browser invented, or one for a plant this
+      // contractor has stopped stocking, buys nothing.
+      const project = await getProject(projectId);
+      const region = regionOfPlanting(project, patch.plantingId);
+      if (!region) {
+        return NextResponse.json({ error: "Unknown plant" }, { status: 400 });
+      }
+      const org = await resolveOrg();
+      const offered = plantOptionsForRegion(org.plantCatalog, region.kind);
+      if (!offered.some((option) => option.id === patch.plantOptionId)) {
+        return NextResponse.json(
+          { error: `Plant "${patch.plantOptionId}" is not offered for this area` },
+          { status: 400 },
+        );
+      }
+      return NextResponse.json(
+        await setPlantSelection(projectId, patch.plantingId, patch.plantOptionId),
+      );
+    }
+
     if (typeof patch.regionId !== "string" || patch.selection === null || typeof patch.selection !== "object") {
       return NextResponse.json(
-        { error: "Expected { regionId, selection } or { marketContext }" },
+        { error: "Expected { regionId, selection }, { plantingId, plantOptionId } or { marketContext }" },
         { status: 400 },
       );
     }
@@ -153,6 +200,12 @@ export async function PATCH(request: Request, { params }: Params) {
   } catch (error) {
     if (error instanceof ProjectNotFoundError) {
       return NextResponse.json({ error: "Project not found" }, { status: 404 });
+    }
+    if (error instanceof UnknownPlantingError) {
+      // A choice about a plant this design does not have. Most likely a
+      // stale tab after a re-segmentation, which is the customer's problem
+      // to see rather than a 500.
+      return NextResponse.json({ error: "Unknown plant" }, { status: 400 });
     }
     if (error instanceof ProjectLockedError) {
       return NextResponse.json(
