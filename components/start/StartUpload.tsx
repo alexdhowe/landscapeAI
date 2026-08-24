@@ -130,27 +130,36 @@ export function StartUpload() {
         separate button plus a hidden input, which is either two tab stops
         or a control a keyboard cannot reach at all.
       */}
+      {/*
+        The show/hide lives on these wrappers rather than on the buttons
+        themselves, and that is not a style preference. `buttonClass`
+        starts with `inline-flex`, and Tailwind emits its display
+        utilities in a fixed order that puts `inline-flex` after `hidden`
+        — so a button carrying both was visible whatever the class
+        attribute said. The camera button was showing on desktops, next
+        to a second button that did exactly the same thing: the two
+        buttons this component's own comment says it exists to avoid. A
+        bare <div> has no competing display utility, so `hidden` means
+        hidden.
+      */}
       <div className="flex flex-col gap-3">
-        <FilePicker
-          tone="primary"
-          capture
-          onPicked={onPicked}
-          className="coarse:flex hidden"
-        >
-          <CameraIcon />
-          Take a photo
-        </FilePicker>
-        <FilePicker tone="primary" onPicked={onPicked} className="coarse:hidden">
-          <CameraIcon />
-          Choose a photo
-        </FilePicker>
-        <FilePicker
-          tone="secondary"
-          onPicked={onPicked}
-          className="coarse:flex hidden"
-        >
-          Choose from your photos
-        </FilePicker>
+        <div className="hidden coarse:block">
+          <FilePicker tone="primary" capture onPicked={onPicked}>
+            <CameraIcon />
+            Take a photo
+          </FilePicker>
+        </div>
+        <div className="coarse:hidden">
+          <FilePicker tone="primary" onPicked={onPicked}>
+            <CameraIcon />
+            Choose a photo
+          </FilePicker>
+        </div>
+        <div className="hidden coarse:block">
+          <FilePicker tone="secondary" onPicked={onPicked}>
+            Choose from your photos
+          </FilePicker>
+        </div>
       </div>
 
       {/* Drag and drop, where there is something to drag with. */}
@@ -194,18 +203,17 @@ function FilePicker({
   tone,
   capture = false,
   onPicked,
-  className = "",
   children,
 }: {
   tone: "primary" | "secondary";
   capture?: boolean;
   onPicked: (event: React.ChangeEvent<HTMLInputElement>) => void;
-  className?: string;
   children: React.ReactNode;
 }) {
   return (
+    // No display utility is ever passed in here: see the wrappers above.
     <label
-      className={`${buttonClass(tone, "lg")} w-full cursor-pointer has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-canopy-700 ${className}`}
+      className={`${buttonClass(tone, "lg")} w-full cursor-pointer has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-canopy-700`}
     >
       <input
         type="file"

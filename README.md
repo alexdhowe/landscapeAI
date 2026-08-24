@@ -28,12 +28,15 @@ not negotiable.
 | Photos off an iPhone | ✅ done — HEIC → JPEG, EXIF orientation baked in, GPS stripped, long edge capped |
 | Rate limiting | ✅ done — per-IP token buckets at the app's edge, tightest on upload and vision |
 | Deployment configuration | ✅ done — Dockerfile, `render.yaml` (free), `fly.toml` (paid), `docs/deploy.md`. **Not yet deployed** |
+| Design pass on a photograph | ✅ done — customer copy on customer surfaces, region names that do not cover the swap, `npm run shots` actually rendering the phone |
 | The aerial leg (`/design/[id]/locate`) | ⛔ gated off — deliberately: no paid imagery or geocoder until there is a working MVP |
 
 All six phases are in, they run on Postgres, the contractor console is behind
 a login, the price book is editable, photos live in object storage when a
 bucket is configured, and the whole thing has been designed and opened on a
-phone. `npm test` runs 397 tests — with a database and without one.
+phone — on a phone *branch*, for the first time in the twelfth session,
+which is its own story. `npm test` runs 406 tests — with a database and
+without one.
 
 **It has not been deployed.** The tenth session wrote the configuration —
 [`docs/deploy.md`](./docs/deploy.md) is the runbook, `Dockerfile` and
@@ -59,7 +62,7 @@ store, so a clean checkout runs the demo with nothing to provision.
 ```sh
 npm run doctor    # is this machine set up? checks .env.local, the API key (against the
                   # real API), and the console login — and says what to fix, in English.
-npm test          # Vitest — 397 tests across every phase. No server, no network, no browser.
+npm test          # Vitest — 406 tests across every phase. No server, no network, no browser.
 npm run typecheck
 npm run dev
 npm run build
@@ -446,6 +449,112 @@ picker filtered to the clicked region's kind, and a budget band that reads
   storage is always upright, metadata-free and capped at 1600px on the long
   edge. See [a photo straight off an iPhone](#a-photo-straight-off-an-iphone).
 
+## What a photograph showed
+
+The design system was built against a 48×64 test fixture of four coloured
+squares. This session put a photograph behind it — a full-frame image with
+sky, a light facade, dark mulch and mid-green lawn — and looked at every
+customer surface again. Five things were wrong, and none of them were
+visible before there was a picture.
+
+**What this session could not see, and what that leaves open.** It had no
+`ANTHROPIC_API_KEY` either, and no network to fetch a photograph with, so
+the picture behind these surfaces was synthesised rather than shot: a
+12-megapixel frame with a real tonal range and a real aspect ratio, which
+is what the layout, the contrast and the overlay geometry needed, and which
+is nothing like a photograph where segmentation is concerned. Every finding
+below is about how a surface behaves with a picture on it, and every one of
+them was reproduced at 390×844 and 1440×900. **The three questions in
+[what you are actually testing](#what-you-are-actually-testing) are still
+open** — whether segmentation finds the right things, how long the model
+call takes, and whether a swapped material convinces over a real
+photograph. Those need a key and a camera, and no session has had both.
+
+**A homeowner was being told to set an environment variable.** The demo
+overlay's label read "Set `ANTHROPIC_API_KEY` to analyse the real thing" —
+developer copy, on a customer's screen, in the largest block above the fold.
+On a 390px phone it pushed the customer's own photo down past 300px: the
+first thing they saw was an amber warning about a missing credential. §1
+says the demo overlay may never ship unlabelled, and it still does not: it
+is labelled *twice*, by an "Example areas" pill pinned to the picture
+itself and by a line under it that says what is example and what is real
+("Everything else here is real: pick a material, watch the range move, send
+it to the contractor"). Neither mentions a key. The person who can set one
+is reading the terminal, which already says so — and in development the
+name appears on the page too, because then they are the same person.
+
+**Two region names were drawn on top of each other.** Markers sat at each
+polygon's centroid, clamped off the frame edge, which is fine when the
+regions are quadrants of a test fixture and a third of the picture apart.
+On a real yard the lawn wraps the walk, both centroids land within a couple
+of percent of the same point, and one label covered the other completely:
+one region silently unnamed, and a stack that reads as a rendering fault.
+Placement is now `lib/design/markers.ts` — clamp, then push apart, with two
+rules that are stated in `__tests__/markers.test.ts` rather than looked for
+in a screenshot:
+
+- **A name stays inside the region it names.** Nudging blindly moved
+  "Front lawn" onto the house, which trades one wrong picture for another.
+  Each marker's ladder of candidate positions is clamped to its own
+  polygon's vertical extent.
+- **Legible beats well-placed.** Where a region is too small to hold two
+  names apart, the second one leaves it rather than stack: a name a little
+  off its shape costs a glance, two names on top of each other cost a whole
+  region.
+
+The contractor's read-only canvas draws from the same function, and it
+needed it more — its labels carry the material as well as the name, so they
+run longer and collide sooner, and they had no frame clamp at all.
+
+**The swap was hidden under the label naming it.** Selecting a bed filled
+its polygon with a river-rock texture and then drew a white pill across the
+middle of it — on a phone the pill is wider than the bed. A region that has
+been swapped now shows its material and drops its marker. Nothing is lost:
+the strip below carries both the name and the material with room for them,
+the picker is titled with it, and the polygon is still a click target.
+
+**The region strip read as a list bolted underneath a picture**, which is
+what the strip's own design note had worried about. Two things fixed it
+without restructuring anything: its heading was `sr-only`, so a row of white
+pills floated on the page ground with nothing saying what they were — it is
+visible now, directly under the photo — and the sideways scroller ends in an
+alpha ramp, so a half-visible pill reads as "there is more" rather than as
+something clipped by a bug.
+
+**`/start` offered three upload buttons on a laptop.** `buttonClass` starts
+with `inline-flex`, Tailwind emits its display utilities in a fixed order
+that puts `inline-flex` after `hidden`, and so a button carrying both was
+visible whatever the class attribute said. The `coarse:hidden` on the other
+button worked, because a media query is emitted later — which is why the
+phone was right and the desktop was not, and why nobody caught it in review:
+the markup reads correctly. The switch now lives on wrapper `<div>`s, which
+have no competing display utility, and the rule is stated where it can
+actually be evaluated: `npm run shots` asserts in the browser that nothing
+the markup calls `hidden` is visible, unless a variant that is matching
+right now re-shows it. Reintroducing the bug makes the audit fail on
+`1440x900` and pass on `390x844`, which is exactly right.
+
+### A promise the product could not keep
+
+The failed-segmentation message ended "or carry on and send it anyway, and a
+rep will take a look." That was not true. A failed segmentation has no
+regions, so there is nothing to tap, nothing to swap, no band, and
+`POST /api/projects/[id]/submit` answers 409 for a design with no
+selections — the send form is not even rendered. A customer who took that
+sentence at its word would have gone looking for a button that does not
+exist.
+
+Making it true means letting a photo be sent with no design attached, and
+that is a change to what an EstimateSnapshot is — a feature, not a design
+fix, and out of scope for a session that adds none. So the copy now says
+what is actually available, and the gap is written down instead:
+
+**Product gap — a lead with no design.** When segmentation fails the
+customer is a dead end, and they are exactly the customer worth having: they
+photographed their yard. The photo is stored and the project exists; only
+the submit path refuses. Whoever picks this up decides what a snapshot with
+no line items means before writing any UI for it.
+
 ## The design system
 
 Everything visual resolves to a token in `app/globals.css`. Before that file
@@ -520,9 +629,23 @@ primitives are what make them the same product.
 `scripts/screenshots.mts` (`npm run shots`) drives the whole customer flow in
 a real Chromium at 390×844 and 1440×900 — upload, segmentation wait, region
 swap, band, submit — then signs in and captures the console. It writes PNGs
-to `.shots/` and audits two rules that are easy to state and easy to break:
-no horizontal scroll at 390px, and no interactive element under 44 CSS px. It
-exits non-zero on a finding.
+to `.shots/` and audits three rules that are easy to state and easy to break:
+no horizontal scroll at 390px, no interactive element under 44 CSS px, and
+nothing visible that the markup says is hidden. It exits non-zero on a
+finding.
+
+**The phone viewport was not a phone until the twelfth session.** Playwright's
+`isMobile` + `hasTouch` report `pointer: coarse` for the first page load and
+lose it on the next navigation; emulating the media feature over CDP survives
+navigation but is killed for good by the first full-page screenshot, which
+overrides the device metrics to capture and cannot be re-established
+afterwards on any session. So every "390×844" PNG this script had ever
+written was the *fine-pointer* branch at phone width — including the `/start`
+shots meant to show the camera button. The pointer type is now forced at the
+engine with a `--blink-settings` flag, which nothing later resets, and one
+browser is launched per viewport to carry it; the audit re-checks
+`(pointer: coarse)` on every surface, because that is a browser flag and
+browser flags get renamed.
 
 It is **not** part of `npm test`, which stays browser-free. Run it against a
 server you have already started:
@@ -537,7 +660,9 @@ npm run shots -- --photo ./some-photo.heic
 Three real bugs came straight out of pointing it at a phone viewport: a grid
 child with `min-width: auto` stretching the whole page sideways, region
 markers stealing each other's taps, and a signed-in rep's lead photo coming
-back 401 (see [contractor auth](#contractor-auth)).
+back 401 (see [contractor auth](#contractor-auth)). A fourth came out of
+fixing the emulation, and the new audit rule is written for it — see
+[what a photograph showed](#what-a-photograph-showed).
 
 ### The thirty seconds, measured
 

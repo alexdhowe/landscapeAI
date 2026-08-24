@@ -5,21 +5,11 @@
  */
 import { KIND_COLORS } from "@/components/configurator/regionColors";
 import { getOption } from "@/lib/catalog/options";
+import { layoutRegionMarkers } from "@/lib/design/markers";
 import type { RegionSelection } from "@/lib/design/types";
 import type { SegmentedRegion } from "@/lib/vision/types";
 import { REGION_KIND_LABELS } from "@/lib/vision/types";
 
-
-
-function centroid(polygon: [number, number][]): [number, number] {
-  let x = 0;
-  let y = 0;
-  for (const [px, py] of polygon) {
-    x += px;
-    y += py;
-  }
-  return [x / polygon.length, y / polygon.length];
-}
 
 export function LeadPhoto({
   photoUrl,
@@ -30,6 +20,7 @@ export function LeadPhoto({
   regions: SegmentedRegion[];
   selections: Record<string, RegionSelection>;
 }) {
+  const markers = layoutRegionMarkers(regions);
   return (
     <div className="relative min-w-0 overflow-hidden rounded-xl bg-bark-900">
       {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -57,16 +48,20 @@ export function LeadPhoto({
           );
         })}
       </svg>
-      {regions.map((region) => {
-        const [cx, cy] = centroid(region.polygon);
+      {/* Same placement rule as the customer's canvas: clamped inside the
+          frame and pushed apart where two centroids land together. The
+          rep's copy carries the material as well as the name, so these run
+          longer and collide sooner. */}
+      {regions.map((region, i) => {
+        const { x, y } = markers[i];
         const surfaceOption = selections[region.id]?.surfaceOptionId
           ? getOption(selections[region.id].surfaceOptionId!)
           : undefined;
         return (
           <span
             key={region.id}
-            className="absolute -translate-x-1/2 -translate-y-1/2 rounded-full bg-black/65 px-2.5 py-1 text-xs font-medium text-white shadow"
-            style={{ left: `${cx * 100}%`, top: `${cy * 100}%` }}
+            className="absolute max-w-[92%] -translate-x-1/2 -translate-y-1/2 rounded-full bg-bark-950/75 px-2.5 py-1 text-2xs font-medium text-white shadow-e2 sm:text-xs"
+            style={{ left: `${x * 100}%`, top: `${y * 100}%` }}
           >
             {region.label || REGION_KIND_LABELS[region.kind]}
             {surfaceOption ? ` → ${surfaceOption.label}` : ""}

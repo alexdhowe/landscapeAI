@@ -159,6 +159,7 @@ export function Configurator({ projectId }: { projectId: string }) {
   // quantity has been measured, only deterministic rendering — generated
   // from the design graph — may sit next to the numbers.
   const deterministic = renderModeForProject(project) === "deterministic";
+  const demo = seg.status === "ready" && seg.source === "demo";
 
   return (
     // One column on a phone, in the order someone standing outside needs
@@ -179,43 +180,75 @@ export function Configurator({ projectId }: { projectId: string }) {
           </Callout>
         )}
         {seg.status === "failed" && (
+          // What is actually true when segmentation fails: there are no
+          // regions, so there is nothing to tap, nothing to swap, no band
+          // and nothing to send. Saying "carry on anyway" would be kinder
+          // and wrong — the customer would go looking for a control that
+          // is not there. So this says the one thing that does work, and
+          // what makes it likelier to work next time.
           <Callout tone="clay" title="We couldn't read that photo" role="alert">
             <p className="mt-0.5">{seg.error}</p>
+            <p className="mt-2">
+              Another photo is the fix, and the shot matters more than the
+              camera: stand back on the driveway or the front walk, hold the
+              phone level, and get the whole area in frame in daylight.
+            </p>
             <a
               href="/start"
               className="mt-2 inline-flex min-h-11 items-center font-medium underline underline-offset-4"
             >
-              Try a different photo
+              Try another photo
             </a>
           </Callout>
         )}
-        {seg.status === "ready" && seg.source === "demo" && (
-          <Callout tone="flag" title="Demo overlay — not your actual photo">
-            <p className="mt-0.5">
-              These areas are a fixed example, not something read off your
-              picture. Set <code className="font-mono text-xs">ANTHROPIC_API_KEY</code>{" "}
-              to analyse the real thing.
-            </p>
-          </Callout>
-        )}
 
-        <PhotoCanvas
-          photoUrl={`/api/projects/${project.id}/photo`}
-          regions={regions}
-          selections={project.selections}
-          selectedRegionId={selectedRegionId}
-          onSelectRegion={selectRegion}
-          pending={seg.status === "pending"}
-        />
-
-        {regions.length > 0 && (
-          <RegionStrip
+        {/* The picture and the row of areas in it are one object, so they
+            sit closer to each other than to anything else on the page. */}
+        <div className="space-y-2">
+          <PhotoCanvas
+            photoUrl={`/api/projects/${project.id}/photo`}
             regions={regions}
             selections={project.selections}
             selectedRegionId={selectedRegionId}
             onSelectRegion={selectRegion}
+            pending={seg.status === "pending"}
+            notice={demo ? "Example areas" : undefined}
           />
-        )}
+
+          {regions.length > 0 && (
+            <RegionStrip
+              regions={regions}
+              selections={project.selections}
+              selectedRegionId={selectedRegionId}
+              onSelectRegion={selectRegion}
+            />
+          )}
+
+          {demo && (
+            // §1: the demo overlay may never ship unlabelled. It is
+            // labelled twice — a pill on the picture and this line under
+            // it — and neither of them asks a homeowner to set an
+            // environment variable. The person who can do that is reading
+            // the terminal, which already says so; in development the name
+            // is here too, because then they are the same person.
+            <p className="text-xs text-flag-900">
+              <strong className="font-semibold">Those outlines are an example.</strong>{" "}
+              We couldn&apos;t read your own photo this time, so we&apos;ve marked up a
+              typical front yard instead. Everything else here is real: pick a
+              material, watch the range move, send it to the contractor.
+              {process.env.NODE_ENV !== "production" && (
+                <span className="text-bark-600">
+                  {" "}
+                  (Dev: no usable{" "}
+                  <code className="font-mono">ANTHROPIC_API_KEY</code>. The
+                  terminal says which of the ways it can be wrong this is, and{" "}
+                  <code className="font-mono">npm run doctor</code> checks all
+                  of them.)
+                </span>
+              )}
+            </p>
+          )}
+        </div>
 
         {seg.status === "ready" && regions.length === 0 && (
           <Callout tone="flag" title="No landscape areas found in this photo">

@@ -3,6 +3,7 @@
 import { useState } from "react";
 
 import { getOption } from "@/lib/catalog/options";
+import { layoutRegionMarkers } from "@/lib/design/markers";
 import type { RegionSelection } from "@/lib/design/types";
 import type { SegmentedRegion } from "@/lib/vision/types";
 import { REGION_KIND_LABELS } from "@/lib/vision/types";
@@ -18,21 +19,15 @@ type Props = {
   onSelectRegion: (regionId: string) => void;
   /** Segmentation is still running: show the wait over the photo. */
   pending?: boolean;
+  /**
+   * A short label pinned to the picture itself. Used for the one thing a
+   * customer must not have to infer: that these outlines are a stock
+   * example rather than a reading of their own photo. It belongs on the
+   * image, not in a block above it — a label that can be scrolled away
+   * from the thing it labels is most of the way to not being one.
+   */
+  notice?: string;
 };
-
-function centroid(polygon: [number, number][]): [number, number] {
-  let x = 0;
-  let y = 0;
-  for (const [px, py] of polygon) {
-    x += px;
-    y += py;
-  }
-  // Pulled off the edges: a marker is centred on its point, so one sitting
-  // at x=0.04 has half of itself outside the picture, and a clipped label
-  // reads as a bug rather than as a region that happens to hug the frame.
-  const clamp = (v: number) => Math.min(0.82, Math.max(0.18, v));
-  return [clamp(x / polygon.length), clamp(y / polygon.length)];
-}
 
 function regionName(region: SegmentedRegion): string {
   return region.label || REGION_KIND_LABELS[region.kind];
@@ -70,12 +65,21 @@ export function PhotoCanvas({
   selectedRegionId,
   onSelectRegion,
   pending = false,
+  notice,
 }: Props) {
   const [dims, setDims] = useState<{ w: number; h: number } | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
 
   const w = dims?.w ?? 1600;
   const h = dims?.h ?? 1200;
+
+  // A region that has been swapped shows its material; a name pinned over
+  // it hides the one thing the customer just did, and on a phone the pill
+  // is wider than a bed. The strip below carries both the name and the
+  // material, with room for them, so nothing is lost by getting out of the
+  // way here.
+  const named = regions.filter((region) => !selections[region.id]?.surfaceOptionId);
+  const markers = layoutRegionMarkers(named);
 
   return (
     <figure className="relative overflow-hidden rounded-xl bg-bark-900 shadow-e3 sm:rounded-2xl">
@@ -199,12 +203,15 @@ export function PhotoCanvas({
         })}
       </svg>
 
-      {regions.length > 0 && (
+      {named.length > 0 && (
         // Pointer convenience, redundant with the strip below: markers
         // sized to name a region without burying the picture under it.
+        // Placement comes from lib/design/markers, which clamps them
+        // inside the frame and pushes apart any that would land on top of
+        // one another.
         <div aria-hidden>
-          {regions.map((region) => {
-            const [cx, cy] = centroid(region.polygon);
+          {named.map((region, i) => {
+            const { x, y } = markers[i];
             const isSelected = region.id === selectedRegionId;
             return (
               <button
@@ -219,7 +226,7 @@ export function PhotoCanvas({
                     ? "bg-white text-bark-900 ring-2 ring-white/70"
                     : "bg-bark-950/70 text-white hover:bg-bark-950/90"
                 }`}
-                style={{ left: `${cx * 100}%`, top: `${cy * 100}%` }}
+                style={{ left: `${x * 100}%`, top: `${y * 100}%` }}
               >
                 {/* The name only. What material is in it is on the strip
                     below, where there is room for it — a marker wide
@@ -230,6 +237,14 @@ export function PhotoCanvas({
             );
           })}
         </div>
+      )}
+
+      {notice && (
+        // Pinned to the picture, top-left, where the eye lands before it
+        // reads any of the outlines.
+        <p className="absolute left-2 top-2 max-w-[calc(100%-1rem)] rounded-full bg-flag-50 px-2.5 py-1 text-2xs font-semibold text-flag-900 shadow-e2 ring-1 ring-flag-200 sm:left-3 sm:top-3 sm:text-xs">
+          {notice}
+        </p>
       )}
 
       {pending && <SegmentationWait />}
@@ -259,17 +274,30 @@ export function RegionStrip({
   if (regions.length === 0) return null;
   return (
     <div>
-      <h2 className="sr-only">Areas in your photo</h2>
+      {/* Visible, and sitting directly under the picture. It was sr-only,
+          which left a row of white pills floating on the page ground with
+          nothing saying what they were — against the four-colour fixture
+          that read as part of the overlay, and against a photograph it
+          reads as a list bolted underneath one. Naming it is what ties it
+          back to the image. */}
+      <h2 className="mb-1.5 text-2xs font-semibold uppercase tracking-wider text-bark-500">
+        Areas in your photo
+      </h2>
       <p className="sr-only" id="region-strip-help">
         {regions.length} labelled area{regions.length === 1 ? "" : "s"}. Choose one
         to change what is in it.
       </p>
       {/* Scrolls sideways inside its own box rather than bleeding to the
           screen edge: a negative margin here widens the grid track it sits
-          in, and the whole page starts scrolling horizontally with it. */}
+          in, and the whole page starts scrolling horizontally with it.
+          The mask is an alpha ramp, not a colour: it fades the right edge
+          so a half-visible pill reads as "there is more" rather than as
+          something clipped by a bug. Content that ends before the ramp is
+          untouched, so a list that fits is not dimmed, and from `sm` the
+          list wraps and the ramp is off. */}
       <ul
         aria-describedby="region-strip-help"
-        className="flex gap-2 overflow-x-auto pb-1 sm:flex-wrap"
+        className="flex gap-2 overflow-x-auto pb-1 [mask-image:linear-gradient(to_right,black_calc(100%-1.75rem),transparent)] sm:flex-wrap sm:[mask-image:none]"
       >
         {regions.map((region) => {
           const surfaceOption = selections[region.id]?.surfaceOptionId

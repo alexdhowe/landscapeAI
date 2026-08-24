@@ -80,13 +80,21 @@ export async function POST(request: Request) {
 /**
  * What a customer is told when segmentation fails.
  *
- * They cannot act on an HTTP status or a request id, and the design is not
- * lost — the band, the swap and the lead all still work without
- * segmentation. So the message says what they can do, and the diagnosis
- * goes to the log where somebody can act on it.
+ * They cannot act on an HTTP status or a request id, so the message says
+ * what they can do and the diagnosis goes to the log where somebody can
+ * act on it.
+ *
+ * It used to end "or carry on and send it anyway, and a rep will take a
+ * look", which was not true. A failed segmentation has no regions, so
+ * there is nothing to tap, nothing to swap, no band, and POST
+ * /submit answers 409 for a design with no selections. Inviting the
+ * customer to send it anyway sends them looking for a button that is not
+ * there. Sending a photo with no design *should* be possible — see
+ * "product gaps" in the README — but until it is, this says the true
+ * thing.
  */
 const CUSTOMER_MESSAGE =
-  "We couldn't read this one. Try another photo — or carry on and send it anyway, and a rep will take a look.";
+  "We couldn't read this one — nothing on your photo got labelled, so there's nothing to change yet. Another photo, taken a few steps further back, usually does it.";
 
 /** The one-line fix for the failures an operator actually hits. */
 function operatorHint(detail: string): string | null {

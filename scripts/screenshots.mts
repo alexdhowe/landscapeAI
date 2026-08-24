@@ -9,6 +9,14 @@
  *
  *   - no horizontal scroll at 390px
  *   - no interactive element under 44 CSS px in either dimension
+ *   - nothing visible that the markup says is hidden
+ *
+ * That third one is not a style rule, it is the bug it was written for:
+ * Tailwind emits its display utilities in a fixed order, so a `hidden` on
+ * an element whose class list also resolves to `inline-flex` (which every
+ * `buttonClass` does) loses, silently, and the element ships visible. Only
+ * a browser can tell you that, because only a browser knows which media
+ * queries are matching.
  *
  * It is NOT part of `npm test`, which must stay browser-free. Run it
  * against a server you have already started:
@@ -31,6 +39,21 @@ const VIEWPORTS: Viewport[] = [
   { name: "1440x900", width: 1440, height: 900, mobile: false },
 ];
 
+/**
+ * Tailwind variants that gate `display`, and the query each one means.
+ * Used by the hidden-element audit to work out whether an element that
+ * says `hidden` has a variant currently re-showing it.
+ */
+const DISPLAY_VARIANTS: Record<string, string> = {
+  coarse: "(pointer: coarse)",
+  fine: "(pointer: fine)",
+  sm: "(min-width: 40rem)",
+  md: "(min-width: 48rem)",
+  lg: "(min-width: 64rem)",
+  xl: "(min-width: 80rem)",
+  "2xl": "(min-width: 96rem)",
+};
+
 const args = new Map<string, string>();
 for (let i = 2; i < process.argv.length; i += 2) {
   args.set(process.argv[i].replace(/^--/, ""), process.argv[i + 1] ?? "");
@@ -46,6 +69,14 @@ const findings: Finding[] = [];
 
 /** The audit. Runs on whatever page is currently open. */
 async function audit(page: Page, where: string, viewport: Viewport) {
+  const coarse = await page.evaluate(() => matchMedia("(pointer: coarse)").matches);
+  if (coarse !== viewport.mobile) {
+    findings.push({
+      where,
+      what: `pointer emulation lost: (pointer: coarse) is ${coarse}, expected ${viewport.mobile} — this shot is of the wrong branch`,
+    });
+  }
+
   if (viewport.mobile) {
     const overflow = await page.evaluate(() => {
       const doc = document.documentElement;
@@ -71,6 +102,36 @@ async function audit(page: Page, where: string, viewport: Viewport) {
       });
     }
   }
+
+  // Anything the markup says is hidden had better be hidden. This is the
+  // `hidden`-loses-to-`inline-flex` class of bug, and it is invisible to a
+  // reviewer because the class attribute reads correctly.
+  const shown = await page.evaluate((variants: Record<string, string>) => {
+    const results: string[] = [];
+    for (const el of document.querySelectorAll<HTMLElement>("[class*='hidden']")) {
+      const classes = el.className?.toString().split(/\s+/) ?? [];
+      // `hidden` with no variant prefix: the base state is "not displayed".
+      if (!classes.includes("hidden")) continue;
+      // …unless a variant that is matching right now sets a display.
+      const reshown = classes.some((c) => {
+        const [variant, utility] = c.split(":");
+        if (!utility || !(variant in variants)) return false;
+        if (!/^(block|flex|inline-flex|inline|inline-block|grid|contents|table)$/.test(utility)) {
+          return false;
+        }
+        return matchMedia(variants[variant]).matches;
+      });
+      const display = getComputedStyle(el).display;
+      if (!reshown && display !== "none") {
+        results.push(
+          `${el.tagName.toLowerCase()} "${(el.textContent || "").trim().slice(0, 32)}" ` +
+            `says hidden but computes ${display}`,
+        );
+      }
+    }
+    return [...new Set(results)];
+  }, DISPLAY_VARIANTS);
+  for (const item of shown) findings.push({ where, what: item });
 
   const small = await page.evaluate(() => {
     const MIN = 44;
@@ -248,12 +309,40 @@ async function run(browser: Browser, viewport: Viewport) {
   await context.close();
 }
 
-const browser = await chromium.launch();
+/**
+ * A browser per viewport, with the pointer type forced at the engine.
+ *
+ * Getting a phone viewport to actually *be* a phone turned out to be the
+ * hard part. Playwright's `isMobile` + `hasTouch` report `pointer: coarse`
+ * for the first page load and lose it on the next navigation; emulating
+ * the media feature over CDP survives navigation but is killed for good by
+ * the first full-page screenshot, which overrides the device metrics to
+ * capture and cannot be re-established afterwards on any session. Between
+ * the two, every "390x844" shot this script has ever taken was of the
+ * fine-pointer branch at phone width — the `/start` shots meant to show
+ * the camera button were showing the desktop layout instead, which is how
+ * three upload buttons shipped on desktop without anyone seeing them.
+ *
+ * A blink setting is decided at browser start and nothing later resets it,
+ * so it is the one place to put this. `audit` re-checks it on every
+ * surface anyway: this is a browser flag, and browser flags get renamed.
+ */
+function launchArgs(viewport: Viewport): string[] {
+  // Blink's pointer/hover enums: 2 = coarse / no hover, 4 = fine,
+  // 2 (hover) = hover available.
+  return viewport.mobile
+    ? ["--blink-settings=primaryPointerType=2,availablePointerTypes=2,primaryHoverType=1,availableHoverTypes=1"]
+    : ["--blink-settings=primaryPointerType=4,availablePointerTypes=4,primaryHoverType=2,availableHoverTypes=2"];
+}
+
 await mkdir(OUT, { recursive: true });
-try {
-  for (const viewport of VIEWPORTS) await run(browser, viewport);
-} finally {
-  await browser.close();
+for (const viewport of VIEWPORTS) {
+  const browser = await chromium.launch({ args: launchArgs(viewport) });
+  try {
+    await run(browser, viewport);
+  } finally {
+    await browser.close();
+  }
 }
 
 console.log("\n--- audit ---");
