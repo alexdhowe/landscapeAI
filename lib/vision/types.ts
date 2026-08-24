@@ -18,12 +18,43 @@ export type RegionKind = "turf" | "bed" | "hardscape" | "foundation_planting";
 /** [x, y] in normalized image coordinates, 0-1, origin top-left. */
 export type NormalizedPoint = [number, number];
 
+/**
+ * A plant standing in a region — a shrub, a grass, a perennial clump.
+ *
+ * An ellipse rather than a polygon: shrubs are blobby, four numbers is a
+ * tenth of the output tokens of an outline, and the only thing this has to
+ * be good enough for is not painting gravel over a boxwood.
+ *
+ * Why it exists: swapping a bed's surface used to fill the whole polygon
+ * with the new material, so choosing river rock turned every shrub in the
+ * bed grey too. The mulch is what changes; the plants stay. That needs the
+ * plants to be objects in the graph, which is also where a future "swap
+ * this shrub for that one" has to read them from — project-map section 5
+ * calls these PointElements.
+ */
+export type Planting = {
+  /** Centre, in normalized image coordinates. */
+  cx: number;
+  cy: number;
+  /** Radii, as fractions of image width and height. */
+  rx: number;
+  ry: number;
+  /** What it appears to be, e.g. "boxwood", "ornamental grass". */
+  label?: string;
+};
+
 export type SegmentedRegion = {
   id: string;
   kind: RegionKind;
   /** Short human label, e.g. "Front lawn", "Bed along walkway". */
   label: string;
   polygon: NormalizedPoint[];
+  /**
+   * Plants standing in this region. Empty when the model reports none —
+   * every consumer must render correctly with an empty list, because that
+   * is what every stored segmentation from before this existed has.
+   */
+  plantings?: Planting[];
   /** What appears to be there now, e.g. "hardwood mulch", "concrete". */
   existingMaterial?: string;
   /** Observed condition, e.g. "faded, weeds coming through". Photo-only. */
@@ -61,6 +92,18 @@ export type VerticalElement = {
   confidence: number;
 };
 
+/**
+ * The result of a segmentation pass, and — because it is stored verbatim —
+ * exactly what comes back out of the store.
+ *
+ * The model is also asked for a **ground line**: where vertical surfaces
+ * meet the ground, left to right. That is deliberately not a field here.
+ * It is an input to parsing, consumed by `lib/vision/groundLine.ts` to pull
+ * regions that climbed the house wall back down onto the ground, and
+ * nothing downstream reads it — so carrying it would mean either a column
+ * nobody queries or a result that does not survive a round trip through
+ * the store. The regions that come out have already been held to it.
+ */
 export type SegmentationResult = {
   regions: SegmentedRegion[];
   /** Vertical elements present in the photo. Photo wins these outright. */

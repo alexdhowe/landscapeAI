@@ -29,13 +29,15 @@ not negotiable.
 | Rate limiting | ✅ done — per-IP token buckets at the app's edge, tightest on upload and vision |
 | Deployment configuration | ✅ done — Dockerfile, `render.yaml` (free), `fly.toml` (paid), `docs/deploy.md`. **Not yet deployed** |
 | Design pass on a photograph | ✅ done — customer copy on customer surfaces, region names that do not cover the swap, `npm run shots` actually rendering the phone |
+| Contractor login on a self-hosted deployment | ✅ fixed — `trustHost`; it threw `UntrustedHost` on every deployment target |
+| Segmentation against a real photo | ⚠️ improved, unverified — regions held to a reported ground line, plants kept out of a material swap. Needs a key and a yard to judge |
 | The aerial leg (`/design/[id]/locate`) | ⛔ gated off — deliberately: no paid imagery or geocoder until there is a working MVP |
 
 All six phases are in, they run on Postgres, the contractor console is behind
 a login, the price book is editable, photos live in object storage when a
 bucket is configured, and the whole thing has been designed and opened on a
 phone — on a phone *branch*, for the first time in the twelfth session,
-which is its own story. `npm test` runs 406 tests — with a database and
+which is its own story. `npm test` runs 435 tests — with a database and
 without one.
 
 **It has not been deployed.** The tenth session wrote the configuration —
@@ -62,7 +64,7 @@ store, so a clean checkout runs the demo with nothing to provision.
 ```sh
 npm run doctor    # is this machine set up? checks .env.local, the API key (against the
                   # real API), and the console login — and says what to fix, in English.
-npm test          # Vitest — 406 tests across every phase. No server, no network, no browser.
+npm test          # Vitest — 435 tests across every phase. No server, no network, no browser.
 npm run typecheck
 npm run dev
 npm run build
@@ -449,6 +451,127 @@ picker filtered to the clicked region's kind, and a budget band that reads
   storage is always upright, metadata-free and capped at 1600px on the long
   edge. See [a photo straight off an iPhone](#a-photo-straight-off-an-iphone).
 
+## The first real yard, through a real key
+
+Everything above this section was found against a stand-in image. Then the
+owner put a working `ANTHROPIC_API_KEY` and a photograph of an actual front
+yard through the app, and found three things no amount of looking at a
+synthesised picture could have shown.
+
+### The console nobody could sign in to
+
+Signing in as a contractor returned a server error page and filled the
+terminal with `UntrustedHost: Host must be trusted`.
+
+Auth.js will not build a callback URL from a Host header it does not trust
+unless it recognises the hosting platform, and the only platform it
+recognises by itself is Vercel. Every way this app ships — the Dockerfile,
+`render.yaml`, `fly.toml`, `npm start` on a laptop — is self-hosted. So
+`/api/auth/session`, `/api/auth/providers` and `/api/auth/error` all threw,
+the login page failed to render, and **the console was unreachable on every
+deployment target it has**. `lib/auth/options.ts` now sets `trustHost: true`.
+
+The interesting part is why it survived eleven sessions and a whole
+deployment runbook. `AUTH_TRUST_HOST` appeared exactly once in the
+repository: on the command line in this README's `npm run shots` snippet.
+Not in `.env.example`, not in `render.yaml`, not in the `fly secrets` list,
+not in `docs/deploy.md`. The only thing that ever signed in set the variable
+that hid the bug, and then swallowed the failure — `waitForURL(/dashboard/)`
+was followed by `.catch(() => {})`, so a failed sign-in produced screenshots
+of the login page filed under the names `dashboard`, `deltas` and
+`pricebook`.
+
+Both halves are closed. The snippet no longer sets the variable, so the
+screenshot pass signs in the way a deployment does; a sign-in that does not
+reach the dashboard is now a finding that exits non-zero (verified by
+running it with a wrong password); and `lib/auth/__tests__/config.test.ts`
+asserts the setting, which needed `authConfig()` split out of the module
+that calls `NextAuth()` — that call pulls in `next/server` and cannot be
+loaded by a browser-free test suite, which is why the one line deciding
+whether anybody can log in had never been asserted anywhere.
+
+### Regions that climbed the wall
+
+On the first upload the outlines landed roughly right. On later ones they
+drifted upward: a foundation bed whose polygon reached a third of the way up
+the brick facade, and a front lawn whose top edge sat on the house above it.
+
+The segmentation prompt has always said "only outline ground-plane landscape
+areas — never the house walls, roof, sky". Saying a rule in a prompt is not
+enforcing it. Two changes:
+
+- **The prompt anchors the vertical axis before it asks for anything.** It
+  now says what y=0 and y=1 are, names the failure mode out loud (ground
+  regions placed too high, with a top edge on the wall behind them), and
+  asks for the ground line *first* so the model finds where the ground
+  starts before it outlines anything standing on it.
+- **`lib/vision/groundLine.ts` enforces it.** The model reports where
+  vertical surfaces meet the ground, left to right; every region vertex
+  above that line is pulled down onto it, and a region drawn entirely above
+  it is dropped. Placing a polyline is a far easier task than placing a
+  polygon, which is the whole reason for asking separately.
+
+Being wrong about the line is cheap by construction. It only ever moves a
+vertex *down*, so a line that is too high changes nothing. A line spanning
+less than a third of the width is refused rather than extrapolated sideways.
+And the failure that would actually hurt — a line placed too *low*, which
+would push every region into a sliver at the bottom of the frame — is caught
+by a quorum: if applying the line destroys most of what the model found, the
+line is likelier to be wrong than all of the regions are, and it is
+discarded whole. One region up a wall is an outlier worth correcting; all of
+them is a bad ground line.
+
+**This half is not verified.** The clamp is unit-tested against the exact
+geometry of the observed failure; whether the model reports a good ground
+line, and whether the anchoring paragraph moves the polygons, needs a key
+and a yard.
+
+### Gravel over the shrubs
+
+Swapping a bed's surface filled the whole region polygon with the new
+material, so choosing river rock turned every shrub standing in the bed grey
+along with the mulch. The mulch is what changes.
+
+The fix is not to go hunting for the plants in the picture at render time —
+section 1 is explicit that the image is a view and never the artifact. The
+plants become objects in the graph. The vision pass now reports the plants
+in each region as ellipses (`cx`/`cy`/`rx`/`ry`, four numbers rather than an
+outline: a shrub is blobby, and the only thing this has to be good enough
+for is not painting gravel over a boxwood), they persist in a `plantings`
+column on `regions` (migration 0005), and the swap renders through an SVG
+**mask** — the region with the plants punched out of it — instead of a clip
+path. Material lands on the ground; the photograph shows through where the
+plants are, softened so a crisp oval does not read as a mistake.
+
+It degrades to exactly the old behaviour: the column is nullable and stays
+nullable, every region segmented before this has no plantings, and a swap
+over an empty list covers the whole region the way it always did. The demo
+overlay carries plantings too, so the no-key path exercises the same code —
+without that, "swap mulch for stone" looks correct in development and paints
+over every shrub in production.
+
+### Product gap — swapping the plants themselves
+
+The other half of that request is a feature, and it is worth being precise
+about what is now in place and what is not. **Identifying the plants is
+done**: they are in the object graph, per region, with a label. **Swapping
+one for another is not**, and it is not a rendering problem — it needs two
+things this repository does not have:
+
+- **Plant SKUs with the metadata section 3.5 requires** — install size,
+  mature height and spread, growth-rate class, form, hardiness zone,
+  deciduous vs evergreen. Section 7 lists this as seed data only the owner
+  can produce, and the time slider already depends on it.
+- **One image per SKU**, per section 3.5's asset strategy — scaled for
+  shrubs, grasses and perennials, and two or three states for trees, where a
+  juvenile is not a small mature specimen.
+
+With those, the per-plant swap is the configurator pattern that already
+works for surfaces: tap a plant, pick from a catalog filtered to its region
+kind, price it through an assembly. Without them there is nothing to offer
+and nothing to price, and the catalog is the guardrail — nothing may be
+offered that cannot be priced.
+
 ## What a photograph showed
 
 The design system was built against a 48×64 test fixture of four coloured
@@ -652,10 +775,17 @@ server you have already started:
 
 ```sh
 npm run build
-AUTH_TRUST_HOST=1 AUTH_SECRET=$(openssl rand -base64 32) \
+AUTH_SECRET=$(openssl rand -base64 32) \
   CONTRACTOR_EMAIL=you@example.com CONTRACTOR_PASSWORD=… npm start &
 npm run shots -- --photo ./some-photo.heic
 ```
+
+This command used to begin `AUTH_TRUST_HOST=1`, and that one variable was
+hiding a login nobody could use — see
+[the console nobody could sign in to](#the-console-nobody-could-sign-in-to).
+It is deliberately not here any more: the screenshot pass signs in the way
+a deployment does, and reports a finding if it does not reach the
+dashboard.
 
 Three real bugs came straight out of pointing it at a phone viewport: a grid
 child with `min-width: auto` stretching the whole page sideways, region

@@ -122,12 +122,38 @@ export function PhotoCanvas({
               <feFuncB type="gamma" amplitude="1" exponent="0.5" offset="0.3" />
             </feComponentTransfer>
           </filter>
+          {/* Takes the hard edge off the plant cut-outs: a shrub is not an
+              ellipse, and a crisp oval of untouched photo reads as a
+              mistake where a soft one reads as a plant. */}
+          <filter id="planting-soften">
+            <feGaussianBlur stdDeviation={w * 0.003} />
+          </filter>
           {regions.map((region) => (
-            <clipPath key={region.id} id={`clip-${region.id}`}>
+            // The region, minus the plants standing in it. White shows the
+            // new material, black lets the photograph through — so
+            // swapping mulch for stone re-surfaces the bed and leaves the
+            // shrubs alone. Before this the texture covered the whole
+            // polygon and every plant in the bed turned grey with it.
+            <mask key={region.id} id={`swap-${region.id}`}>
               <polygon
                 points={region.polygon.map(([x, y]) => `${x * w},${y * h}`).join(" ")}
+                fill="#ffffff"
               />
-            </clipPath>
+              {(region.plantings ?? []).length > 0 && (
+                <g filter="url(#planting-soften)">
+                  {region.plantings!.map((plant, i) => (
+                    <ellipse
+                      key={i}
+                      cx={plant.cx * w}
+                      cy={plant.cy * h}
+                      rx={plant.rx * w}
+                      ry={plant.ry * h}
+                      fill="#000000"
+                    />
+                  ))}
+                </g>
+              )}
+            </mask>
           ))}
         </defs>
         {regions.map((region) => {
@@ -143,7 +169,10 @@ export function PhotoCanvas({
           return (
             <g key={region.id}>
               {surfaceOption ? (
-                <>
+                // Masked, not clipped: the mask is the region with the
+                // plants punched out of it, so the material lands on the
+                // ground and the planting stays photographic.
+                <g mask={`url(#swap-${region.id})`}>
                   {/* Textured material, feather-edged into the photo. */}
                   <polygon
                     points={points}
@@ -160,12 +189,11 @@ export function PhotoCanvas({
                     width={w}
                     height={h}
                     preserveAspectRatio="none"
-                    clipPath={`url(#clip-${region.id})`}
                     filter="url(#photo-shading)"
                     opacity={0.75}
                     style={{ mixBlendMode: "multiply" }}
                   />
-                </>
+                </g>
               ) : (
                 <polygon
                   points={points}

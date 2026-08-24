@@ -208,3 +208,116 @@ describe("parseSegmentation", () => {
     expect(result.cannotSee).toEqual(["no landscape visible in photo"]);
   });
 });
+
+describe("plantings", () => {
+  // The list exists for one reason: swapping a bed's surface used to paint
+  // the new material over every shrub standing in it.
+  const withPlantings = (plantings: unknown) =>
+    JSON.stringify({
+      regions: [
+        {
+          kind: "bed",
+          label: "Bed",
+          polygon: [
+            [0.1, 0.6],
+            [0.9, 0.6],
+            [0.9, 0.9],
+            [0.1, 0.9],
+          ],
+          plantings,
+          confidence: 0.8,
+        },
+      ],
+    });
+
+  it("reads ellipses off a region", () => {
+    const { regions } = parseSegmentation(
+      withPlantings([{ cx: 0.3, cy: 0.7, rx: 0.04, ry: 0.05, label: "boxwood" }]),
+    );
+    expect(regions[0].plantings).toEqual([
+      { cx: 0.3, cy: 0.7, rx: 0.04, ry: 0.05, label: "boxwood" },
+    ]);
+  });
+
+  it("leaves the field off entirely when there are none", () => {
+    // Which is what every region stored before this existed looks like,
+    // and every consumer has to render that correctly.
+    expect(parseSegmentation(withPlantings([])).regions[0].plantings).toBeUndefined();
+    expect(parseSegmentation(withPlantings(undefined)).regions[0].plantings).toBeUndefined();
+    expect(parseSegmentation(withPlantings("shrubs")).regions[0].plantings).toBeUndefined();
+  });
+
+  it("drops specks and clamps an over-generous radius", () => {
+    const { regions } = parseSegmentation(
+      withPlantings([
+        { cx: 0.3, cy: 0.7, rx: 0.0001, ry: 0.05 },
+        { cx: 0.5, cy: 0.7, rx: 9, ry: 0.05 },
+        { cx: 0.7, cy: 0.7, rx: 0.04, ry: "big" },
+      ]),
+    );
+    // The speck and the unparseable one go; the giant is clamped, not lost.
+    expect(regions[0].plantings).toEqual([{ cx: 0.5, cy: 0.7, rx: 0.5, ry: 0.05, label: undefined }]);
+  });
+
+  it("stops counting well before a model enumerates ground cover", () => {
+    const many = Array.from({ length: 60 }, (_, i) => ({
+      cx: 0.2 + i * 0.005,
+      cy: 0.7,
+      rx: 0.01,
+      ry: 0.01,
+    }));
+    expect(parseSegmentation(withPlantings(many)).regions[0].plantings).toHaveLength(24);
+  });
+});
+
+describe("the ground line", () => {
+  const response = (groundLine: unknown, top: number) =>
+    JSON.stringify({
+      ground_line: groundLine,
+      regions: [
+        {
+          kind: "foundation_planting",
+          label: "Bed along the house",
+          polygon: [
+            [0.1, top],
+            [0.9, top],
+            [0.9, 0.8],
+            [0.1, 0.8],
+          ],
+          confidence: 0.8,
+        },
+      ],
+    });
+
+  it("pulls a region that climbed the wall back down to the ground", () => {
+    // The failure a real photograph produced: a foundation bed whose
+    // polygon reached a third of the way up the brick.
+    const { regions } = parseSegmentation(response([[0, 0.6], [1, 0.6]], 0.25));
+    for (const [, y] of regions[0].polygon) expect(y).toBeGreaterThanOrEqual(0.6);
+  });
+
+  it("does not carry the ground line out of the parse", () => {
+    // It is an input, consumed here. Carrying it would mean either a
+    // column nobody queries or a result that does not survive the store.
+    expect(parseSegmentation(response([[0, 0.6], [1, 0.6]], 0.25))).not.toHaveProperty(
+      "groundLine",
+    );
+  });
+
+  it("leaves a region that already sits on the ground alone", () => {
+    const { regions } = parseSegmentation(response([[0, 0.6], [1, 0.6]], 0.7));
+    expect(regions[0].polygon[0]).toEqual([0.1, 0.7]);
+  });
+
+  it("changes nothing when the model reports no ground line", () => {
+    const { regions } = parseSegmentation(response(undefined, 0.25));
+    expect(regions[0].polygon[0]).toEqual([0.1, 0.25]);
+  });
+
+  it("accepts a two-point line, which is what a flat photo gets", () => {
+    // parsePolygon needs three vertices to enclose something; a polyline
+    // across a photo is very often exactly two.
+    const { regions } = parseSegmentation(response([[0.05, 0.55], [0.95, 0.6]], 0.3));
+    expect(regions[0].polygon[0][1]).toBeGreaterThan(0.3);
+  });
+});

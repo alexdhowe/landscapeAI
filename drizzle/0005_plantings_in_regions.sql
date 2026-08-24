@@ -1,0 +1,14 @@
+-- The plants standing in a region become objects in the graph.
+--
+-- Swapping a bed's surface filled the whole region polygon with the new
+-- material, so choosing river rock over mulch turned every shrub in the bed
+-- grey along with it. The mulch is what changes; the plants stay. Rendering
+-- that needs the plants to exist in the object graph rather than only in the
+-- photograph — project-map section 5 calls these PointElements, and section 1
+-- is why the answer is not to go looking for them in the picture at render
+-- time: the image is a view, never the artifact.
+--
+-- Nullable, and it stays nullable. Every region segmented before the vision
+-- pass was asked for plantings has none, those projects still render, and a
+-- swap over a null simply covers the whole region the way it did before.
+ALTER TABLE "regions" ADD COLUMN "plantings" jsonb;

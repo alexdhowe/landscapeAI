@@ -3,8 +3,10 @@
  * Claude call lives in classify.ts; this module turns untrusted model text
  * into a validated SegmentationResult and is unit-tested in isolation.
  */
+import { holdRegionsToGround } from "./groundLine";
 import type {
   NormalizedPoint,
+  Planting,
   RegionKind,
   SegmentationResult,
   SegmentedRegion,
@@ -29,7 +31,7 @@ export function extractJson(text: string): string {
   return text.trim();
 }
 
-function parsePolygon(raw: unknown): NormalizedPoint[] | null {
+function parsePoints(raw: unknown, minimum: number): NormalizedPoint[] | null {
   if (!Array.isArray(raw)) return null;
   const points: NormalizedPoint[] = [];
   for (const pt of raw) {
@@ -54,8 +56,59 @@ function parsePolygon(raw: unknown): NormalizedPoint[] | null {
       }
     }
   }
-  // A polygon needs at least 3 vertices to enclose anything.
-  return points.length >= 3 ? points : null;
+  return points.length >= minimum ? points : null;
+}
+
+/** A polygon needs at least 3 vertices to enclose anything. */
+function parsePolygon(raw: unknown): NormalizedPoint[] | null {
+  return parsePoints(raw, 3);
+}
+
+/** A polyline needs two. The ground line across a photo is often exactly two. */
+function parsePolyline(raw: unknown): NormalizedPoint[] | null {
+  return parsePoints(raw, 2);
+}
+
+/**
+ * How many plants are worth carrying per region.
+ *
+ * The list exists to stop gravel being painted over a shrub, and a bed
+ * with thirty separate entries is a model enumerating ground cover leaf by
+ * leaf rather than naming the shrubs. Past this point the extra shapes
+ * cost render time and buy nothing.
+ */
+const MAX_PLANTINGS_PER_REGION = 24;
+
+/**
+ * The smallest plant worth punching out of a swap: below this an ellipse
+ * is a speck that only stipples the new material.
+ */
+const MIN_PLANTING_RADIUS = 0.004;
+
+function parsePlantings(raw: unknown): Planting[] {
+  if (!Array.isArray(raw)) return [];
+  const plantings: Planting[] = [];
+  for (const item of raw) {
+    if (item === null || typeof item !== "object") continue;
+    const e = item as Record<string, unknown>;
+    const nums = [e.cx, e.cy, e.rx, e.ry];
+    if (!nums.every((n) => typeof n === "number" && Number.isFinite(n))) continue;
+    const [cx, cy, rx, ry] = nums as number[];
+    // A radius is a fraction of the frame, so half the picture is already
+    // absurd for one shrub; clamping rather than dropping keeps a merely
+    // over-generous guess usable.
+    const clampR = (r: number) => Math.min(0.5, Math.abs(r));
+    if (clampR(rx) < MIN_PLANTING_RADIUS || clampR(ry) < MIN_PLANTING_RADIUS) continue;
+    plantings.push({
+      cx: clamp01(cx),
+      cy: clamp01(cy),
+      rx: clampR(rx),
+      ry: clampR(ry),
+      label: asString(e.label),
+    });
+    if (plantings.length >= MAX_PLANTINGS_PER_REGION) break;
+  }
+  return plantings;
 }
 
 function parseKind(raw: unknown): RegionKind | null {
@@ -146,6 +199,8 @@ export function parseSegmentation(
 
   const obj = data as {
     regions?: unknown;
+    ground_line?: unknown;
+    groundLine?: unknown;
     vertical_elements?: unknown;
     verticalElements?: unknown;
     cannot_see?: unknown;
@@ -164,11 +219,13 @@ export function parseSegmentation(
       typeof r.confidence === "number" && Number.isFinite(r.confidence)
         ? clamp01(r.confidence)
         : 0.5;
+    const plantings = parsePlantings(r.plantings);
     regions.push({
       id: asString(r.id) ?? `region_${i + 1}`,
       kind,
       label: asString(r.label) ?? `Region ${i + 1}`,
       polygon,
+      ...(plantings.length > 0 ? { plantings } : {}),
       existingMaterial: asString(r.existing_material) ?? asString(r.existingMaterial),
       condition: asString(r.condition),
       estimatedAreaSf:
@@ -183,8 +240,14 @@ export function parseSegmentation(
     ? rawCannotSee.filter((s): s is string => typeof s === "string" && s.trim() !== "")
     : [];
 
+  // The prompt has always forbidden outlining the house; this is where
+  // that stops being a request. A region drawn up the wall is pulled back
+  // down to the ground line, and one drawn entirely on the wall is
+  // dropped. Without a usable ground line nothing moves.
+  const groundLine = parsePolyline(obj.ground_line ?? obj.groundLine) ?? undefined;
+
   return {
-    regions,
+    regions: holdRegionsToGround(regions, groundLine),
     verticalElements: parseVerticalElements(obj.vertical_elements ?? obj.verticalElements),
     cannotSee,
     source,

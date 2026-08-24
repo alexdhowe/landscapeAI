@@ -93,6 +93,9 @@ function toSegmentedRegion(row: RegionRow): SegmentedRegion {
     kind: row.kind,
     label: row.label,
     polygon: row.polygon,
+    ...(row.plantings === null || row.plantings.length === 0
+      ? {}
+      : { plantings: row.plantings }),
     ...(row.existingMaterial === null ? {} : { existingMaterial: row.existingMaterial }),
     ...(row.condition === null ? {} : { condition: row.condition }),
     ...(row.estimatedAreaSf === null ? {} : { estimatedAreaSf: row.estimatedAreaSf }),
@@ -384,6 +387,7 @@ export async function replaceSegmentation(
         kind: region.kind,
         label: region.label,
         polygon: region.polygon,
+        plantings: region.plantings ?? null,
         existingMaterial: region.existingMaterial ?? null,
         condition: region.condition ?? null,
         estimatedAreaSf: region.estimatedAreaSf ?? null,

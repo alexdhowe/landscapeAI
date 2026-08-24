@@ -287,6 +287,18 @@ async function run(browser: Browser, viewport: Viewport) {
     await page.getByLabel("Password").fill(PASSWORD);
     await page.getByRole("button", { name: /sign in/i }).click();
     await page.waitForURL(/dashboard/, { timeout: 30_000 }).catch(() => {});
+    // Signing in has to actually work, and this swallowed the failure: it
+    // caught the timeout and carried on, so the next three screenshots
+    // were of the login page under the names "dashboard", "deltas" and
+    // "pricebook". A console nobody could sign in to shipped for eleven
+    // sessions behind that catch. Run this WITHOUT AUTH_TRUST_HOST set —
+    // that variable was the thing hiding it.
+    if (!/\/dashboard/.test(page.url())) {
+      findings.push({
+        where: `login @ ${viewport.name}`,
+        what: `sign-in did not reach the dashboard — landed on ${new URL(page.url()).pathname}`,
+      });
+    }
     for (const route of ["dashboard", "deltas", "pricebook"]) {
       await page.goto(`${BASE}/${route}`, { waitUntil: "networkidle" });
       await shoot(page, viewport, route);

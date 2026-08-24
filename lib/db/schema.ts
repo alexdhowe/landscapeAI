@@ -63,7 +63,7 @@ import type {
   Quantity,
   TierMultiplier,
 } from "../pricing/types";
-import type { NormalizedPoint, VerticalElement } from "../vision/types";
+import type { NormalizedPoint, Planting, VerticalElement } from "../vision/types";
 import type { LngLat } from "../measure/area";
 
 /**
@@ -473,6 +473,12 @@ export const regions = pgTable(
     label: text("label").notNull(),
     /** Normalized image coordinates, 0-1, origin top-left. */
     polygon: jsonb("polygon").$type<NormalizedPoint[]>().notNull(),
+    /**
+     * The plants standing in this region, as ellipses in normalized image
+     * coordinates. Null for every region segmented before they were asked
+     * for, which is why nothing may require them — see the type.
+     */
+    plantings: jsonb("plantings").$type<Planting[]>(),
     existingMaterial: text("existing_material"),
     condition: text("condition"),
     /**
