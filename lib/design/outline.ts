@@ -234,6 +234,55 @@ export function insetOutline(
   });
 }
 
+/** Total edge length of a closed ring. */
+function perimeter(ring: readonly NormalizedPoint[]): number {
+  let total = 0;
+  for (let i = 0; i < ring.length; i++) {
+    const [x0, y0] = ring[i];
+    const [x1, y1] = ring[(i + 1) % ring.length];
+    total += Math.hypot(x1 - x0, y1 - y0);
+  }
+  return total;
+}
+
+/**
+ * How far this particular region's fill may sit inside its outline.
+ *
+ * The inset exists to keep a swapped material off the cobbles a bed is
+ * edged with, so it was written as a fraction of the frame — a fixed
+ * distance, because a row of cobbles is a fixed width wherever it appears
+ * in the photograph. That is right for the *reason* and wrong for the
+ * result, because the same distance is a rounding error on a lawn and a
+ * demolition on a strip.
+ *
+ * A real photograph made it obvious. Four regions: a lawn at 31.9% of the
+ * frame, a mulch bed at 21%, and — this is the yard, not an edge case — a
+ * turf strip at 0.9% and a walkway at 0.7%. The fixed inset took **33.5%**
+ * of the smallest one's area. Swap the material on that walkway and a
+ * third of it simply would not be painted, which reads as the swap having
+ * failed rather than as a tasteful margin. Long thin regions are not
+ * unusual here: walkways, edging strips, the grass between a drive and a
+ * fence.
+ *
+ * So the frame-sized inset is a ceiling, and the region's own width is the
+ * other bound. `area / perimeter` is about half the width of a long thin
+ * region, and is the natural scale of a fat one, so a small multiple of it
+ * bounds the share of area the inset can take at roughly `2 × SHARE`
+ * whatever the shape. The multiple is set so a region big enough to have
+ * been fine already is left exactly as it was.
+ */
+const INSET_SHARE_OF_WIDTH = 0.06;
+
+export function insetForRegion(
+  ring: readonly NormalizedPoint[],
+  preferred: number,
+): number {
+  const edge = perimeter(ring);
+  if (edge <= 0) return 0;
+  const scale = Math.abs(signedDoubleArea(ring)) / 2 / edge;
+  return Math.min(Math.abs(preferred), INSET_SHARE_OF_WIDTH * scale);
+}
+
 /**
  * Push a ring outward by a fixed distance — the other direction of the
  * same offset.

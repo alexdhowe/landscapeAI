@@ -32,6 +32,7 @@ not negotiable.
 | Contractor login on a self-hosted deployment | ✅ fixed — `trustHost`; it threw `UntrustedHost` on every deployment target |
 | Segmentation against a real photo | ✅ **the model was right all along** — a real yard's bed came back at 27 vertices and 25.5% of frame; the second pass was flattening it |
 | The second pass moving the ground | ✅ fixed — it reported a ground line along the bottom of the photo and every region was pulled onto it |
+| The fill eating a narrow region | ✅ fixed — a frame-sized inset took 33% of a walkway strip's area and a rounding error off the lawn beside it; it scales to the region now |
 | The ground clamp eating a raised bed | ✅ fixed — a bed behind a retaining wall is above the ground line by definition; the clamp now corrects a region but never guts one |
 | Which stage makes an outline wrong | ✅ observable — `npm run segment` writes one image per stage; the parser no longer hides the model's own polygons |
 | Plug-and-play plants | ✅ done — hover to identify, swap one plant for another, priced and frozen like any other choice |
@@ -45,7 +46,7 @@ All six phases are in, they run on Postgres, the contractor console is behind
 a login, the price book is editable, photos live in object storage when a
 bucket is configured, and the whole thing has been designed and opened on a
 phone — on a phone *branch*, for the first time in the twelfth session,
-which is its own story. `npm test` runs 564 tests — with a database and
+which is its own story. `npm test` runs 570 tests — with a database and
 without one.
 
 **It has not been deployed.** The tenth session wrote the configuration —
@@ -72,7 +73,7 @@ store, so a clean checkout runs the demo with nothing to provision.
 ```sh
 npm run doctor    # is this machine set up? checks .env.local, the API key (against the
                   # real API), and the console login — and says what to fix, in English.
-npm test          # Vitest — 564 tests across every phase. No server, no network, no browser.
+npm test          # Vitest — 570 tests across every phase. No server, no network, no browser.
 npm run typecheck
 npm run dev
 npm run build
@@ -678,6 +679,40 @@ compared, not by reasoning about token counts.
 What the wait needs is honesty on the customer's side, not removal: a
 minute is a long time to look at a progress bar with no idea whether it is
 working.
+
+### The fill, on a yard with narrow regions
+
+A fourth photo had two regions the earlier ones did not: a turf strip at
+0.9% of the frame and a walkway at 0.7%, next to a lawn at 31.9%. The
+pipeline came through clean — every region within 0.2% end to end — and
+then the last line of the report said the material fill was sitting inside
+its outline by **33.5% of a region's area**.
+
+The inset is meant to keep a swapped material off the row of cobbles a bed
+is edged with. A row of cobbles is a fixed width wherever it appears in the
+picture, so the inset was written as a fixed fraction of the frame. Right
+for the reason, wrong for the result: the same distance is a rounding error
+on a lawn and a demolition on a strip. Swap the material on that walkway
+and a third of it would not be painted, which reads as the swap having
+failed rather than as a tasteful margin. Long thin regions are not an edge
+case here — walkways, edging strips, the grass between a drive and a fence.
+
+`insetForRegion` makes the frame-sized figure a *ceiling* and bounds it by
+the region's own width. `area / perimeter` is about half the width of a long
+thin region and the natural scale of a fat one, so a small multiple of it
+caps the share of area the inset can take whatever the shape. Measured
+against the four regions from that photo:
+
+| region | was | now |
+|---|---|---|
+| lawn, 31.9% of frame | 4.4% | 4.4% |
+| mulch bed, 21% | 5.8% | 5.8% |
+| turf strip, 0.9% | 80.4% | 6.0% |
+| walkway, 0.7% | 80.4% | 6.0% |
+
+The regions that were already fine are byte-identical — the multiple is set
+so a region wide enough to give up the full inset still gives it up, because
+this must not quietly soften the thing that keeps gravel off a border.
 
 ### The same bed, three times
 

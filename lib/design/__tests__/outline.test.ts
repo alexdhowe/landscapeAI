@@ -7,7 +7,13 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { closedPathData, insetOutline, outsetOutline, smoothOutline } from "../outline";
+import {
+  closedPathData,
+  insetForRegion,
+  insetOutline,
+  outsetOutline,
+  smoothOutline,
+} from "../outline";
 import type { NormalizedPoint } from "../../vision/types";
 
 /** A regular n-gon sampled on a circle — a stand-in for a curved bed edge. */
@@ -284,5 +290,76 @@ describe("pushing the edge the other way", () => {
       expect(y).toBeGreaterThanOrEqual(0);
       expect(y).toBeLessThanOrEqual(1);
     }
+  });
+});
+
+describe("how far a fill may sit inside its own region", () => {
+  // The inset keeps a swapped material off the cobbles a bed is edged
+  // with, so it was written as a fixed fraction of the frame — right for
+  // the reason, wrong for the result. A real photo had a lawn at 31.9% of
+  // frame beside a walkway strip at 0.7%, and the same distance took a
+  // third of the strip. Swap the material there and it reads as the swap
+  // having failed.
+  const PREFERRED = 0.006;
+
+  /** A long thin strip `w` tall running most of the width — a walkway. */
+  function strip(w: number): NormalizedPoint[] {
+    return [
+      [0.05, 0.5],
+      [0.95, 0.5],
+      [0.95, 0.5 + w],
+      [0.05, 0.5 + w],
+    ];
+  }
+
+  function lost(ring: NormalizedPoint[]) {
+    const before = Math.abs(areaOf(ring));
+    const after = Math.abs(areaOf(insetOutline(ring, insetForRegion(ring, PREFERRED))));
+    return 1 - after / before;
+  }
+
+  function areaOf(ring: readonly NormalizedPoint[]) {
+    let sum = 0;
+    for (let i = 0; i < ring.length; i++) {
+      const [x0, y0] = ring[i];
+      const [x1, y1] = ring[(i + 1) % ring.length];
+      sum += x0 * y1 - x1 * y0;
+    }
+    return sum / 2;
+  }
+
+  it("leaves a big region exactly as it was", () => {
+    // A region wide enough to give up the full inset still gives it up:
+    // this must not quietly soften the thing that keeps gravel off a border.
+    const lawn = circle(40, 0.35);
+    expect(insetForRegion(lawn, PREFERRED)).toBeCloseTo(PREFERRED, 6);
+  });
+
+  it("takes far less from a narrow strip", () => {
+    expect(insetForRegion(strip(0.02), PREFERRED)).toBeLessThan(PREFERRED / 3);
+  });
+
+  it("keeps the loss modest however thin the region gets", () => {
+    // The property that matters. Before this, a thin enough strip lost
+    // everything; the observed worst case on a real yard was 33.5%.
+    for (const w of [0.005, 0.01, 0.02, 0.05, 0.1, 0.2]) {
+      expect(lost(strip(w)), `strip ${w} tall`).toBeLessThan(0.15);
+    }
+  });
+
+  it("never insets a region out of existence", () => {
+    for (const w of [0.001, 0.002, 0.005]) {
+      expect(Math.abs(areaOf(insetOutline(strip(w), insetForRegion(strip(w), PREFERRED))))).
+        toBeGreaterThan(0);
+    }
+  });
+
+  it("is still an inset, not a no-op", () => {
+    // Small regions get less, not nothing — the border still matters there.
+    expect(insetForRegion(strip(0.02), PREFERRED)).toBeGreaterThan(0);
+  });
+
+  it("survives a degenerate ring", () => {
+    expect(insetForRegion([[0.1, 0.1], [0.1, 0.1], [0.1, 0.1]], PREFERRED)).toBe(0);
   });
 });

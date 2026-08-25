@@ -8,6 +8,7 @@ import { layoutRegionMarkers } from "@/lib/design/markers";
 import {
   closedPathData,
   effectiveOutline,
+  insetForRegion,
   insetOutline,
   smoothOutline,
 } from "@/lib/design/outline";
@@ -71,13 +72,18 @@ type Props = {
 const PLANTING_MARGIN = 1.18;
 
 /**
- * How far inside its outline a swapped material is painted, as a fraction
+ * The most a swapped material is painted inside its outline, as a fraction
  * of the frame.
  *
  * Small on purpose. Enough to keep gravel off the row of cobbles a bed is
  * edged with, not enough to read as the bed having shrunk. The outline
  * itself does not move — this is only the fill, so what the customer sees
  * as the region's boundary is still where the boundary is.
+ *
+ * A ceiling rather than the amount: `insetForRegion` takes this down for a
+ * region too narrow to give it up. On a real yard this same distance was a
+ * rounding error on the lawn and a third of the area of the walkway strip
+ * beside it.
  */
 const MATERIAL_INSET = 0.006;
 
@@ -289,7 +295,10 @@ export function PhotoCanvas({
                   stone border is what they notice. */}
               <path
                 d={closedPathData(
-                  insetOutline(smoothOutline(liveOutline(region)), MATERIAL_INSET),
+                  (() => {
+                    const path = smoothOutline(liveOutline(region));
+                    return insetOutline(path, insetForRegion(path, MATERIAL_INSET));
+                  })(),
                   w,
                   h,
                 )}

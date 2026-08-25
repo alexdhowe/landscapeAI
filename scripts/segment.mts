@@ -37,7 +37,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { loadEnvLocal } from "../lib/env/localFile";
 import { annotateOutlines } from "../lib/image/annotate";
 import { normalizePhoto } from "../lib/image/normalize";
-import { insetOutline, smoothOutline } from "../lib/design/outline";
+import { insetForRegion, insetOutline, smoothOutline } from "../lib/design/outline";
 import { readCredential } from "../lib/vision/credentials";
 import { MODEL, SEGMENTATION_PROMPT } from "../lib/vision/classify";
 import { demoSegmentation } from "../lib/vision/demo";
@@ -312,8 +312,9 @@ async function main() {
   // The fill the customer sees is inset inside the drawn outline; if that
   // is what looks wrong, it is this and not the recognition.
   const insetLoss = refined.map((region) => {
-    const before = doubleArea(smoothOutline(region.polygon));
-    const after = doubleArea(insetOutline(smoothOutline(region.polygon), 0.006));
+    const path = smoothOutline(region.polygon);
+    const before = doubleArea(path);
+    const after = doubleArea(insetOutline(path, insetForRegion(path, 0.006)));
     return before > 0 ? 1 - after / before : 0;
   });
   if (insetLoss.length > 0) {
