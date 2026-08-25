@@ -175,6 +175,34 @@ const MAX_PLANT_MOVE = 0.15;
 const MIN_PLANT_RADIUS_RATIO = 0.4;
 const MAX_PLANT_RADIUS_RATIO = 2.5;
 
+/**
+ * Is this correction to a region's outline one we will take?
+ *
+ * Split out from the merge so that counting what a refinement changed and
+ * actually changing it cannot drift apart. `summarizeRefinement` reports
+ * the same decision this makes, from the same constants — the alternative
+ * was a tally that re-derived the bounds and slowly stopped agreeing with
+ * them.
+ */
+export function polygonCorrectionAccepted(
+  before: readonly NormalizedPoint[],
+  after: readonly NormalizedPoint[],
+): boolean {
+  const was = doubleArea(before);
+  if (was <= 0) return false;
+  const ratio = doubleArea(after) / was;
+  return ratio >= MIN_AREA_RATIO && ratio <= MAX_AREA_RATIO;
+}
+
+/** Is this correction to a plant's ellipse one we will take? */
+export function plantCorrectionAccepted(before: Planting, after: RefinedEllipse): boolean {
+  if (Math.hypot(after.cx - before.cx, after.cy - before.cy) > MAX_PLANT_MOVE) return false;
+  for (const ratio of [after.rx / before.rx, after.ry / before.ry]) {
+    if (ratio < MIN_PLANT_RADIUS_RATIO || ratio > MAX_PLANT_RADIUS_RATIO) return false;
+  }
+  return true;
+}
+
 function refinePlantings(
   plantings: Planting[] | undefined,
   refined: Map<string, RefinedEllipse>,
@@ -182,18 +210,59 @@ function refinePlantings(
   if (!plantings || plantings.length === 0) return plantings;
   return plantings.map((plant) => {
     const next = refined.get(plant.id);
-    if (!next) return plant;
-    const moved = Math.hypot(next.cx - plant.cx, next.cy - plant.cy);
-    if (moved > MAX_PLANT_MOVE) return plant;
-    const rxRatio = next.rx / plant.rx;
-    const ryRatio = next.ry / plant.ry;
-    for (const ratio of [rxRatio, ryRatio]) {
-      if (ratio < MIN_PLANT_RADIUS_RATIO || ratio > MAX_PLANT_RADIUS_RATIO) return plant;
-    }
+    if (!next || !plantCorrectionAccepted(plant, next)) return plant;
     // Its identity, its label and the customer's choice about it all stay
     // attached to the id; only where and how big it is can move.
     return { ...plant, cx: next.cx, cy: next.cy, rx: next.rx, ry: next.ry };
   });
+}
+
+/**
+ * What a second look actually bought, counted.
+ *
+ * The refinement costs a whole extra vision call per upload against the
+ * thirty-second budget in map section 2, and until this existed nothing
+ * measured either side of that trade. Elapsed time alone does not settle
+ * it: a pass that takes four seconds and has most of its corrections
+ * refused by the bounds above is a different problem from one that takes
+ * four seconds and lands every one of them. The first is a merge to
+ * loosen, the second is a model to make faster.
+ *
+ * "Offered" counts shapes that came back for something the first pass
+ * found; a correction for an id nobody recognises is not offered to
+ * anything and is not counted.
+ */
+export type RefinementTally = {
+  outlinesOffered: number;
+  outlinesAccepted: number;
+  plantsOffered: number;
+  plantsAccepted: number;
+};
+
+export function summarizeRefinement(
+  regions: readonly SegmentedRegion[],
+  refined: RefinedShapes,
+): RefinementTally {
+  const tally: RefinementTally = {
+    outlinesOffered: 0,
+    outlinesAccepted: 0,
+    plantsOffered: 0,
+    plantsAccepted: 0,
+  };
+  for (const region of regions) {
+    const polygon = refined.polygons.get(region.id);
+    if (polygon) {
+      tally.outlinesOffered += 1;
+      if (polygonCorrectionAccepted(region.polygon, polygon)) tally.outlinesAccepted += 1;
+    }
+    for (const plant of region.plantings ?? []) {
+      const next = refined.plantings.get(plant.id);
+      if (!next) continue;
+      tally.plantsOffered += 1;
+      if (plantCorrectionAccepted(plant, next)) tally.plantsAccepted += 1;
+    }
+  }
+  return tally;
 }
 
 export function mergeRefinement(
@@ -204,12 +273,7 @@ export function mergeRefinement(
     const plantings = refinePlantings(region.plantings, refined.plantings);
     const withPlants = plantings === region.plantings ? region : { ...region, plantings };
     const polygon = refined.polygons.get(region.id);
-    if (!polygon) return withPlants;
-    const before = doubleArea(region.polygon);
-    const after = doubleArea(polygon);
-    if (before <= 0) return withPlants;
-    const ratio = after / before;
-    if (ratio < MIN_AREA_RATIO || ratio > MAX_AREA_RATIO) return withPlants;
+    if (!polygon || !polygonCorrectionAccepted(region.polygon, polygon)) return withPlants;
     return { ...withPlants, polygon };
   });
   // The refinement reports the ground line again, having now seen where its

@@ -10,7 +10,13 @@ import { readCredential } from "./credentials";
 import { demoSegmentation } from "./demo";
 import type { VisionImageMediaType } from "./mediaTypes";
 import { extractJson, parseSegmentation } from "./parse";
-import { mergeRefinement, parseRefinement, refinementPrompt } from "./refine";
+import {
+  mergeRefinement,
+  parseRefinement,
+  refinementPrompt,
+  summarizeRefinement,
+} from "./refine";
+import { reportVisionTiming, type RefinementTiming } from "./timing";
 import type { SegmentationResult } from "./types";
 
 const SEGMENTATION_PROMPT = `You are analyzing a homeowner's photo of their yard for a landscape design tool.
@@ -117,6 +123,10 @@ export async function classifyPhoto(
   const client = credential.apiKey
     ? new Anthropic({ apiKey: credential.apiKey })
     : new Anthropic();
+  // Both calls are timed. The model call is most of the thirty seconds
+  // section 2 promises and has never been a number in this repository,
+  // because no session that could change it had a key to measure it with.
+  const startedFirst = Date.now();
   const response = await client.messages.create({
     model: MODEL,
     max_tokens: 16000,
@@ -137,15 +147,27 @@ export async function classifyPhoto(
       },
     ],
   });
+  const firstPassMs = Date.now() - startedFirst;
 
   const first = parseSegmentation(textOf(response), "claude");
-  if (first.regions.length === 0 || !refinementEnabled()) return first;
+  const report = (refinement: RefinementTiming) =>
+    reportVisionTiming({ firstPassMs, regions: first.regions.length, refinement });
+
+  if (first.regions.length === 0) {
+    report({ status: "no-regions" });
+    return first;
+  }
+  if (!refinementEnabled()) {
+    report({ status: "off" });
+    return first;
+  }
 
   // The second look. Everything about it is best-effort: if the image
   // cannot be annotated, if the call fails, or if what comes back is
   // unusable, the first pass is the answer. A refinement is an
   // improvement, never a requirement — and never a reason to fail a
   // segmentation that already succeeded.
+  const startedSecond = Date.now();
   try {
     const annotated = await annotateOutlines(
       imageData,
@@ -156,7 +178,15 @@ export async function classifyPhoto(
         plantings: region.plantings,
       })),
     );
-    if (!annotated) return first;
+    if (!annotated) {
+      report({
+        status: "skipped",
+        ms: Date.now() - startedSecond,
+        reason: "the photo could not be annotated",
+      });
+      return first;
+    }
+    const annotateMs = Date.now() - startedSecond;
     const second = await client.messages.create({
       model: MODEL,
       max_tokens: 16000,
@@ -178,12 +208,27 @@ export async function classifyPhoto(
       ],
     });
     const refined = parseRefinement(textOf(second), extractJson);
-    if (refined.polygons.size === 0 && refined.plantings.size === 0) return first;
+    if (refined.polygons.size === 0 && refined.plantings.size === 0) {
+      report({ status: "no-shapes", ms: Date.now() - startedSecond });
+      return first;
+    }
+    // Counted before the merge, from the same predicates the merge uses.
+    // How much of the second look survives the bounds is the number that
+    // says whether this call is worth its latency — elapsed time alone
+    // cannot tell a slow pass from one whose answers are being thrown away.
+    report({
+      status: "merged",
+      ms: Date.now() - startedSecond,
+      annotateMs,
+      tally: summarizeRefinement(first.regions, refined),
+    });
     return { ...first, regions: mergeRefinement(first.regions, refined) };
   } catch (error) {
-    console.warn(
-      `[vision] outline refinement skipped: ${error instanceof Error ? error.message : String(error)}`,
-    );
+    report({
+      status: "skipped",
+      ms: Date.now() - startedSecond,
+      reason: error instanceof Error ? error.message : String(error),
+    });
     return first;
   }
 }

@@ -7,7 +7,7 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { closedPathData, insetOutline, smoothOutline } from "../outline";
+import { closedPathData, insetOutline, outsetOutline, smoothOutline } from "../outline";
 import type { NormalizedPoint } from "../../vision/types";
 
 /** A regular n-gon sampled on a circle — a stand-in for a curved bed edge. */
@@ -215,5 +215,74 @@ describe("insetOutline", () => {
     expect(
       insetOutline(ring, 0.01).every(([x, y]) => Number.isFinite(x) && Number.isFinite(y)),
     ).toBe(true);
+  });
+});
+
+/** Twice the area of a ring, sign discarded. */
+function doubleArea(ring: readonly NormalizedPoint[]): number {
+  let sum = 0;
+  for (let i = 0; i < ring.length; i++) {
+    const [x0, y0] = ring[i];
+    const [x1, y1] = ring[(i + 1) % ring.length];
+    sum += x0 * y1 - x1 * y0;
+  }
+  return Math.abs(sum);
+}
+
+describe("pushing the edge the other way", () => {
+  // The customer's "push it out" button. It shipped moving the edge IN —
+  // the offset read its amount through Math.abs, so both buttons did the
+  // same thing and there was no way to undo an over-correction short of
+  // discarding it. These pin the direction rather than the wording.
+  it("makes the ring bigger, where inset makes it smaller", () => {
+    const pushed = outsetOutline(SQUARE, 0.004);
+    const pulled = insetOutline(SQUARE, 0.004);
+    expect(doubleArea(pushed)).toBeGreaterThan(doubleArea(SQUARE));
+    expect(doubleArea(pulled)).toBeLessThan(doubleArea(SQUARE));
+  });
+
+  it("is what a negative amount means", () => {
+    expect(insetOutline(SQUARE, -0.004)).toEqual(outsetOutline(SQUARE, 0.004));
+  });
+
+  it("undoes a pull of the same size", () => {
+    const roundTrip = outsetOutline(insetOutline(SQUARE, 0.004), 0.004);
+    roundTrip.forEach(([x, y], i) => {
+      expect(x).toBeCloseTo(SQUARE[i][0], 6);
+      expect(y).toBeCloseTo(SQUARE[i][1], 6);
+    });
+  });
+
+  it("moves every point outward, whichever way the ring winds", () => {
+    for (const ring of [circle(20, 0.3), [...circle(20, 0.3)].reverse()]) {
+      for (const [x, y] of outsetOutline(ring, 0.01)) {
+        expect(Math.hypot(x - 0.5, y - 0.5)).toBeGreaterThan(0.3);
+      }
+    }
+  });
+
+  it("is capped the same amount as a pull inward", () => {
+    const huge = outsetOutline(circle(20, 0.3), 5);
+    for (const [x, y] of huge) {
+      expect(Math.hypot(x - 0.5, y - 0.5)).toBeLessThan(0.35);
+    }
+  });
+
+  it("keeps a region that already touches the frame edge on the picture", () => {
+    // Otherwise isUsableOutline refuses it, the PATCH route answers 400,
+    // and the customer presses the button and watches nothing happen.
+    const atEdge: NormalizedPoint[] = [
+      [0, 0.5],
+      [0.6, 0.5],
+      [0.6, 1],
+      [0, 1],
+    ];
+    const pushed = outsetOutline(atEdge, 0.01);
+    for (const [x, y] of pushed) {
+      expect(x).toBeGreaterThanOrEqual(0);
+      expect(x).toBeLessThanOrEqual(1);
+      expect(y).toBeGreaterThanOrEqual(0);
+      expect(y).toBeLessThanOrEqual(1);
+    }
   });
 });

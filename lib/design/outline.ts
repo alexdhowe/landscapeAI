@@ -145,28 +145,52 @@ function signedDoubleArea(ring: readonly NormalizedPoint[]): number {
 }
 
 /**
- * Pull a ring inward by a fixed distance.
+ * Offset a ring along its own normals: inward for a positive amount,
+ * outward for a negative one.
  *
- * Used for the material fill, not for the outline. A bed is edged with
- * cobbles or steel or brick, the traced boundary lands on or near that
- * edging, and the two ways to be wrong are not equally bad: material
- * stopping a hair short of the edging is what a real bed looks like, and
- * material painted across the customer's own stone border is the thing
- * they notice immediately. So the fill sits just inside the line.
+ * There are two callers and the sign is the whole contract between them.
+ *
+ *   **The material fill** insets by a fraction of a percent. A bed is
+ *   edged with cobbles or steel or brick, the traced boundary lands on or
+ *   near that edging, and the two ways to be wrong are not equally bad:
+ *   material stopping a hair short of the edging is what a real bed looks
+ *   like, and material painted across the customer's own stone border is
+ *   the thing they notice immediately. So the fill sits just inside the
+ *   line.
+ *
+ *   **The customer nudging the whole edge** goes both ways — and until
+ *   this was written down it went only one. The amount was read through
+ *   `Math.abs`, so "push it out" pulled the edge in by exactly as much as
+ *   "pull it in" did: on a unit square both buttons took the area from
+ *   0.360 to 0.350. The direction nobody could reach is the one that
+ *   undoes an over-correction, so the only way back from one was to throw
+ *   the whole correction away and start from the segmented outline.
  *
  * Each vertex moves along its angle bisector. That is exact for a convex
  * corner and good enough everywhere else at the distances this is used at
  * — a fraction of a percent of the frame. Anything larger wants a real
  * polygon offset with self-intersection handling, so the amount is capped
- * rather than trusted.
+ * rather than trusted, in both directions.
+ *
+ * The result is held inside the frame. Pushing a region that already
+ * touches the edge of the photo outward would otherwise put a vertex
+ * outside it, and `isUsableOutline` refuses those — the PATCH route would
+ * answer 400 and the configurator ignores anything that is not ok, so the
+ * customer would press a button and watch nothing happen at all.
  */
-const MAX_INSET = 0.02;
+const MAX_OFFSET = 0.02;
+
+/** Keep an offset vertex on the picture. */
+function inFrame(v: number): number {
+  return Math.min(1, Math.max(0, v));
+}
 
 export function insetOutline(
   ring: readonly NormalizedPoint[],
   amount: number,
 ): NormalizedPoint[] {
-  const distance = Math.min(Math.abs(amount), MAX_INSET);
+  // Signed, and capped by the same amount in either direction.
+  const distance = Math.max(-MAX_OFFSET, Math.min(MAX_OFFSET, amount));
   if (ring.length < 3 || distance === 0) return [...ring];
   // Which way is in: flip the normal for a ring wound the other way, or
   // this pushes outward and does the opposite of its job.
@@ -204,10 +228,25 @@ export function insetOutline(
     // and it is capped so a spike does not fly across the shape.
     const scale = Math.min(3, 1 / Math.max(0.34, len / normals.length));
     return [
-      curr[0] + (nx / len) * distance * scale,
-      curr[1] + (ny / len) * distance * scale,
+      inFrame(curr[0] + (nx / len) * distance * scale),
+      inFrame(curr[1] + (ny / len) * distance * scale),
     ] as NormalizedPoint;
   });
+}
+
+/**
+ * Push a ring outward by a fixed distance — the other direction of the
+ * same offset.
+ *
+ * It exists so no call site has to encode the direction as a minus sign
+ * again. That convention lived only in the caller's head, and the
+ * function on the other side of it disagreed silently.
+ */
+export function outsetOutline(
+  ring: readonly NormalizedPoint[],
+  amount: number,
+): NormalizedPoint[] {
+  return insetOutline(ring, -Math.abs(amount));
 }
 
 

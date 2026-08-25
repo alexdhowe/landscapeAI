@@ -1,6 +1,6 @@
 "use client";
 
-import { insetOutline } from "@/lib/design/outline";
+import { insetOutline, outsetOutline } from "@/lib/design/outline";
 import type { NormalizedPoint } from "@/lib/vision/types";
 
 import { Button } from "@/components/ui/Button";
@@ -24,6 +24,13 @@ import { Button } from "@/components/ui/Button";
  *   little outside the bed's stone border all the way round. It is also
  *   the keyboard and screen-reader path, which is why it is a pair of real
  *   buttons rather than a slider.
+ *
+ * Both directions of that pair have to work, and for one commit they did
+ * not — "push it out" moved the edge in, because the offset it called
+ * read its amount through `Math.abs`. Out is what undoes an
+ * over-correction, so without it the only way back was to discard the
+ * whole correction. The direction is now named at the call site rather
+ * than carried by a minus sign; see `outsetOutline`.
  */
 const NUDGE = 0.004;
 
@@ -84,7 +91,7 @@ export function OutlineControls({
               tone="secondary"
               size="sm"
               disabled={busy}
-              onClick={() => onChange(insetOutline(polygon, -NUDGE))}
+              onClick={() => onChange(outsetOutline(polygon, NUDGE))}
             >
               Push it out
             </Button>

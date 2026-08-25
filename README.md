@@ -33,13 +33,15 @@ not negotiable.
 | Segmentation against a real photo | ⚠️ improved, unverified — ground line, denser outlines, a self-correcting second pass. Needs a key and a yard to judge |
 | Plug-and-play plants | ✅ done — hover to identify, swap one plant for another, priced and frozen like any other choice |
 | Correcting an outline | ✅ done — drag the edge on the photo, or nudge the whole edge in or out; the model's polygon is kept alongside |
+| "Push it out" pushing it in | ✅ fixed — the offset read its amount through `Math.abs`, so both nudge buttons moved the edge the same way |
+| What the vision call costs | ✅ instrumented — every segmentation logs one line: total, first pass, second look, and how much of the second look survived the merge |
 | The aerial leg (`/design/[id]/locate`) | ⛔ gated off — deliberately: no paid imagery or geocoder until there is a working MVP |
 
 All six phases are in, they run on Postgres, the contractor console is behind
 a login, the price book is editable, photos live in object storage when a
 bucket is configured, and the whole thing has been designed and opened on a
 phone — on a phone *branch*, for the first time in the twelfth session,
-which is its own story. `npm test` runs 526 tests — with a database and
+which is its own story. `npm test` runs 551 tests — with a database and
 without one.
 
 **It has not been deployed.** The tenth session wrote the configuration —
@@ -66,7 +68,7 @@ store, so a clean checkout runs the demo with nothing to provision.
 ```sh
 npm run doctor    # is this machine set up? checks .env.local, the API key (against the
                   # real API), and the console login — and says what to fix, in English.
-npm test          # Vitest — 526 tests across every phase. No server, no network, no browser.
+npm test          # Vitest — 551 tests across every phase. No server, no network, no browser.
 npm run typecheck
 npm run dev
 npm run build
@@ -575,6 +577,71 @@ architecture, not a plant-specific gap, and it closes when the aerial leg
 does. The spacing validation in `lib/growth/spacing.ts` knows how to warn
 about crowding at year five and is not wired to this yet: it needs a scale
 in feet, which one photograph cannot give.
+
+## Two buttons that did the same thing, and a call nobody had timed
+
+A fresh read of the previous session's work, before any new feature, found
+one bug and one absence.
+
+### "Push it out" pushed it in
+
+`insetOutline` began `Math.min(Math.abs(amount), MAX_INSET)`. The material
+fill is the caller it was written for and that caller only ever insets, so
+throwing the sign away was invisible there. The nudge buttons added later
+encoded their direction *as* the sign — `insetOutline(polygon, -NUDGE)` —
+and the function ignored it. Both buttons moved the edge inward by exactly
+the same amount: on a unit square, area 0.360 → 0.350 either way.
+
+The direction that was unreachable is the one that undoes an
+over-correction. Pull the edge in one press too many and the only way back
+was "Put back the edge we found", which throws away every correction made
+to that region. And because presses compound on the stored polygon, the
+`MAX_INSET` cap bounds one press and not twenty.
+
+The offset is signed now, capped the same either way, and the result is
+held inside the frame — an outward nudge on a region already touching the
+edge of the photo would otherwise produce a vertex outside it, which
+`isUsableOutline` refuses, so the PATCH answers 400, and the configurator
+ignores anything that is not ok: the customer would press a button and
+watch nothing happen at all. The direction is no longer carried by a minus
+sign either. `outsetOutline` says which way it goes at the call site,
+because that convention lived only in the caller's head once already.
+
+Six tests, and the one that matters asserts the two directions do opposite
+things rather than asserting either one's wording.
+
+### The model call has never been a number
+
+The [thirty seconds](#the-thirty-seconds-measured) table measures every
+leg of the funnel except the one that dominates it. Three sessions have
+written "somebody with a key should put this in the table" and none could,
+because none had a key. The same absence sits under the open question of
+whether the refinement pass earns the second call it costs.
+
+Neither needs an experiment. They need the application to say what it just
+spent, so that the next real photograph through a real key answers both on
+its own. Every segmentation now logs exactly one line:
+
+```
+[vision] segmentation 8.4s — first pass 5.2s, 4 regions; annotate 0.2s, second look 3.0s, outlines 3/4 kept, plants 6/7 kept
+[vision] segmentation 5.2s — first pass 5.2s, 4 regions; second look off (VISION_REFINE=off)
+[vision] segmentation 7.0s — first pass 5.2s, 4 regions; second look skipped after 1.8s (529 overloaded_error)
+```
+
+The kept counts are the half that elapsed time cannot give you. A second
+look that takes three seconds and has most of its corrections refused by
+the merge bounds is a merge to loosen; one that takes three seconds and
+lands all of them is a call to make faster. Those want opposite fixes and
+the clock cannot tell them apart. They are counted from
+`polygonCorrectionAccepted` and `plantCorrectionAccepted` — the same
+predicates the merge itself decides with, split out of it for exactly this
+reason, so the line and the regions cannot come to disagree about what was
+kept.
+
+One line per segmentation, warned rather than informed when the second
+look failed, so a run is always one row of data. The formatting is pure
+and lives in `lib/vision/timing.ts` so a suite with no key and no network
+can assert it — the same split, and the same reason, as `authConfig()`.
 
 ## Letting the customer fix the edge
 
@@ -1203,6 +1270,12 @@ no horizontal scroll, no tap target under 44px, no page errors — and the
 funnel still runs end to end with rate limiting armed and the aerial leg
 gated off. The command to close the gap, against the deployment and then
 from a real phone on cellular, is in `docs/deploy.md` §9.
+
+**The application measures it now, even though this session still could
+not.** Rather than wait for a session that has both a key and a camera —
+there has not been one yet — every segmentation logs what it spent, so the
+row above fills itself in from the first real upload. See
+[the model call has never been a number](#the-model-call-has-never-been-a-number).
 
 **The wait is designed rather than papered over.** A band of light travels
 down the customer's own photograph while the model reads it, with placeholder

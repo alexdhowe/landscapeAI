@@ -11,7 +11,12 @@
 import { describe, expect, it } from "vitest";
 
 import { extractJson } from "../parse";
-import { mergeRefinement, parseRefinement, refinementPrompt } from "../refine";
+import {
+  mergeRefinement,
+  parseRefinement,
+  refinementPrompt,
+  summarizeRefinement,
+} from "../refine";
 import type { NormalizedPoint, SegmentedRegion } from "../types";
 
 const SQUARE: NormalizedPoint[] = [
@@ -261,5 +266,117 @@ describe("parseRefinement, on the plants", () => {
       }),
     );
     expect(plantings.size).toBe(0);
+  });
+});
+
+describe("summarizeRefinement", () => {
+  // What the second call bought, counted from the same predicates the
+  // merge decides with — so the log line and the merged regions cannot
+  // disagree about what was kept. Elapsed time alone cannot say whether
+  // this pass is worth its latency; this is the other half of that.
+  const TIGHTER: NormalizedPoint[] = [
+    [0.22, 0.62],
+    [0.78, 0.61],
+    [0.79, 0.88],
+    [0.21, 0.89],
+  ];
+  /** Half the area of SQUARE's neighbourhood — outside the merge bounds. */
+  const SHRUNK: NormalizedPoint[] = [
+    [0.2, 0.6],
+    [0.4, 0.6],
+    [0.4, 0.7],
+    [0.2, 0.7],
+  ];
+
+  it("counts an outline the merge keeps", () => {
+    expect(
+      summarizeRefinement([region()], {
+        polygons: new Map([["bed", TIGHTER]]),
+        plantings: new Map(),
+      }),
+    ).toEqual({
+      outlinesOffered: 1,
+      outlinesAccepted: 1,
+      plantsOffered: 0,
+      plantsAccepted: 0,
+    });
+  });
+
+  it("counts an outline the merge refuses as offered but not kept", () => {
+    const tally = summarizeRefinement([region()], {
+      polygons: new Map([["bed", SHRUNK]]),
+      plantings: new Map(),
+    });
+    expect(tally.outlinesOffered).toBe(1);
+    expect(tally.outlinesAccepted).toBe(0);
+    // And the merge agrees, which is the property that matters.
+    const [merged] = mergeRefinement([region()], {
+      polygons: new Map([["bed", SHRUNK]]),
+      plantings: new Map(),
+    });
+    expect(merged.polygon).toEqual(SQUARE);
+  });
+
+  it("counts plants the same way", () => {
+    const tally = summarizeRefinement([region()], {
+      polygons: new Map(),
+      plantings: new Map([
+        // A nudge, taken.
+        ["bed_plant_1", { cx: 0.52, cy: 0.76, rx: 0.06, ry: 0.06 }],
+      ]),
+    });
+    expect(tally).toEqual({
+      outlinesOffered: 0,
+      outlinesAccepted: 0,
+      plantsOffered: 1,
+      plantsAccepted: 1,
+    });
+  });
+
+  it("counts a plant flung across the bed as offered but not kept", () => {
+    const tally = summarizeRefinement([region()], {
+      polygons: new Map(),
+      plantings: new Map([["bed_plant_1", { cx: 0.9, cy: 0.75, rx: 0.05, ry: 0.05 }]]),
+    });
+    expect(tally.plantsOffered).toBe(1);
+    expect(tally.plantsAccepted).toBe(0);
+  });
+
+  it("does not count a correction for something the first pass never found", () => {
+    // An id nobody recognises is not offered to anything, and counting it
+    // would make a refinement that corrected nothing look productive.
+    const tally = summarizeRefinement([region()], {
+      polygons: new Map([["patio", TIGHTER]]),
+      plantings: new Map([["ghost_plant", { cx: 0.5, cy: 0.75, rx: 0.05, ry: 0.05 }]]),
+    });
+    expect(tally).toEqual({
+      outlinesOffered: 0,
+      outlinesAccepted: 0,
+      plantsOffered: 0,
+      plantsAccepted: 0,
+    });
+  });
+
+  it("adds up across regions", () => {
+    const regions = [
+      region({ id: "bed", plantings: [{ id: "p1", cx: 0.5, cy: 0.75, rx: 0.05, ry: 0.05 }] }),
+      region({ id: "lawn", plantings: [{ id: "p2", cx: 0.3, cy: 0.8, rx: 0.04, ry: 0.04 }] }),
+    ];
+    const tally = summarizeRefinement(regions, {
+      polygons: new Map([
+        ["bed", TIGHTER],
+        ["lawn", SHRUNK],
+      ]),
+      plantings: new Map([
+        ["p1", { cx: 0.51, cy: 0.75, rx: 0.05, ry: 0.05 }],
+        ["p2", { cx: 0.3, cy: 0.8, rx: 0.004, ry: 0.04 }],
+      ]),
+    });
+    expect(tally).toEqual({
+      outlinesOffered: 2,
+      outlinesAccepted: 1,
+      plantsOffered: 2,
+      plantsAccepted: 1,
+    });
   });
 });
