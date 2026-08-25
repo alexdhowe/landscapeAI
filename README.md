@@ -32,6 +32,7 @@ not negotiable.
 | Contractor login on a self-hosted deployment | ✅ fixed — `trustHost`; it threw `UntrustedHost` on every deployment target |
 | Segmentation against a real photo | ✅ **the model was right all along** — a real yard's bed came back at 27 vertices and 25.5% of frame; the second pass was flattening it |
 | The second pass moving the ground | ✅ fixed — it reported a ground line along the bottom of the photo and every region was pulled onto it |
+| Outlines placed too high by the model | ⛔ open — one photo put the bed on the brick, plants on the shutters, and a ground line to match. The pipeline passed it through untouched: this one is stage 1 |
 | The fill eating a narrow region | ✅ fixed — a frame-sized inset took 33% of a walkway strip's area and a rounding error off the lawn beside it; it scales to the region now |
 | The ground clamp eating a raised bed | ✅ fixed — a bed behind a retaining wall is above the ground line by definition; the clamp now corrects a region but never guts one |
 | Which stage makes an outline wrong | ✅ observable — `npm run segment` writes one image per stage; the parser no longer hides the model's own polygons |
@@ -713,6 +714,31 @@ against the four regions from that photo:
 The regions that were already fine are byte-identical — the multiple is set
 so a region wide enough to give up the full inset still gives it up, because
 this must not quietly soften the thing that keeps gravel off a border.
+
+### What the stage table cannot tell you
+
+A fifth photo — a brick house, a black mulch bed inside a river-rock
+cobble border — came through the pipeline perfectly clean. Every stage a
+no-op to within 0.1%. And the outlines were **wrong**: the bed's outline
+sat on the brick wall, the plant ellipses were on the window shutters, and
+the lawn's inner edge ran across the house.
+
+The model put them there. Its own reported ground line was `y 0.305–0.48`
+in a photo where the house meets the mulch at about `0.55`, and every
+region and every plant is consistent with that — uniformly about 0.2 of
+the frame too high. Internally coherent, all of it wrong.
+
+**This is the first stage-1 failure anybody has confirmed**, and it is the
+exact failure `groundLine.ts` was built for — a region climbing the wall.
+The clamp cannot touch it, because the ground line is wrong in the same
+direction and by the same amount, so there is nothing to correct against.
+
+The lesson for reading `npm run segment`: the table says which stage
+*changed* the geometry. It cannot say whether stage 1 was right, because a
+model that is confidently and consistently wrong produces a table that
+looks perfect. **Only the picture answers that.** A clean table plus a bad
+`01-model.jpg` is a real result, and it means something different from
+everything above this section.
 
 ### The same bed, three times
 

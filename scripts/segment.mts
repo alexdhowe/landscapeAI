@@ -29,7 +29,7 @@
  * a photograph — it says so rather than letting you read the pictures as if
  * it had.
  */
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 import Anthropic from "@anthropic-ai/sdk";
@@ -89,6 +89,19 @@ const topEdge = (ring: readonly NormalizedPoint[]) => Math.min(...ring.map(([, y
 
 type Stage = { key: string; title: string; regions: SegmentedRegion[] };
 
+/**
+ * Everything a run may write. Named rather than globbed so pointing
+ * `--out` at a directory with other things in it cannot delete them.
+ */
+const ARTIFACTS = [
+  "01-model.jpg",
+  "02-ground.jpg",
+  "02b-sent-for-second-look.jpg",
+  "03-refined.jpg",
+  "04-drawn.jpg",
+  "segmentation.json",
+];
+
 async function draw(photo: Buffer, mediaType: string, stage: Stage, dir: string) {
   const annotated = await annotateOutlines(
     photo,
@@ -131,6 +144,11 @@ function table(stages: Stage[]) {
 
 async function main() {
   mkdirSync(OUT, { recursive: true });
+  // Clear what a previous run left. A stale artifact in here does not look
+  // stale — `02b-sent-for-second-look.jpg` survived a run with the second
+  // pass switched off and read as current, which is precisely the kind of
+  // wrong evidence this script exists to stop producing.
+  for (const stale of ARTIFACTS) rmSync(path.join(OUT, stale), { force: true });
 
   const raw = readFileSync(PHOTO);
   const photo = await normalizePhoto(raw, "");
@@ -273,7 +291,11 @@ async function main() {
   } else if (!REFINE) {
     console.log("  second look: off (VISION_REFINE=off)");
   }
-  stages.push({ key: "03-refined", title: "3 second look", regions: refined });
+  // Only when there was a second look. Writing an "03" identical to "02"
+  // invites reading a stage that did not run.
+  if (refined !== held) {
+    stages.push({ key: "03-refined", title: "3 second look", regions: refined });
+  }
 
   // Stage 4 — what is actually drawn on the customer's photo.
   const drawn = refined.map((region) => ({
