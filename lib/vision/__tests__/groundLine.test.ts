@@ -123,16 +123,23 @@ describe("clampPolygonToGround", () => {
 });
 
 describe("holdRegionsToGround", () => {
-  it("drops a region drawn entirely above the ground line", () => {
-    // Nothing to recover: the model outlined a piece of wall.
+  it("leaves a region wholly above the line alone rather than deleting it", () => {
+    // This used to drop it, on the theory that the model had outlined a
+    // piece of wall and there was nothing to recover. Two real photographs
+    // of the same yard said otherwise: a bed held up by a retaining wall
+    // sits above the point where that wall meets the ground, always, and
+    // the clamp annihilated a 26-vertex bed covering 22.3% of the frame.
+    // A stray region a customer can see and ignore beats their actual bed
+    // vanishing.
+    const raised = region("raised-bed", [
+      [0.2, 0.1],
+      [0.8, 0.1],
+      [0.8, 0.3],
+      [0.2, 0.3],
+    ]);
     const held = holdRegionsToGround(
       [
-        region("on-the-wall", [
-          [0.2, 0.1],
-          [0.8, 0.1],
-          [0.8, 0.3],
-          [0.2, 0.3],
-        ]),
+        raised,
         region("on-the-ground", [
           [0.2, 0.7],
           [0.8, 0.7],
@@ -142,7 +149,29 @@ describe("holdRegionsToGround", () => {
       ],
       LINE,
     );
-    expect(held.map((r) => r.id)).toEqual(["on-the-ground"]);
+    expect(held.map((r) => r.id)).toEqual(["raised-bed", "on-the-ground"]);
+    expect(held[0].polygon).toEqual(raised.polygon);
+  });
+
+  it("does not clamp a region it would gut", () => {
+    // The real shape of the failure: the ground line traced the sweep of a
+    // wall cap down to y=0.98 at mid-frame, and the bed behind it had
+    // essentially no area below that. Clamping is a correction, not a
+    // demolition, so it does not run here.
+    const bed = region("raised-bed", [
+      [0.25, 0.24],
+      [0.9, 0.5],
+      [0.9, 0.6],
+      [0.25, 0.75],
+    ]);
+    const sweeping: NormalizedPoint[] = [
+      [0, 0.26],
+      [0.2, 0.55],
+      [0.55, 1],
+      [1, 0.84],
+    ];
+    const [held] = holdRegionsToGround([bed], sweeping);
+    expect(held.polygon).toEqual(bed.polygon);
   });
 
   it("keeps everything else about a region it clamps", () => {
@@ -197,31 +226,30 @@ describe("holdRegionsToGround", () => {
     expect(holdRegionsToGround(regions, low)).toEqual(regions);
   });
 
-  it("still corrects a single outlier among regions that are fine", () => {
-    const regions = [
-      region("on-the-wall", [
-        [0.2, 0.1],
-        [0.8, 0.1],
-        [0.8, 0.3],
-        [0.2, 0.3],
-      ]),
-      region("fine-a", [
-        [0.05, 0.7],
-        [0.5, 0.7],
-        [0.5, 0.95],
-        [0.05, 0.95],
-      ]),
-      region("fine-b", [
-        [0.5, 0.7],
-        [0.95, 0.7],
-        [0.95, 0.95],
-        [0.5, 0.95],
-      ]),
-    ];
-    expect(holdRegionsToGround(regions, LINE).map((r) => r.id)).toEqual([
-      "fine-a",
-      "fine-b",
+  it("still does the job it was built for", () => {
+    // The failure this module exists for: a foundation bed whose TOP edge
+    // strayed a third of the way up the brick while its bottom edge sat on
+    // the mulch. It has real area below the line, so it keeps it and comes
+    // back corrected — the guard above must not swallow this case.
+    const climbing = region("bed-up-the-brick", [
+      [0.1, 0.25],
+      [0.9, 0.27],
+      [0.9, 0.92],
+      [0.1, 0.9],
     ]);
+    const fine = region("fine", [
+      [0.05, 0.7],
+      [0.5, 0.7],
+      [0.5, 0.95],
+      [0.05, 0.95],
+    ]);
+    const held = holdRegionsToGround([climbing, fine], LINE);
+    expect(held.map((r) => r.id)).toEqual(["bed-up-the-brick", "fine"]);
+    for (const [x, y] of held[0].polygon) {
+      expect(y, `x=${x}`).toBeGreaterThanOrEqual(groundYAt(LINE, x) - 1e-9);
+    }
+    // Untouched regions stay byte-identical.
+    expect(held[1].polygon).toEqual(fine.polygon);
   });
 
   it("touches nothing without a usable ground line", () => {

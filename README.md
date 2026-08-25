@@ -32,6 +32,7 @@ not negotiable.
 | Contractor login on a self-hosted deployment | ✅ fixed — `trustHost`; it threw `UntrustedHost` on every deployment target |
 | Segmentation against a real photo | ✅ **the model was right all along** — a real yard's bed came back at 27 vertices and 25.5% of frame; the second pass was flattening it |
 | The second pass moving the ground | ✅ fixed — it reported a ground line along the bottom of the photo and every region was pulled onto it |
+| The ground clamp eating a raised bed | ✅ fixed — a bed behind a retaining wall is above the ground line by definition; the clamp now corrects a region but never guts one |
 | Which stage makes an outline wrong | ✅ observable — `npm run segment` writes one image per stage; the parser no longer hides the model's own polygons |
 | Plug-and-play plants | ✅ done — hover to identify, swap one plant for another, priced and frozen like any other choice |
 | Correcting an outline | ✅ done — drag the edge on the photo, or nudge the whole edge in or out; the model's polygon is kept alongside |
@@ -43,7 +44,7 @@ All six phases are in, they run on Postgres, the contractor console is behind
 a login, the price book is editable, photos live in object storage when a
 bucket is configured, and the whole thing has been designed and opened on a
 phone — on a phone *branch*, for the first time in the twelfth session,
-which is its own story. `npm test` runs 563 tests — with a database and
+which is its own story. `npm test` runs 564 tests — with a database and
 without one.
 
 **It has not been deployed.** The tenth session wrote the configuration —
@@ -70,7 +71,7 @@ store, so a clean checkout runs the demo with nothing to provision.
 ```sh
 npm run doctor    # is this machine set up? checks .env.local, the API key (against the
                   # real API), and the console login — and says what to fix, in English.
-npm test          # Vitest — 563 tests across every phase. No server, no network, no browser.
+npm test          # Vitest — 564 tests across every phase. No server, no network, no browser.
 npm run typecheck
 npm run dev
 npm run build
@@ -664,6 +665,44 @@ The remaining 56 seconds is still nearly twice the budget and is its own
 problem — 16,000 max output tokens of polygon coordinates is most of it.
 That is a design question (fewer, better-placed vertices; a faster model for
 one or both passes), not a prompt-wording one, and it is not answered here.
+
+### And then the first pass's ground line did the same thing
+
+Re-run with the second pass off, the same photo failed a second way — and
+this one is worse, because it is not a stray line, it is the concept.
+
+The model returned a 26-vertex bed covering **22.3%** of the frame. Stage 2
+returned **0.0%**. The ground line it reported traces the sweep of the wall
+cap: `y=0.21` at the left, dropping to `0.98` at mid-frame, back to `0.84`
+at the right. The bed spans `y 0.24–0.755`, so it lies *entirely above*
+that line, and clamping annihilated it.
+
+That is not a bad line. **A raised bed is above the ground line by
+definition** — a bed held up by a retaining wall sits above the point where
+that wall meets the ground, in every photograph ever taken of one. No line
+can be drawn that makes it otherwise, so no amount of prompt work fixes
+this. The model even named the thing it had found: `retaining_wall` at 0.93
+confidence, `raised_bed` at 0.88, in the same response whose geometry we
+then destroyed.
+
+The guard is now per region and states the module's own principle where it
+bites: **a clamp that would leave a region with less than a quarter of its
+area does not run for that region.** A bed whose *top* edge strayed onto the
+brick — the failure this was built for — has real area below the line, keeps
+it, and still comes back corrected; there is a test for exactly that shape
+so the guard cannot swallow it. A region with nothing below the line is not
+being corrected, it is being deleted.
+
+The cost: a region genuinely drawn up a wall is no longer dropped. That case
+is hypothetical. This one has now happened twice on the only two real
+photographs anybody has run, and a stray region a customer can see and
+ignore beats their bed disappearing. Verified against the actual polygon and
+the actual ground line from that run: 22.3% in, 22.3% out.
+
+**Worth saying plainly:** across two real photos the ground clamp has moved
+one vertex by 0.004 and destroyed one bed. Its benefit has been observed
+once, in an earlier session, against a photo nobody kept. Deleting the
+feature outright is a live option and wants one more real photo to decide.
 
 ## How the outlines got looked at
 

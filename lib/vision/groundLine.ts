@@ -110,50 +110,64 @@ function doubleArea(polygon: readonly NormalizedPoint[]): number {
 const MIN_DOUBLE_AREA = 1e-6;
 
 /**
+ * How much of a region the clamp is allowed to take.
+ *
+ * This is the whole guard, and it is per region rather than across the
+ * segmentation, because the damage this does is per region.
+ *
+ * The clamp was built for a bed whose *top* edge strayed onto the brick
+ * while its bottom edge sat on the mulch. That region has real area below
+ * the line, keeps it, and comes back corrected. A region with almost
+ * nothing below the line is a different animal: clamping does not correct
+ * it, it deletes it.
+ *
+ * And there is a whole category of region that is legitimately, permanently
+ * above the ground line — **a raised bed**. A bed held up by a retaining
+ * wall sits above the point where that wall meets the ground, by
+ * definition, in every photograph ever taken of one. No ground line can be
+ * drawn that makes it otherwise.
+ *
+ * Two real photographs of the same yard proved the cost of not knowing
+ * that. In one the second pass's ground line flattened a 25.5% bed to a
+ * 0.2% ribbon (fixed separately, in `mergeRefinement`). In the other the
+ * *first* pass's line — which traced the sweep of the wall cap, dropping to
+ * y=0.98 at mid-frame — flattened a 26-vertex, 22.3% bed to nothing at all.
+ * Both times the model had it right, said so, and even reported the
+ * `raised_bed` and `retaining_wall` that explain why: 0.88 and 0.93
+ * confidence. We destroyed the outline anyway.
+ *
+ * So: a clamp that would leave a region with less than this share of its
+ * area does not run for that region. It is the same principle the module
+ * always claimed — a correction for an outlier, not a rewrite — applied
+ * where it actually bites.
+ *
+ * The cost is that a region genuinely drawn up a wall is no longer dropped.
+ * That case is hypothetical; this one has now happened twice on the only
+ * two real photographs anybody has run. A stray region a customer can see
+ * and ignore beats their actual bed disappearing.
+ */
+const MIN_SHARE_KEPT = 0.25;
+
+/**
  * Apply the ground line to a whole segmentation.
  *
- * Regions that survive keep everything else about them; regions flattened
- * to nothing are dropped. With no usable ground line nothing is touched,
- * which is also what every segmentation stored before this existed gets.
- *
- * The one way this could do real damage is a ground line placed too LOW.
- * There is a quorum against the worst of it: if applying the line
- * *destroys* most of what the model found — flattens it below
- * MIN_DOUBLE_AREA — the line is likelier to be wrong than all of the
- * regions are, and it is discarded whole. Clamping is a correction for an
- * outlier, not a rewrite of the segmentation.
- *
- * **Be clear about what that does not cover.** It counts regions destroyed,
- * not area lost, so a line placed a little too low — leaving every region
- * as a thin band rather than as nothing — passes it untouched. And it
- * cannot help at all when a single region is the one gutted, because a
- * single gutted region is exactly the outlier this is built to correct.
- * A real yard hit precisely that: one bed reduced to a 0.2% ribbon while
- * its three neighbours were only mildly trimmed, which is indistinguishable
- * by any quorum from the case this feature exists for.
- *
- * The lesson was not that the quorum needs widening — every widening tried
- * against that data also swallowed the legitimate single-outlier case. It
- * was that a bad ground line must not get this far. See `mergeRefinement`,
- * which used to hand this function a ground line reported by the *second*
- * vision pass and no longer does.
+ * Every region comes back — corrected where the clamp is a correction,
+ * untouched where it would be a demolition. With no usable ground line
+ * nothing is touched, which is also what every segmentation stored before
+ * this existed gets.
  */
-const MAX_SHARE_DESTROYED = 0.5;
-
 export function holdRegionsToGround<T extends SegmentedRegion>(
   regions: readonly T[],
   groundLine: readonly NormalizedPoint[] | undefined,
 ): T[] {
   const line = usableGroundLine(groundLine);
   if (!line) return [...regions];
-  const held: T[] = [];
-  for (const region of regions) {
+  return regions.map((region) => {
     const polygon = clampPolygonToGround(region.polygon, line);
-    if (doubleArea(polygon) < MIN_DOUBLE_AREA) continue;
-    held.push({ ...region, polygon });
-  }
-  if (regions.length > 0 && held.length < regions.length * (1 - MAX_SHARE_DESTROYED)) {
-    return [...regions];
-  }
-  return held;
+    const before = doubleArea(region.polygon);
+    const after = doubleArea(polygon);
+    if (after < MIN_DOUBLE_AREA) return region;
+    if (before > 0 && after / before < MIN_SHARE_KEPT) return region;
+    return { ...region, polygon };
+  });
 }
