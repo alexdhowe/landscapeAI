@@ -133,14 +133,31 @@ export function parseRefinement(text: string, extractJson: (t: string) => string
 /**
  * How much of a region's outline a second look may move.
  *
- * A refinement that halves a region or doubles it is not tightening an
- * edge, it is disagreeing with the first pass about what the region *is* —
- * and the pass that could see the unannotated photograph is the better
- * judge of that. Bounded, so the worst a bad refinement can do is leave
- * the first answer in place.
+ * These were 0.5 and 2, written on the assumption that the first pass is
+ * roughly right and the second pass nudges an edge. A real photograph
+ * showed that assumption failing in the direction nobody had planned for.
+ *
+ * On a brick house with a black mulch bed, the first pass placed *every*
+ * region about 0.2 of the frame too high — bed on the wall, plants on the
+ * shutters, and a ground line to match, all internally consistent and all
+ * wrong. The second pass, which could see its own outlines drawn on the
+ * photograph, corrected all of it: bed onto the mulch, lawn onto the
+ * grass, driveway onto the concrete, every plant onto its shrub.
+ *
+ * The merge then kept one correction out of three. The bed passed at 1.55.
+ * The lawn — inflated by the first pass to 43.1% of the frame because it
+ * included a slab of house — came back at 16.1%, a ratio of **0.37**, and
+ * was refused. The driveway went 0.4% → 1.0%, a ratio of **2.37**, and was
+ * refused. Both refusals were corrections *away from* a badly wrong answer.
+ *
+ * That is the shape of the problem: when the first pass is wholesale wrong,
+ * every correction worth having is a large one, and a bound tuned for
+ * nudges rejects exactly the corrections that matter most. So the bounds
+ * are wide now — wide enough to admit a wholesale relocation, tight enough
+ * that a collapsed or exploded polygon is still refused.
  */
-const MIN_AREA_RATIO = 0.5;
-const MAX_AREA_RATIO = 2;
+const MIN_AREA_RATIO = 0.2;
+const MAX_AREA_RATIO = 5;
 
 function doubleArea(polygon: readonly NormalizedPoint[]): number {
   let sum = 0;
@@ -174,6 +191,73 @@ const MIN_PLANT_RADIUS_RATIO = 0.4;
 const MAX_PLANT_RADIUS_RATIO = 2.5;
 
 /**
+ * Which correction belongs to which plant.
+ *
+ * The prompt asks the second pass to return the ids it was given. On a
+ * real photograph it returned `plant_1 … plant_8` for plants this pass
+ * calls `front_corner_mulch_bed_plant_1 …`, and every one of seven
+ * corrections was dropped on an exact string comparison — reported as
+ * `plants 0/0`, which reads as "nothing was offered" rather than "nothing
+ * matched". The customer kept a set of rings sitting on the brickwork.
+ *
+ * Asking more firmly is not a fix; a model shortening an id it was told to
+ * echo is ordinary. So the match tolerates one id being a tail of the
+ * other, which is exactly the shortening observed and cannot collide:
+ * plant ids are `<regionId>_plant_<n>`, so a tail match still pins the
+ * number, and the region is already fixed by the loop that calls this.
+ */
+function plantIdMatches(ours: string, theirs: string): boolean {
+  if (ours === theirs) return true;
+  const a = ours.toLowerCase();
+  const b = theirs.toLowerCase();
+  return a.endsWith(`_${b}`) || b.endsWith(`_${a}`);
+}
+
+/** The correction offered for this plant, however the model spelled the id. */
+export function findPlantCorrection(
+  plant: Planting,
+  refined: ReadonlyMap<string, RefinedEllipse>,
+): RefinedEllipse | undefined {
+  const exact = refined.get(plant.id);
+  if (exact) return exact;
+  for (const [id, shape] of refined) {
+    if (plantIdMatches(plant.id, id)) return shape;
+  }
+  return undefined;
+}
+
+/** The mean of a ring's vertices. Enough to say how far a region moved. */
+function centroid(ring: readonly NormalizedPoint[]): NormalizedPoint {
+  let x = 0;
+  let y = 0;
+  for (const [px, py] of ring) {
+    x += px;
+    y += py;
+  }
+  return [x / ring.length, y / ring.length];
+}
+
+/**
+ * How far the region a plant stands in was itself corrected.
+ *
+ * A plant may move that far and then some. When the second pass is fixing
+ * a systematic error it moves the bed and everything standing in it by the
+ * same amount, and a fixed allowance rejects the whole set — the plants
+ * most in need of correction being, by definition, the ones furthest out.
+ * A plant flung across a bed that did not move is still refused, which is
+ * what the allowance was protecting against in the first place.
+ */
+function plantAllowance(
+  before: readonly NormalizedPoint[] | undefined,
+  after: readonly NormalizedPoint[] | undefined,
+): number {
+  if (!before || !after || before.length === 0 || after.length === 0) return MAX_PLANT_MOVE;
+  const [bx, by] = centroid(before);
+  const [ax, ay] = centroid(after);
+  return MAX_PLANT_MOVE + Math.hypot(ax - bx, ay - by);
+}
+
+/**
  * Is this correction to a region's outline one we will take?
  *
  * Split out from the merge so that counting what a refinement changed and
@@ -192,9 +276,18 @@ export function polygonCorrectionAccepted(
   return ratio >= MIN_AREA_RATIO && ratio <= MAX_AREA_RATIO;
 }
 
-/** Is this correction to a plant's ellipse one we will take? */
-export function plantCorrectionAccepted(before: Planting, after: RefinedEllipse): boolean {
-  if (Math.hypot(after.cx - before.cx, after.cy - before.cy) > MAX_PLANT_MOVE) return false;
+/**
+ * Is this correction to a plant's ellipse one we will take?
+ *
+ * `allowance` is how far this plant's own region moved, plus the nudge the
+ * plant is allowed on its own; see `plantAllowance`.
+ */
+export function plantCorrectionAccepted(
+  before: Planting,
+  after: RefinedEllipse,
+  allowance: number = MAX_PLANT_MOVE,
+): boolean {
+  if (Math.hypot(after.cx - before.cx, after.cy - before.cy) > allowance) return false;
   for (const ratio of [after.rx / before.rx, after.ry / before.ry]) {
     if (ratio < MIN_PLANT_RADIUS_RATIO || ratio > MAX_PLANT_RADIUS_RATIO) return false;
   }
@@ -203,12 +296,13 @@ export function plantCorrectionAccepted(before: Planting, after: RefinedEllipse)
 
 function refinePlantings(
   plantings: Planting[] | undefined,
-  refined: Map<string, RefinedEllipse>,
+  refined: ReadonlyMap<string, RefinedEllipse>,
+  allowance: number,
 ): Planting[] | undefined {
   if (!plantings || plantings.length === 0) return plantings;
   return plantings.map((plant) => {
-    const next = refined.get(plant.id);
-    if (!next || !plantCorrectionAccepted(plant, next)) return plant;
+    const next = findPlantCorrection(plant, refined);
+    if (!next || !plantCorrectionAccepted(plant, next, allowance)) return plant;
     // Its identity, its label and the customer's choice about it all stay
     // attached to the id; only where and how big it is can move.
     return { ...plant, cx: next.cx, cy: next.cy, rx: next.rx, ry: next.ry };
@@ -253,11 +347,12 @@ export function summarizeRefinement(
       tally.outlinesOffered += 1;
       if (polygonCorrectionAccepted(region.polygon, polygon)) tally.outlinesAccepted += 1;
     }
+    const allowance = plantAllowance(region.polygon, polygon);
     for (const plant of region.plantings ?? []) {
-      const next = refined.plantings.get(plant.id);
+      const next = findPlantCorrection(plant, refined.plantings);
       if (!next) continue;
       tally.plantsOffered += 1;
-      if (plantCorrectionAccepted(plant, next)) tally.plantsAccepted += 1;
+      if (plantCorrectionAccepted(plant, next, allowance)) tally.plantsAccepted += 1;
     }
   }
   return tally;
@@ -268,11 +363,17 @@ export function mergeRefinement(
   refined: RefinedShapes,
 ): SegmentedRegion[] {
   const merged = regions.map((region) => {
-    const plantings = refinePlantings(region.plantings, refined.plantings);
-    const withPlants = plantings === region.plantings ? region : { ...region, plantings };
     const polygon = refined.polygons.get(region.id);
-    if (!polygon || !polygonCorrectionAccepted(region.polygon, polygon)) return withPlants;
-    return { ...withPlants, polygon };
+    const takeShape = polygon !== undefined && polygonCorrectionAccepted(region.polygon, polygon);
+    // The plants move with the region they stand in, so their allowance is
+    // measured against the shape actually being taken.
+    const plantings = refinePlantings(
+      region.plantings,
+      refined.plantings,
+      plantAllowance(region.polygon, takeShape ? polygon : undefined),
+    );
+    const withPlants = plantings === region.plantings ? region : { ...region, plantings };
+    return takeShape ? { ...withPlants, polygon: polygon! } : withPlants;
   });
   // The refinement does NOT get to re-decide the ground line, and this is
   // the one place that rule was broken. It used to re-run the clamp with

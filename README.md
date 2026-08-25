@@ -32,7 +32,7 @@ not negotiable.
 | Contractor login on a self-hosted deployment | ✅ fixed — `trustHost`; it threw `UntrustedHost` on every deployment target |
 | Segmentation against a real photo | ✅ **the model was right all along** — a real yard's bed came back at 27 vertices and 25.5% of frame; the second pass was flattening it |
 | The second pass moving the ground | ✅ fixed — it reported a ground line along the bottom of the photo and every region was pulled onto it |
-| Outlines placed too high by the model | ⛔ open — one photo put the bed on the brick, plants on the shutters, and a ground line to match. The pipeline passed it through untouched: this one is stage 1 |
+| Outlines placed too high by the model | ✅ the second pass fixes it — and the merge was throwing the fix away. Bounds widened, plant ids matched leniently, plants allowed to move with their region |
 | The fill eating a narrow region | ✅ fixed — a frame-sized inset took 33% of a walkway strip's area and a rounding error off the lawn beside it; it scales to the region now |
 | The ground clamp eating a raised bed | ✅ fixed — a bed behind a retaining wall is above the ground line by definition; the clamp now corrects a region but never guts one |
 | Which stage makes an outline wrong | ✅ observable — `npm run segment` writes one image per stage; the parser no longer hides the model's own polygons |
@@ -47,7 +47,7 @@ All six phases are in, they run on Postgres, the contractor console is behind
 a login, the price book is editable, photos live in object storage when a
 bucket is configured, and the whole thing has been designed and opened on a
 phone — on a phone *branch*, for the first time in the twelfth session,
-which is its own story. `npm test` runs 570 tests — with a database and
+which is its own story. `npm test` runs 576 tests — with a database and
 without one.
 
 **It has not been deployed.** The tenth session wrote the configuration —
@@ -74,7 +74,7 @@ store, so a clean checkout runs the demo with nothing to provision.
 ```sh
 npm run doctor    # is this machine set up? checks .env.local, the API key (against the
                   # real API), and the console login — and says what to fix, in English.
-npm test          # Vitest — 570 tests across every phase. No server, no network, no browser.
+npm test          # Vitest — 576 tests across every phase. No server, no network, no browser.
 npm run typecheck
 npm run dev
 npm run build
@@ -714,6 +714,61 @@ against the four regions from that photo:
 The regions that were already fine are byte-identical — the multiple is set
 so a region wide enough to give up the full inset still gives it up, because
 this must not quietly soften the thing that keeps gravel off a border.
+
+### The second pass was right and we were binning it
+
+The obvious response to the section below was to switch the second pass
+back on, now that the ground-line bug in it was fixed, and see whether
+"correct the outline you can see" fixes a systematic offset. It does.
+Completely. On that same brick-house photo the second pass moved the bed
+onto the mulch, the lawn onto the grass, the driveway onto the concrete
+and all seven plants onto their shrubs.
+
+**The merge kept one correction in three, and none of the plants.**
+
+| region | first pass | second pass | ratio | old verdict |
+|---|---|---|---|---|
+| mulch bed | 10.9% | 16.8% | 1.55 | accepted |
+| lawn | 43.1% | 16.1% | **0.37** | refused |
+| driveway | 0.4% | 1.0% | **2.37** | refused |
+
+Both refusals were corrections *away from* a badly wrong answer. The
+lawn's 43.1% was inflated because the first pass had it swallowing a slab
+of house; shrinking it to 16.1% was the fix. The bounds were 0.5 and 2,
+tuned on the assumption that the first pass is roughly right and the second
+pass nudges an edge — and when the first pass is wholesale wrong, **every
+correction worth having is a large one**. A bound tuned for nudges rejects
+exactly the corrections that matter most. They are 0.2 and 5 now: wide
+enough for a wholesale relocation, tight enough to refuse a polygon that
+has collapsed or swallowed the frame.
+
+The plants failed for a dumber reason. Asked to echo
+`front_corner_mulch_bed_plant_1`, the second pass returned `plant_1`, and
+all seven corrections died on an exact string comparison. It was reported
+as `plants 0/0` — which reads as "nothing was offered" rather than
+"nothing matched", so the log hid it too. A model shortening an id it was
+told to echo is ordinary behaviour and asking more firmly is not a fix, so
+the match now tolerates one id being a tail of the other. Plant ids are
+`<regionId>_plant_<n>`, so a tail match still pins the number and the
+region is already fixed by the caller.
+
+And the plant *allowance* had the same flaw as the area bounds: a fixed
+0.15 of the frame, when a systematic correction moves the bed and
+everything standing in it together. A plant may now travel as far as its
+own region travelled, plus the original nudge — measured against the shape
+actually taken, so a refused polygon buys its plants nothing. A plant flung
+across a bed that did not move is still refused, which is what that bound
+existed for.
+
+Replayed against the real response: **outlines 3/3, plants 7/7**, every
+plant landing on the ground instead of the brickwork. Was 1/3 and 0/0.
+
+**One thing this leaves open.** Partial acceptance means the picture can
+mix passes — a bed from the second pass beside a lawn from the first,
+which is how they came to overlap in that run's `04-drawn.jpg`. With the
+bounds this wide it should be rare, but "rare" is not "impossible", and
+regions that overlap are visibly broken. If it shows up again the answer is
+probably all-or-nothing: take the whole refinement or none of it.
 
 ### What the stage table cannot tell you
 
