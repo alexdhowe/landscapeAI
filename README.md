@@ -38,6 +38,7 @@ not negotiable.
 | Correcting an outline | ✅ done — drag the edge on the photo, or nudge the whole edge in or out; the model's polygon is kept alongside |
 | "Push it out" pushing it in | ✅ fixed — the offset read its amount through `Math.abs`, so both nudge buttons moved the edge the same way |
 | What the vision call costs | ✅ instrumented — every segmentation logs one line: total, first pass, second look, and how much of the second look survived the merge |
+| The vision call's latency | ⚖️ accepted — 56-75s per upload against §2's thirty. The accuracy is worth the wait; do not optimise it away without asking |
 | The aerial leg (`/design/[id]/locate`) | ⛔ gated off — deliberately: no paid imagery or geocoder until there is a working MVP |
 
 All six phases are in, they run on Postgres, the contractor console is behind
@@ -661,10 +662,35 @@ earlier. Turning the second pass off is now strictly better on both axes:
 the outlines are the good stage-1 ones and the wait drops by 95 seconds.
 `VISION_REFINE=off` does it without touching code.
 
-The remaining 56 seconds is still nearly twice the budget and is its own
-problem — 16,000 max output tokens of polygon coordinates is most of it.
-That is a design question (fewer, better-placed vertices; a faster model for
-one or both passes), not a prompt-wording one, and it is not answered here.
+The remaining leg has since measured 56.2 s, 75.5 s and 68.8 s across three
+runs on the same photo. That is around twice section 2's budget, and
+16,000 max output tokens of polygon coordinates is most of it.
+
+**The owner has decided that trade deliberately: the accuracy is worth the
+wait.** Do not "fix" this without asking. §2's thirty seconds was written
+before anyone had measured a vision call or seen what one buys, and the
+levers that would close it — a faster model, fewer vertices, dropping the
+fields the prompt asks for — all pay for it in exactly the thing the last
+three sessions were spent recovering. If it is revisited, it is revisited
+with `npm run segment` run against both options and the two `01-model.jpg`
+compared, not by reasoning about token counts.
+
+What the wait needs is honesty on the customer's side, not removal: a
+minute is a long time to look at a progress bar with no idea whether it is
+working.
+
+### The same bed, three times
+
+Worth recording next to it, because it bears on how much accuracy is
+buyable at all. Across three runs of the identical photo, the identical
+prompt and the identical model, that bed came back at **25.5%, 22.3% and
+29.8%** of the frame — all three of them plausible-looking outlines.
+
+So run-to-run variance on this task is roughly ±15%, and no amount of
+prompt work reduces it to zero, because it is not a wording problem. That
+is the strongest argument yet for the position the outline-correction work
+already took: make correcting an edge fast and obvious, and stop chasing a
+deterministic answer that does not exist.
 
 ### And then the first pass's ground line did the same thing
 
