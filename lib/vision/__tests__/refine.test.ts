@@ -131,22 +131,49 @@ describe("mergeRefinement", () => {
     expect(mergeRefinement(regions, { polygons: new Map(), plantings: new Map() })).toEqual(regions);
   });
 
-  it("holds the corrected outlines to the ground line it reports", () => {
+  it("takes a corrected outline that reaches up the frame on its merits", () => {
+    // Reaches further up than the first pass, but within the area bounds
+    // above — a bigger correction than that is refused as a disagreement.
     const climbing: NormalizedPoint[] = [
-      [0.2, 0.2],
-      [0.8, 0.2],
+      [0.2, 0.35],
+      [0.8, 0.35],
       [0.8, 0.9],
       [0.2, 0.9],
     ];
     const [merged] = mergeRefinement([region()], {
       polygons: new Map([["bed", climbing]]),
       plantings: new Map(),
-      groundLine: [
-        [0, 0.55],
-        [1, 0.55],
-      ],
     });
-    for (const [, y] of merged.polygon) expect(y).toBeGreaterThanOrEqual(0.55);
+    // The refinement's own polygon is taken on its merits. What it may not
+    // do is bring a new ground line with it — see below.
+    expect(merged.polygon).toEqual(climbing);
+  });
+
+  it("does not let the second pass move the ground", () => {
+    // This is the bug that made a real yard unusable. The merge used to
+    // re-run the ground clamp with a ground line the *second* pass
+    // reported. On a photo of a raised stone-walled bed that line came
+    // back along the bottom edge of the frame: a 27-point bed covering
+    // 25.5% of the picture was pulled down onto it and became a 0.2%
+    // ribbon along the wall, and the tally still called it "kept".
+    //
+    // Everything except shape belongs to the pass that saw the clean
+    // photograph. A ground line is emphatically one of those things, and a
+    // pass looking at a picture with coloured lines drawn all over it is a
+    // worse judge of where the ground is, not a better one.
+    const nudged: NormalizedPoint[] = SQUARE.map(([x, y]) => [x + 0.01, y] as NormalizedPoint);
+    const shapes = { polygons: new Map([["bed", nudged]]), plantings: new Map() };
+    // A ground line at the bottom of the frame, offered the only way a
+    // caller still can — the type no longer carries one at all.
+    const [merged] = mergeRefinement([region()], {
+      ...shapes,
+      groundLine: [
+        [0, 0.95],
+        [1, 0.95],
+      ],
+    } as typeof shapes);
+    expect(merged.polygon).toEqual(nudged);
+    expect(Math.min(...merged.polygon.map(([, y]) => y))).toBeLessThan(0.95);
   });
 });
 

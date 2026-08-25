@@ -116,13 +116,27 @@ const MIN_DOUBLE_AREA = 1e-6;
  * to nothing are dropped. With no usable ground line nothing is touched,
  * which is also what every segmentation stored before this existed gets.
  *
- * The one way this could do real damage is a ground line placed too LOW —
- * at y=0.9 in a photo where the ground starts at 0.6, every region gets
- * its top pushed to the bottom of the frame and the customer is left with
- * slivers. So there is a quorum: if applying the line destroys most of
- * what the model found, the line is likelier to be wrong than all of the
+ * The one way this could do real damage is a ground line placed too LOW.
+ * There is a quorum against the worst of it: if applying the line
+ * *destroys* most of what the model found — flattens it below
+ * MIN_DOUBLE_AREA — the line is likelier to be wrong than all of the
  * regions are, and it is discarded whole. Clamping is a correction for an
  * outlier, not a rewrite of the segmentation.
+ *
+ * **Be clear about what that does not cover.** It counts regions destroyed,
+ * not area lost, so a line placed a little too low — leaving every region
+ * as a thin band rather than as nothing — passes it untouched. And it
+ * cannot help at all when a single region is the one gutted, because a
+ * single gutted region is exactly the outlier this is built to correct.
+ * A real yard hit precisely that: one bed reduced to a 0.2% ribbon while
+ * its three neighbours were only mildly trimmed, which is indistinguishable
+ * by any quorum from the case this feature exists for.
+ *
+ * The lesson was not that the quorum needs widening — every widening tried
+ * against that data also swallowed the legitimate single-outlier case. It
+ * was that a bad ground line must not get this far. See `mergeRefinement`,
+ * which used to hand this function a ground line reported by the *second*
+ * vision pass and no longer does.
  */
 const MAX_SHARE_DESTROYED = 0.5;
 

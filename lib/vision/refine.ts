@@ -22,7 +22,6 @@
  * comes back unusable, the first pass stands.
  */
 import type { OutlineLegend } from "../image/annotate";
-import { holdRegionsToGround } from "./groundLine";
 import type { NormalizedPoint, Planting, SegmentedRegion } from "./types";
 
 export function refinementPrompt(legend: readonly OutlineLegend[]): string {
@@ -45,7 +44,6 @@ Return corrected shapes in the same normalized coordinates as before: x and y be
 
 Respond with ONLY a JSON object, no other text:
 {
-  "ground_line": [[x, y], [x, y], ...],
   "regions": [
     {
       "id": "the same id",
@@ -65,7 +63,6 @@ export type RefinedShapes = {
   polygons: Map<string, NormalizedPoint[]>;
   /** Keyed by planting id, flat across regions — the ids are unique. */
   plantings: Map<string, RefinedEllipse>;
-  groundLine?: NormalizedPoint[];
 };
 
 function points(raw: unknown, minimum: number): NormalizedPoint[] | null {
@@ -107,7 +104,9 @@ export function parseRefinement(text: string, extractJson: (t: string) => string
     return empty;
   }
   if (data === null || typeof data !== "object") return empty;
-  const obj = data as { regions?: unknown; ground_line?: unknown; groundLine?: unknown };
+  // A `ground_line` the model volunteers anyway is read and dropped on the
+  // floor: this pass does not get to move the ground. See mergeRefinement.
+  const obj = data as { regions?: unknown };
   const polygons = new Map<string, NormalizedPoint[]>();
   const plantings = new Map<string, RefinedEllipse>();
   if (Array.isArray(obj.regions)) {
@@ -128,8 +127,7 @@ export function parseRefinement(text: string, extractJson: (t: string) => string
       }
     }
   }
-  const groundLine = points(obj.ground_line ?? obj.groundLine, 2) ?? undefined;
-  return groundLine ? { polygons, plantings, groundLine } : { polygons, plantings };
+  return { polygons, plantings };
 }
 
 /**
@@ -276,7 +274,22 @@ export function mergeRefinement(
     if (!polygon || !polygonCorrectionAccepted(region.polygon, polygon)) return withPlants;
     return { ...withPlants, polygon };
   });
-  // The refinement reports the ground line again, having now seen where its
-  // own outlines fell against the house. Same enforcement as the first pass.
-  return holdRegionsToGround(merged, refined.groundLine);
+  // The refinement does NOT get to re-decide the ground line, and this is
+  // the one place that rule was broken. It used to re-run the clamp with
+  // the second pass's own line, on the theory that a pass which had seen
+  // where its outlines fell was better placed to say where the ground is.
+  //
+  // It is not, and a real yard proved it. On a photo of a raised
+  // stone-walled bed the second pass returned a ground line along the
+  // bottom edge of the frame; every region was pulled down onto it, and a
+  // 27-point bed covering 25.5% of the picture became a 0.2% ribbon along
+  // the wall. The customer saw a scribble where their bed was.
+  //
+  // It is the same principle as every other field here: everything except
+  // shape was established by the pass that saw the unannotated photograph,
+  // and a pass looking at a picture with coloured lines drawn all over it
+  // is a worse judge of it, not a better one. A ground line is emphatically
+  // one of those things. The first pass's line has already been applied by
+  // the time these regions arrive.
+  return merged;
 }

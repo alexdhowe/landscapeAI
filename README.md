@@ -30,7 +30,8 @@ not negotiable.
 | Deployment configuration | ✅ done — Dockerfile, `render.yaml` (free), `fly.toml` (paid), `docs/deploy.md`. **Not yet deployed** |
 | Design pass on a photograph | ✅ done — customer copy on customer surfaces, region names that do not cover the swap, `npm run shots` actually rendering the phone |
 | Contractor login on a self-hosted deployment | ✅ fixed — `trustHost`; it threw `UntrustedHost` on every deployment target |
-| Segmentation against a real photo | ⛔ **not good enough** — two real yards came back "not even close". Priority one |
+| Segmentation against a real photo | ✅ **the model was right all along** — a real yard's bed came back at 27 vertices and 25.5% of frame; the second pass was flattening it |
+| The second pass moving the ground | ✅ fixed — it reported a ground line along the bottom of the photo and every region was pulled onto it |
 | Which stage makes an outline wrong | ✅ observable — `npm run segment` writes one image per stage; the parser no longer hides the model's own polygons |
 | Plug-and-play plants | ✅ done — hover to identify, swap one plant for another, priced and frozen like any other choice |
 | Correcting an outline | ✅ done — drag the edge on the photo, or nudge the whole edge in or out; the model's polygon is kept alongside |
@@ -42,7 +43,7 @@ All six phases are in, they run on Postgres, the contractor console is behind
 a login, the price book is editable, photos live in object storage when a
 bucket is configured, and the whole thing has been designed and opened on a
 phone — on a phone *branch*, for the first time in the twelfth session,
-which is its own story. `npm test` runs 562 tests — with a database and
+which is its own story. `npm test` runs 563 tests — with a database and
 without one.
 
 **It has not been deployed.** The tenth session wrote the configuration —
@@ -69,7 +70,7 @@ store, so a clean checkout runs the demo with nothing to provision.
 ```sh
 npm run doctor    # is this machine set up? checks .env.local, the API key (against the
                   # real API), and the console login — and says what to fix, in English.
-npm test          # Vitest — 562 tests across every phase. No server, no network, no browser.
+npm test          # Vitest — 563 tests across every phase. No server, no network, no browser.
 npm run typecheck
 npm run dev
 npm run build
@@ -583,7 +584,91 @@ does. The spacing validation in `lib/growth/spacing.ts` knows how to warn
 about crowding at year five and is not wired to this yet: it needs a scale
 in feet, which one photograph cannot give.
 
-## The outlines are wrong, and nobody knows which stage made them wrong
+## Found it: the second pass was moving the ground
+
+`npm run segment` was run on the raised-bed photo the moment it existed,
+and the four pictures answered the question in one upload.
+
+**Stage 1 was good.** The model returned a 27-vertex outline covering 25.5%
+of the frame that follows the lava-rock bed properly — along the house, down
+the right, around the capstones and back. It also read the yard correctly:
+`black lava rock / crushed volcanic stone`, a `retaining_wall` at 0.95
+confidence, a `raised_bed` at 0.85, six plants in roughly the right places.
+The recognition was never the problem.
+
+**Stage 2 changed nothing.** The first pass's ground line was applied and
+moved one vertex by 0.004. The clamp — my leading suspect, and the thing I
+would have "fixed" if I had guessed instead of measured — was innocent.
+
+**Stage 3 destroyed it.** That same bed came out of the second look as
+**0.2% of the frame**: a ribbon along the base of the wall with a spike up
+the left side. Every y-value in it lands on a smooth interpolated curve,
+which is the signature of `groundYAt`, not of a model's round numbers.
+
+`mergeRefinement` ended with this line:
+
+```ts
+return holdRegionsToGround(merged, refined.groundLine);
+```
+
+The refinement prompt asked for `ground_line` a second time, on the theory
+that a pass which had seen where its outlines fell was better placed to say
+where the ground is. Looking at a photo with coloured lines drawn all over
+it, the second pass put the ground line along the **bottom edge of the
+picture** — `groundYAt(0.5) ≈ 0.945`. Every region was then pulled down onto
+it. The customer saw a scribble where their bed was.
+
+Replayed as a unit test: a bed at 25.5% of frame, a refinement well inside
+the merge bounds, and a bottom-of-frame ground line → 0.0% area, top edge
+0.875, and the tally still reporting `1/1 kept`. Exactly the real numbers.
+
+**The fix is one line, and it is the module's own principle.** Everything
+except shape belongs to the pass that saw the clean photograph — the merge
+already refuses to let a refinement change a region's kind, label, material
+or confidence for precisely this reason. A ground line is emphatically one
+of those things. `mergeRefinement` now returns `merged`. The refinement
+prompt no longer asks for a ground line, which also takes output tokens off
+the critical path, and a `ground_line` a model volunteers anyway is read and
+dropped.
+
+### What the quorum could not have done
+
+The obvious follow-up is to widen the quorum in `groundLine.ts` so a
+disastrous line gets thrown out. **It would not have helped, and every
+version tried against the real data made things worse.**
+
+The count-based quorum only notices regions flattened to *nothing*, so it
+was never going to fire here. But an area-based one does not fire either:
+of the four regions, only the bed was gutted — the walk kept 77% of its
+area, the strip 81%, and the lawn actually grew. One gutted region among
+three mildly-trimmed ones is *exactly* the outlier the clamp exists to
+correct, and no threshold separates the two cases. An area quorum tight
+enough to catch this also discarded the legitimate single-bed-up-the-wall
+line that the whole feature was built for — it broke two existing tests on
+the first run, which is how that got caught.
+
+So the quorum is unchanged and its docblock now says plainly what it does
+and does not cover. The lesson was not that the last guard needs widening;
+it was that a bad ground line must not reach it.
+
+### The other number
+
+The first pass took **56.2 seconds** and the second **95.6 seconds** — 152
+seconds against section 2's thirty, on a 410×487 image. That is the first
+time this call has ever been measured, by the timing line added a commit
+earlier. Turning the second pass off is now strictly better on both axes:
+the outlines are the good stage-1 ones and the wait drops by 95 seconds.
+`VISION_REFINE=off` does it without touching code.
+
+The remaining 56 seconds is still nearly twice the budget and is its own
+problem — 16,000 max output tokens of polygon coordinates is most of it.
+That is a design question (fewer, better-placed vertices; a faster model for
+one or both passes), not a prompt-wording one, and it is not answered here.
+
+## How the outlines got looked at
+
+*(The diagnosis above came out of the tooling below, which was built before
+anyone knew which stage was at fault.)*
 
 Two real photographs came back with outlines that were, in the owner's
 words, "not even close" — a raised stone-walled bed whose outline covered

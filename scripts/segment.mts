@@ -159,6 +159,7 @@ async function main() {
   let first: SegmentedRegion[];
   let groundLine: NormalizedPoint[] | undefined;
   let firstText = "";
+  let secondText = "";
 
   if (credential.status === "present") {
     const client = credential.apiKey
@@ -254,13 +255,11 @@ async function main() {
         ],
       });
       console.log(`  second look: ${((Date.now() - started) / 1000).toFixed(1)}s`);
-      const shapes = parseRefinement(
-        second.content
-          .filter((b): b is { type: "text"; text: string } => b.type === "text")
-          .map((b) => b.text)
-          .join("\n"),
-        extractJson,
-      );
+      secondText = second.content
+        .filter((b): b is { type: "text"; text: string } => b.type === "text")
+        .map((b) => b.text)
+        .join("\n");
+      const shapes = parseRefinement(secondText, extractJson);
       const tally = summarizeRefinement(held, shapes);
       console.log(
         `  second look kept: outlines ${tally.outlinesAccepted}/${tally.outlinesOffered}, ` +
@@ -294,9 +293,13 @@ async function main() {
         groundLine: groundLine ?? null,
         groundLineUsable: groundLine ? Boolean(usableGroundLine(groundLine)) : false,
         stages: Object.fromEntries(stages.map((s) => [s.key, s.regions])),
-        // The unparsed reply, because a polygon that never made it through
-        // the parser is invisible in every other artifact here.
+        // The unparsed replies, because a polygon that never made it
+        // through the parser — or a field we deliberately drop, like the
+        // ground line the second pass is no longer allowed to move — is
+        // invisible in every other artifact here. Finding that one cost a
+        // round trip that this file existed to prevent.
         firstPassText: firstText || null,
+        secondPassText: secondText || null,
       },
       null,
       2,
