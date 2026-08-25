@@ -19,6 +19,7 @@ const TALLY = {
   outlinesAccepted: 3,
   plantsOffered: 7,
   plantsAccepted: 6,
+  plantsCarried: 0,
 };
 
 function timing(refinement: RefinementTiming, over: Partial<VisionTiming> = {}): VisionTiming {
@@ -62,7 +63,13 @@ describe("formatVisionTiming", () => {
         status: "merged",
         ms: 3200,
         annotateMs: 200,
-        tally: { outlinesOffered: 4, outlinesAccepted: 0, plantsOffered: 7, plantsAccepted: 1 },
+        tally: {
+          outlinesOffered: 4,
+          outlinesAccepted: 0,
+          plantsOffered: 7,
+          plantsAccepted: 1,
+          plantsCarried: 6,
+        },
       }),
     );
     expect(line).toContain("outlines 0/4 kept");

@@ -77,7 +77,11 @@ function refinementPhrase(refinement: RefinementTiming): string {
         `annotate ${seconds(refinement.annotateMs)}`,
         `second look ${seconds(refinement.ms - refinement.annotateMs)}`,
         `outlines ${tally.outlinesAccepted}/${tally.outlinesOffered} kept`,
-        `plants ${tally.plantsAccepted}/${tally.plantsOffered} kept`,
+        // Carried plants are the ones nothing was offered for, moved with
+        // their region's own correction. Worth naming: the alternative is a
+        // plant stranded outside the region it belongs to.
+        `plants ${tally.plantsAccepted}/${tally.plantsOffered} kept` +
+          (tally.plantsCarried > 0 ? ` (+${tally.plantsCarried} carried)` : ""),
       ].join(", ");
     }
   }

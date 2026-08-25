@@ -294,19 +294,125 @@ export function plantCorrectionAccepted(
   return true;
 }
 
+/**
+ * The transform a region's own accepted correction implies.
+ *
+ * Taken from the bounding boxes rather than fitted, because the thing being
+ * captured is coarse — the region went from *there* to *here*, this much
+ * smaller — and a least-squares fit over two polygons with different vertex
+ * counts would be precision this does not have.
+ */
+type BoxTransform = { sx: number; sy: number; bx: number; by: number; ax: number; ay: number };
+
+function boundingBox(ring: readonly NormalizedPoint[]) {
+  const xs = ring.map(([x]) => x);
+  const ys = ring.map(([, y]) => y);
+  return { x0: Math.min(...xs), x1: Math.max(...xs), y0: Math.min(...ys), y1: Math.max(...ys) };
+}
+
+function boxTransform(
+  before: readonly NormalizedPoint[],
+  after: readonly NormalizedPoint[],
+): BoxTransform | null {
+  if (before.length < 3 || after.length < 3) return null;
+  const b = boundingBox(before);
+  const a = boundingBox(after);
+  const bw = b.x1 - b.x0;
+  const bh = b.y1 - b.y0;
+  if (bw <= 0 || bh <= 0) return null;
+  return { sx: (a.x1 - a.x0) / bw, sy: (a.y1 - a.y0) / bh, bx: b.x0, by: b.y0, ax: a.x0, ay: a.y0 };
+}
+
+const through = (t: BoxTransform, cx: number, cy: number): NormalizedPoint => [
+  t.ax + (cx - t.bx) * t.sx,
+  t.ay + (cy - t.by) * t.sy,
+];
+
+/**
+ * How far from where a plant is *expected* to be a correction may be claimed
+ * for it. Generous, because the expectation is a coarse box transform; small
+ * enough that two shrubs a bed apart cannot be swapped.
+ */
+const MAX_PLANT_SNAP = 0.12;
+
+/**
+ * Move a region's plants with the region.
+ *
+ * Matching corrections to plants by id does not work and cannot be made to.
+ * Asked twice to echo the ids it was given, the same model returned
+ * `plant_1 … plant_8` on one run and `shrub_1 … shrub_8` on the next, for
+ * plants this pass calls `front_foundation_bed_plant_1 …`. Nine plants, then
+ * eight, renamed differently each time. No amount of instruction fixes a
+ * model that is re-describing what it sees rather than relabelling a list.
+ *
+ * So the id is a hint and the geometry is the authority. When a region's own
+ * outline correction is accepted, that correction says where everything
+ * standing in the region went — so each plant is carried through the same
+ * transform, and the model's ellipse is claimed for it only if one landed
+ * near where the plant is now expected to be.
+ *
+ * The fallback matters as much as the match. A plant left where it was while
+ * its region moves ends up **outside its own region**: the mask punches a
+ * hole in nothing, and the glyph and its tap target render on the brickwork.
+ * That is what "a couple of weird plants up in the air" looks like, and it
+ * is not a cosmetic problem — it is a plant the customer cannot tap and a
+ * shrub that gets gravel painted over it.
+ */
 function refinePlantings(
   plantings: Planting[] | undefined,
   refined: ReadonlyMap<string, RefinedEllipse>,
-  allowance: number,
-): Planting[] | undefined {
-  if (!plantings || plantings.length === 0) return plantings;
-  return plantings.map((plant) => {
-    const next = findPlantCorrection(plant, refined);
-    if (!next || !plantCorrectionAccepted(plant, next, allowance)) return plant;
-    // Its identity, its label and the customer's choice about it all stay
-    // attached to the id; only where and how big it is can move.
-    return { ...plant, cx: next.cx, cy: next.cy, rx: next.rx, ry: next.ry };
+  before: readonly NormalizedPoint[],
+  taken: readonly NormalizedPoint[] | undefined,
+): { plantings: Planting[] | undefined; matched: number; carried: number } {
+  if (!plantings || plantings.length === 0) {
+    return { plantings, matched: 0, carried: 0 };
+  }
+  const transform = taken ? boxTransform(before, taken) : null;
+  const allowance = plantAllowance(before, taken);
+  const claimed = new Set<RefinedEllipse>();
+  let matched = 0;
+  let carried = 0;
+
+  const next = plantings.map((plant) => {
+    // An id the model did echo is the strongest signal there is.
+    const byId = findPlantCorrection(plant, refined);
+    if (byId && !claimed.has(byId) && plantCorrectionAccepted(plant, byId, allowance)) {
+      claimed.add(byId);
+      matched += 1;
+      return { ...plant, cx: byId.cx, cy: byId.cy, rx: byId.rx, ry: byId.ry };
+    }
+    // Otherwise: where does this region's correction say the plant went, and
+    // did a corrected ellipse land near there?
+    if (!transform) return plant;
+    const [px, py] = through(transform, plant.cx, plant.cy);
+    let best: RefinedEllipse | undefined;
+    let bestDistance = MAX_PLANT_SNAP;
+    for (const shape of refined.values()) {
+      if (claimed.has(shape)) continue;
+      const distance = Math.hypot(shape.cx - px, shape.cy - py);
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        best = shape;
+      }
+    }
+    if (best) {
+      claimed.add(best);
+      matched += 1;
+      return { ...plant, cx: best.cx, cy: best.cy, rx: best.rx, ry: best.ry };
+    }
+    // Nothing claimed it, but its region still moved. Carry it along rather
+    // than leaving it stranded outside the region it belongs to.
+    carried += 1;
+    return {
+      ...plant,
+      cx: px,
+      cy: py,
+      rx: plant.rx * Math.abs(transform.sx),
+      ry: plant.ry * Math.abs(transform.sy),
+    };
   });
+
+  return { plantings: next, matched, carried };
 }
 
 /**
@@ -329,6 +435,12 @@ export type RefinementTally = {
   outlinesAccepted: number;
   plantsOffered: number;
   plantsAccepted: number;
+  /**
+   * Plants nothing was offered for, moved with their region's own accepted
+   * correction. Reported because it is the difference between a plant that
+   * followed its bed and one stranded on the wall behind it.
+   */
+  plantsCarried: number;
 };
 
 export function summarizeRefinement(
@@ -340,20 +452,26 @@ export function summarizeRefinement(
     outlinesAccepted: 0,
     plantsOffered: 0,
     plantsAccepted: 0,
+    plantsCarried: 0,
   };
   for (const region of regions) {
     const polygon = refined.polygons.get(region.id);
+    const takeShape = polygon !== undefined && polygonCorrectionAccepted(region.polygon, polygon);
     if (polygon) {
       tally.outlinesOffered += 1;
-      if (polygonCorrectionAccepted(region.polygon, polygon)) tally.outlinesAccepted += 1;
+      if (takeShape) tally.outlinesAccepted += 1;
     }
-    const allowance = plantAllowance(region.polygon, polygon);
-    for (const plant of region.plantings ?? []) {
-      const next = findPlantCorrection(plant, refined.plantings);
-      if (!next) continue;
-      tally.plantsOffered += 1;
-      if (plantCorrectionAccepted(plant, next, allowance)) tally.plantsAccepted += 1;
-    }
+    // Counted from the same routine the merge uses, so the line and the
+    // regions cannot come to disagree about what was kept.
+    const { matched, carried } = refinePlantings(
+      region.plantings,
+      refined.plantings,
+      region.polygon,
+      takeShape ? polygon : undefined,
+    );
+    tally.plantsOffered += (region.plantings ?? []).length;
+    tally.plantsAccepted += matched;
+    tally.plantsCarried += carried;
   }
   return tally;
 }
@@ -365,12 +483,12 @@ export function mergeRefinement(
   const merged = regions.map((region) => {
     const polygon = refined.polygons.get(region.id);
     const takeShape = polygon !== undefined && polygonCorrectionAccepted(region.polygon, polygon);
-    // The plants move with the region they stand in, so their allowance is
-    // measured against the shape actually being taken.
-    const plantings = refinePlantings(
+    // The plants move with the region they stand in.
+    const { plantings } = refinePlantings(
       region.plantings,
       refined.plantings,
-      plantAllowance(region.polygon, takeShape ? polygon : undefined),
+      region.polygon,
+      takeShape ? polygon : undefined,
     );
     const withPlants = plantings === region.plantings ? region : { ...region, plantings };
     return takeShape ? { ...withPlants, polygon: polygon! } : withPlants;

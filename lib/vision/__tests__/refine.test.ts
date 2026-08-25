@@ -89,9 +89,11 @@ describe("mergeRefinement", () => {
     expect(merged.existingMaterial).toBe("hardwood mulch");
     expect(merged.estimatedAreaSf).toBe(300);
     expect(merged.confidence).toBe(0.85);
-    expect(merged.plantings).toEqual([
-      { id: "bed_plant_1", cx: 0.5, cy: 0.75, rx: 0.05, ry: 0.05 },
-    ]);
+    // The plant keeps its identity. Its position is not "nothing else": it
+    // moves with the region, because a plant left behind when its bed moves
+    // ends up outside the bed it belongs to.
+    expect(merged.plantings).toHaveLength(1);
+    expect(merged.plantings![0].id).toBe("bed_plant_1");
   });
 
   it("keeps the first pass's shape when the correction collapses or explodes it", () => {
@@ -340,8 +342,12 @@ describe("summarizeRefinement", () => {
     ).toEqual({
       outlinesOffered: 1,
       outlinesAccepted: 1,
-      plantsOffered: 0,
+      // `plantsOffered` is now every plant in the region, not only the ones
+      // the model named. Nothing was offered for this one, so it is carried
+      // by the region's own accepted correction rather than left behind.
+      plantsOffered: 1,
       plantsAccepted: 0,
+      plantsCarried: 1,
     });
   });
 
@@ -373,6 +379,7 @@ describe("summarizeRefinement", () => {
       outlinesAccepted: 0,
       plantsOffered: 1,
       plantsAccepted: 1,
+      plantsCarried: 0,
     });
   });
 
@@ -395,8 +402,11 @@ describe("summarizeRefinement", () => {
     expect(tally).toEqual({
       outlinesOffered: 0,
       outlinesAccepted: 0,
-      plantsOffered: 0,
+      // The region's plant is still counted — it is simply not corrected,
+      // and with no accepted outline there is nothing to carry it either.
+      plantsOffered: 1,
       plantsAccepted: 0,
+      plantsCarried: 0,
     });
   });
 
@@ -415,12 +425,10 @@ describe("summarizeRefinement", () => {
         ["p2", { cx: 0.3, cy: 0.8, rx: 0.004, ry: 0.04 }],
       ]),
     });
-    expect(tally).toEqual({
-      outlinesOffered: 2,
-      outlinesAccepted: 1,
-      plantsOffered: 2,
-      plantsAccepted: 1,
-    });
+    expect(tally.outlinesOffered).toBe(2);
+    expect(tally.outlinesAccepted).toBe(1);
+    expect(tally.plantsOffered).toBe(2);
+    expect(tally.plantsAccepted).toBe(1);
   });
 });
 
@@ -445,10 +453,12 @@ describe("matching a correction to the plant it is for", () => {
       polygons: new Map(),
       plantings: new Map([["plant_1", { cx: 0.32, cy: 0.72, rx: 0.045, ry: 0.045 }]]),
     };
-    expect(summarizeRefinement([plants()], shapes).plantsOffered).toBe(1);
+    // One of the two plants had a correction claimed for it by its id.
+    expect(summarizeRefinement([plants()], shapes).plantsAccepted).toBe(1);
     const [merged] = mergeRefinement([plants()], shapes);
     expect(merged.plantings![0].cx).toBeCloseTo(0.32, 6);
-    // The plant it does not name is untouched.
+    // No outline correction here, so the plant it does not name is untouched
+    // — there is no region movement to carry it.
     expect(merged.plantings![1].cx).toBeCloseTo(0.6, 6);
   });
 
@@ -515,5 +525,101 @@ describe("how far a plant may travel", () => {
     });
     expect(merged.polygon).toEqual(bed);
     expect(merged.plantings![0].cy).toBeCloseTo(0.4, 6);
+  });
+});
+
+describe("plants moving with the region they stand in", () => {
+  // Matching corrections to plants by id does not work and cannot be made
+  // to. Asked twice to echo the ids it was given, the same model returned
+  // `plant_1 … plant_8` on one run and `shrub_1 … shrub_8` on the next, for
+  // plants this pass calls `front_foundation_bed_plant_1 …` — nine plants,
+  // then eight, renamed differently each time. So the id is a hint and the
+  // geometry is the authority.
+  const bed: NormalizedPoint[] = [
+    [0.1, 0.3],
+    [0.9, 0.3],
+    [0.9, 0.5],
+    [0.1, 0.5],
+  ];
+  /** The same bed, found lower down and a little shallower. */
+  const corrected: NormalizedPoint[] = [
+    [0.1, 0.6],
+    [0.9, 0.6],
+    [0.9, 0.75],
+    [0.1, 0.75],
+  ];
+  const withPlants = (): SegmentedRegion =>
+    region({
+      id: "bed",
+      polygon: bed,
+      plantings: [
+        { id: "bed_plant_1", cx: 0.3, cy: 0.4, rx: 0.05, ry: 0.05 },
+        { id: "bed_plant_2", cx: 0.7, cy: 0.4, rx: 0.05, ry: 0.05 },
+      ],
+    });
+
+  it("claims a correction that landed where the plant is now expected", () => {
+    // Named `shrub_3`, which matches no id we hold. It is claimed because
+    // it sits about where the region's own correction says plant_1 went.
+    const [merged] = mergeRefinement([withPlants()], {
+      polygons: new Map([["bed", corrected]]),
+      plantings: new Map([["shrub_3", { cx: 0.31, cy: 0.68, rx: 0.06, ry: 0.04 }]]),
+    });
+    expect(merged.plantings![0].cx).toBeCloseTo(0.31, 6);
+    expect(merged.plantings![0].cy).toBeCloseTo(0.68, 6);
+    // And it keeps its own identity, which the customer's choices hang off.
+    expect(merged.plantings![0].id).toBe("bed_plant_1");
+  });
+
+  it("carries a plant nothing was offered for", () => {
+    // The failure this exists for: a plant left where it was while its bed
+    // moves ends up outside the bed. The mask punches a hole in nothing and
+    // the glyph renders on the wall behind — "weird plants up in the air".
+    const [merged] = mergeRefinement([withPlants()], {
+      polygons: new Map([["bed", corrected]]),
+      plantings: new Map(),
+    });
+    const top = Math.min(...corrected.map(([, y]) => y));
+    const bottom = Math.max(...corrected.map(([, y]) => y));
+    for (const plant of merged.plantings!) {
+      expect(plant.cy, plant.id).toBeGreaterThanOrEqual(top);
+      expect(plant.cy, plant.id).toBeLessThanOrEqual(bottom);
+    }
+  });
+
+  it("does not move plants when the outline correction was refused", () => {
+    // No accepted movement, nothing to carry them by.
+    const exploded: NormalizedPoint[] = [
+      [0, 0],
+      [1, 0],
+      [1, 1],
+      [0, 1],
+    ];
+    const [merged] = mergeRefinement([withPlants()], {
+      polygons: new Map([["bed", exploded]]),
+      plantings: new Map(),
+    });
+    expect(merged.plantings![0].cy).toBeCloseTo(0.4, 6);
+  });
+
+  it("will not let two plants claim the same correction", () => {
+    const [merged] = mergeRefinement([withPlants()], {
+      polygons: new Map([["bed", corrected]]),
+      plantings: new Map([["shrub_1", { cx: 0.3, cy: 0.68, rx: 0.05, ry: 0.05 }]]),
+    });
+    const claimed = merged.plantings!.filter(
+      (p) => Math.abs(p.cx - 0.3) < 1e-6 && Math.abs(p.cy - 0.68) < 1e-6,
+    );
+    expect(claimed).toHaveLength(1);
+  });
+
+  it("counts what it matched and what it carried", () => {
+    const tally = summarizeRefinement([withPlants()], {
+      polygons: new Map([["bed", corrected]]),
+      plantings: new Map([["shrub_1", { cx: 0.31, cy: 0.68, rx: 0.05, ry: 0.05 }]]),
+    });
+    expect(tally.plantsOffered).toBe(2);
+    expect(tally.plantsAccepted).toBe(1);
+    expect(tally.plantsCarried).toBe(1);
   });
 });
