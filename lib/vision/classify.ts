@@ -19,7 +19,7 @@ import {
 import { reportVisionTiming, type RefinementTiming } from "./timing";
 import type { SegmentationResult } from "./types";
 
-const SEGMENTATION_PROMPT = `You are analyzing a homeowner's photo of their yard for a landscape design tool.
+export const SEGMENTATION_PROMPT = `You are analyzing a homeowner's photo of their yard for a landscape design tool.
 
 COORDINATES. Everything you return is in normalized image coordinates: x and y between 0 and 1, origin at the TOP-LEFT corner, x rightward, y downward. y=0 is the very top edge of the image — usually sky or roof. y=1 is the very bottom edge — usually the ground closest to the camera. A point halfway down the image is y=0.5 whether or not anything interesting is there.
 
@@ -81,7 +81,7 @@ If the photo shows no yard at all, return {"ground_line": [], "regions": [], "ve
 
 export { hasVisionCredentials } from "./credentials";
 
-const MODEL = "claude-opus-5";
+export const MODEL = "claude-opus-5";
 
 /**
  * The refinement pass costs a second vision call, which is real latency

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { extractJson, parseSegmentation } from "../parse";
+import { extractJson, parseSegmentation, parseSegmentationRaw } from "../parse";
 
 const validResponse = JSON.stringify({
   regions: [
@@ -320,6 +320,39 @@ describe("the ground line", () => {
     expect(parseSegmentation(response([[0, 0.6], [1, 0.6]], 0.25))).not.toHaveProperty(
       "groundLine",
     );
+  });
+
+  it("leaves the model's own polygon alone in the raw parse", () => {
+    // The clamp is a policy of ours, and for as long as it lived inside
+    // the parser there was no way to tell an outline the model placed
+    // badly from one we moved. Three rounds of prompt work were spent on
+    // the assumption it was the former. `npm run segment` compares the
+    // two, and this is the property that makes that comparison mean
+    // anything: raw is what was said, before we touch it.
+    const body = response([[0, 0.6], [1, 0.6]], 0.25);
+    expect(parseSegmentationRaw(body).regions[0].polygon[0]).toEqual([0.1, 0.25]);
+    expect(parseSegmentation(body).regions[0].polygon[0]).toEqual([0.1, 0.6]);
+  });
+
+  it("carries the reported ground line on the raw parse, so it can be drawn", () => {
+    expect(parseSegmentationRaw(response([[0, 0.6], [1, 0.6]], 0.25)).groundLine).toEqual([
+      [0, 0.6],
+      [1, 0.6],
+    ]);
+  });
+
+  it("shows a ground line the quorum threw away, which the clamped parse cannot", () => {
+    // A line at 0.9 would flatten this region to nothing, so the quorum
+    // discards the line whole and the region comes through untouched.
+    // That is the right call — but from the clamped result alone it is
+    // indistinguishable from the model never having reported a line, and
+    // those two want completely different fixes.
+    const body = response([[0, 0.9], [1, 0.9]], 0.2);
+    expect(parseSegmentation(body).regions[0].polygon[0]).toEqual([0.1, 0.2]);
+    expect(parseSegmentationRaw(body).groundLine).toEqual([
+      [0, 0.9],
+      [1, 0.9],
+    ]);
   });
 
   it("leaves a region that already sits on the ground alone", () => {

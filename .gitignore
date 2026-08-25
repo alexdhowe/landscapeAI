@@ -31,3 +31,6 @@ yarn-error.log*
 # local project store (photos + play-stage designs)
 /.data
 .shots/
+
+# stage-by-stage segmentation dumps (npm run segment)
+.segment/

@@ -180,14 +180,31 @@ function parseVerticalElements(raw: unknown): VerticalElement[] {
 }
 
 /**
- * Parse model text into a SegmentationResult. Invalid regions are dropped
- * rather than failing the whole response; throws only when no JSON object
- * can be recovered at all.
+ * What the model actually said, before anything of ours moves it.
+ *
+ * This is the stage nobody could see. The ground-line clamp used to run
+ * inside the parser, so by the time a region reached any caller — the
+ * design page, a screenshot, a person deciding whether the prompt needs
+ * another round — it had already been through a geometry policy of ours,
+ * with no way to tell which of the two put it where it is. Three rounds of
+ * prompt work were aimed at the model on the assumption that the model was
+ * what was wrong, and that assumption has never once been checked against
+ * the model's own output.
+ *
+ * So the parse and the policy are separate now. `parseSegmentation` still
+ * applies the clamp and still returns exactly what it always did; this is
+ * the same work with the last step left off, for anyone who needs to see
+ * where an outline came from.
  */
-export function parseSegmentation(
+export type RawSegmentation = SegmentationResult & {
+  /** As reported, whether or not it was usable. */
+  groundLine?: NormalizedPoint[];
+};
+
+export function parseSegmentationRaw(
   text: string,
   source: SegmentationResult["source"] = "claude",
-): SegmentationResult {
+): RawSegmentation {
   let data: unknown;
   try {
     data = JSON.parse(extractJson(text));
@@ -242,16 +259,34 @@ export function parseSegmentation(
     ? rawCannotSee.filter((s): s is string => typeof s === "string" && s.trim() !== "")
     : [];
 
-  // The prompt has always forbidden outlining the house; this is where
-  // that stops being a request. A region drawn up the wall is pulled back
-  // down to the ground line, and one drawn entirely on the wall is
-  // dropped. Without a usable ground line nothing moves.
   const groundLine = parsePolyline(obj.ground_line ?? obj.groundLine) ?? undefined;
 
   return {
-    regions: holdRegionsToGround(regions, groundLine),
+    regions,
     verticalElements: parseVerticalElements(obj.vertical_elements ?? obj.verticalElements),
     cannotSee,
     source,
+    ...(groundLine ? { groundLine } : {}),
   };
+}
+
+/**
+ * Parse model text into a SegmentationResult. Invalid regions are dropped
+ * rather than failing the whole response; throws only when no JSON object
+ * can be recovered at all.
+ *
+ * The prompt has always forbidden outlining the house; the clamp here is
+ * where that stops being a request. A region drawn up the wall is pulled
+ * back down to the ground line, and one drawn entirely on the wall is
+ * dropped. Without a usable ground line nothing moves.
+ */
+export function parseSegmentation(
+  text: string,
+  source: SegmentationResult["source"] = "claude",
+): SegmentationResult {
+  // The ground line does not survive into the result: it is an input,
+  // consumed here. Carrying it would mean either a column nobody queries
+  // or a result that does not round-trip through the store.
+  const { groundLine, ...raw } = parseSegmentationRaw(text, source);
+  return { ...raw, regions: holdRegionsToGround(raw.regions, groundLine) };
 }

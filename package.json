@@ -20,6 +20,7 @@
     "db:seed": "tsx scripts/db-seed.ts",
     "db:setup": "npm run db:migrate && npm run db:seed",
     "db:user": "tsx scripts/db-user.ts",
+    "segment": "tsx scripts/segment.mts",
     "shots": "tsx scripts/screenshots.mts"
   },
   "dependencies": {

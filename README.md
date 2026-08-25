@@ -30,7 +30,8 @@ not negotiable.
 | Deployment configuration | ✅ done — Dockerfile, `render.yaml` (free), `fly.toml` (paid), `docs/deploy.md`. **Not yet deployed** |
 | Design pass on a photograph | ✅ done — customer copy on customer surfaces, region names that do not cover the swap, `npm run shots` actually rendering the phone |
 | Contractor login on a self-hosted deployment | ✅ fixed — `trustHost`; it threw `UntrustedHost` on every deployment target |
-| Segmentation against a real photo | ⚠️ improved, unverified — ground line, denser outlines, a self-correcting second pass. Needs a key and a yard to judge |
+| Segmentation against a real photo | ⛔ **not good enough** — two real yards came back "not even close". Priority one |
+| Which stage makes an outline wrong | ✅ observable — `npm run segment` writes one image per stage; the parser no longer hides the model's own polygons |
 | Plug-and-play plants | ✅ done — hover to identify, swap one plant for another, priced and frozen like any other choice |
 | Correcting an outline | ✅ done — drag the edge on the photo, or nudge the whole edge in or out; the model's polygon is kept alongside |
 | "Push it out" pushing it in | ✅ fixed — the offset read its amount through `Math.abs`, so both nudge buttons moved the edge the same way |
@@ -41,7 +42,7 @@ All six phases are in, they run on Postgres, the contractor console is behind
 a login, the price book is editable, photos live in object storage when a
 bucket is configured, and the whole thing has been designed and opened on a
 phone — on a phone *branch*, for the first time in the twelfth session,
-which is its own story. `npm test` runs 551 tests — with a database and
+which is its own story. `npm test` runs 554 tests — with a database and
 without one.
 
 **It has not been deployed.** The tenth session wrote the configuration —
@@ -68,10 +69,14 @@ store, so a clean checkout runs the demo with nothing to provision.
 ```sh
 npm run doctor    # is this machine set up? checks .env.local, the API key (against the
                   # real API), and the console login — and says what to fix, in English.
-npm test          # Vitest — 551 tests across every phase. No server, no network, no browser.
+npm test          # Vitest — 554 tests across every phase. No server, no network, no browser.
 npm run typecheck
 npm run dev
 npm run build
+
+npm run segment   # dev-only: segment one photo and write what every stage did to
+                  # the outlines — the model's own polygons, after the ground
+                  # clamp, after the second look, and as drawn. Needs a key.
 
 npm run shots     # dev-only: drive the customer flow in a real browser at
                   # 390x844 and 1440x900, capture every surface, and audit
@@ -577,6 +582,87 @@ architecture, not a plant-specific gap, and it closes when the aerial leg
 does. The spacing validation in `lib/growth/spacing.ts` knows how to warn
 about crowding at year five and is not wired to this yet: it needs a scale
 in feet, which one photograph cannot give.
+
+## The outlines are wrong, and nobody knows which stage made them wrong
+
+Two real photographs came back with outlines that were, in the owner's
+words, "not even close" — a raised stone-walled bed whose outline covered
+the wall and a fraction of the lava rock, and a curved mulch bed with a
+third of its area left out. Outline accuracy is the product: if a
+homeowner cannot get their areas recognised, nothing downstream of that
+matters.
+
+**The important thing about that report is what it cannot tell us.** What
+the customer sees is not the model's output. It is the model's output
+after four transformations of ours:
+
+| Stage | What it does | Can move an outline |
+|---|---|---|
+| 1 — the model | polygons from the photograph | — |
+| 2 — the ground line | pulls ground regions off the wall (`lib/vision/groundLine.ts`) | down, or drops the region |
+| 3 — the second look | corrects outlines, merge bounds decide how much is kept | anywhere within bounds |
+| 4 — drawing | corner-cutting, then the material inset | inward |
+
+Three rounds of prompt work have gone into stage 1, on the assumption that
+stage 1 is what is wrong. **That assumption has never been checked**, and
+until this session it could not be: `parseSegmentation` applied the ground
+clamp *inside the parser*, so the model's own polygons were discarded
+before any caller — the design page, a screenshot, a person deciding
+whether the prompt needs another round — could see them. Every judgement
+ever made about this model's segmentation has been made by looking at
+stage 4.
+
+### What was measured
+
+The parse and the clamp are separate now (`parseSegmentationRaw` returns
+what was said; `parseSegmentation` is that plus the policy, unchanged), and
+two of the four stages can be quantified without a key:
+
+- **Corner cutting costs real area on a coarse polygon.** Measured across
+  regular n-gons: 10.8% of area at 5 vertices, 7.8% at 6, 4.6% at 8, 3.0%
+  at 10, 0.8% at 20, 0.2% at 40. The smoothing was designed for the 20–40
+  vertices the prompt asks for and is close to free there. On the handful
+  of vertices the model actually tends to return, it both shrinks the
+  region and rounds off corners that were right — which is where the
+  blobby look comes from. It is not, on its own, big enough to explain
+  "not even close".
+- **The material inset is a fixed fraction of the frame, not of the
+  region.** `npm run segment` reports it: on the demo overlay it takes up
+  to 11% of a small region's area, against a fraction of a percent of a
+  large one. A narrow bed loses proportionally far more than a lawn.
+
+The stage that can move an outline *arbitrarily far* is the ground clamp,
+and its guard has a hole: the quorum that protects against a badly placed
+ground line counts regions **destroyed** — flattened below `1e-6` area. A
+line placed too low leaves every region as a thin band near the bottom of
+the frame, and a band has area, so the quorum never fires. Verified: three
+regions against a ground line at 0.9 when the ground starts at 0.55 all
+survive as slivers. Its own comment describes exactly that failure as the
+thing it prevents. It does not.
+
+Whether that is what happened to these two photographs is **not** known,
+and guessing at it is how the last three rounds were spent.
+
+### `npm run segment`
+
+```sh
+npm run segment -- --photo ./yard.jpg
+```
+
+One photo, the same bytes and the same prompt production uses, and one
+image per stage written to `.segment/`: `01-model.jpg`, `02-ground.jpg`,
+`03-refined.jpg`, `04-drawn.jpg`, the annotated frame that was sent for the
+second look, and `segmentation.json` with the unparsed reply in it. Then a
+table of vertices, share of frame and topmost vertex per region per stage.
+
+The question stops being "why is the model bad at this" and becomes "which
+picture stops looking like the yard", which is a question a single upload
+answers. If `01-model.jpg` is already wrong, the mechanism has to change
+and no amount of prompt wording will do it. If it is right and
+`02-ground.jpg` is wrong, the bug is ours and it is a day's work.
+
+Without a key it runs the demo overlay through the same stages and says so,
+in those words, so the pictures cannot be read as if they meant something.
 
 ## Two buttons that did the same thing, and a call nobody had timed
 
