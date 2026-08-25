@@ -34,6 +34,7 @@ import path from "node:path";
 
 import Anthropic from "@anthropic-ai/sdk";
 
+import { loadEnvLocal } from "../lib/env/localFile";
 import { annotateOutlines } from "../lib/image/annotate";
 import { normalizePhoto } from "../lib/image/normalize";
 import { insetOutline, smoothOutline } from "../lib/design/outline";
@@ -49,6 +50,13 @@ import {
   summarizeRefinement,
 } from "../lib/vision/refine";
 import type { NormalizedPoint, SegmentedRegion } from "../lib/vision/types";
+
+// Imports hoist, so this is the first thing that actually runs — which is
+// all that is required, since credentials are read at call time inside
+// main(). Next.js loads .env.local itself; a tsx script does not, and a
+// diagnostic that reports "no API key" on a machine that has one is worse
+// than no diagnostic at all.
+const env = loadEnvLocal();
 
 const args = new Map<string, string>();
 for (let i = 2; i < process.argv.length; i += 2) {
@@ -132,11 +140,19 @@ async function main() {
   );
 
   const credential = readCredential();
-  if (credential.status !== "present") {
+  if (credential.status === "present") {
+    console.log(
+      env.applied.includes("ANTHROPIC_API_KEY")
+        ? `  key: from ${env.path}`
+        : `  key: from the shell environment${env.found ? ` (overriding ${env.path})` : ""}`,
+    );
+  } else {
     console.log(
       `\n  NO ANTHROPIC_API_KEY — running the demo overlay through the same stages.` +
         `\n  The pictures below are of the fixture, not of your photograph, and say` +
-        `\n  nothing about how well anything is recognised. Run \`npm run doctor\`.`,
+        `\n  nothing about how well anything is recognised.` +
+        `\n  ${env.found ? `Read ${env.path} and found no key in it.` : `No ${env.path}.`}` +
+        `\n  Run \`npm run doctor\` — it checks the key against the real API.`,
     );
   }
 
@@ -308,6 +324,18 @@ async function main() {
 }
 
 main().catch((error) => {
-  console.error(error instanceof Error ? error.message : error);
+  const message = error instanceof Error ? error.message : String(error);
+  // The one failure worth translating. A raw 401 body sends people looking
+  // at this script; the key is what is wrong, and doctor already knows how
+  // to say which way it is wrong.
+  if (/authentication_error|invalid x-api-key|401/i.test(message)) {
+    console.error(
+      `\n  The API rejected the key.` +
+        `\n  ${env.applied.includes("ANTHROPIC_API_KEY") ? `It came from ${env.path}.` : "It came from the shell environment."}` +
+        `\n  Run \`npm run doctor\` — it checks the key against the real API and says what to fix.\n`,
+    );
+  } else {
+    console.error(`\n  ${message}\n`);
+  }
   process.exit(1);
 });

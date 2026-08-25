@@ -17,10 +17,11 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 
+import { envFilePath, parseEnvFile } from "../lib/env/localFile";
 import { cleanKey, looksLikeAnthropicKey } from "../lib/vision/credentials";
 
 const ROOT = process.cwd();
-const ENV_FILE = path.join(ROOT, ".env.local");
+const ENV_FILE = envFilePath(ROOT);
 
 /** The public prefix and the tail, never the middle. */
 const preview = (key: string) =>
@@ -37,19 +38,9 @@ const fail = (m: string, fix: string) => {
   info(`→ ${fix}`);
 };
 
-/** Parse KEY=VALUE lines. Deliberately not a dotenv dependency: this has to
- *  work on a checkout where `npm ci` is the step that failed. */
-function parseEnvFile(contents: string): Record<string, string> {
-  const values: Record<string, string> = {};
-  for (const line of contents.split(/\r?\n/)) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#")) continue;
-    const eq = trimmed.indexOf("=");
-    if (eq === -1) continue;
-    values[trimmed.slice(0, eq).trim()] = cleanKey(trimmed.slice(eq + 1));
-  }
-  return values;
-}
+// The parse moved to lib/env/localFile.ts when `npm run segment` needed to
+// read the same file: doctor reports on it, that script loads it, and two
+// copies of this would eventually disagree about what the file says.
 
 async function main() {
   console.log(`\nlandscapeAI setup check`);

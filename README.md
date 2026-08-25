@@ -42,7 +42,7 @@ All six phases are in, they run on Postgres, the contractor console is behind
 a login, the price book is editable, photos live in object storage when a
 bucket is configured, and the whole thing has been designed and opened on a
 phone — on a phone *branch*, for the first time in the twelfth session,
-which is its own story. `npm test` runs 554 tests — with a database and
+which is its own story. `npm test` runs 562 tests — with a database and
 without one.
 
 **It has not been deployed.** The tenth session wrote the configuration —
@@ -69,7 +69,7 @@ store, so a clean checkout runs the demo with nothing to provision.
 ```sh
 npm run doctor    # is this machine set up? checks .env.local, the API key (against the
                   # real API), and the console login — and says what to fix, in English.
-npm test          # Vitest — 554 tests across every phase. No server, no network, no browser.
+npm test          # Vitest — 562 tests across every phase. No server, no network, no browser.
 npm run typecheck
 npm run dev
 npm run build
