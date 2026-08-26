@@ -749,6 +749,29 @@ shrubs, 2 carried, none left above the bed.** Was nine out of nine on the
 brick. The log line says so too — `plants 7/9 kept (+2 carried)` — because
 a carried plant and a corrected one are different facts.
 
+### Where that left it
+
+Run again on the same brick-house photo with everything in place:
+
+| region | 1 model | 2 ground | 3 second look | 4 drawn |
+|---|---|---|---|---|
+| mulch bed | 12.8% | 12.7% | **20.8%** | 20.7% |
+| lawn | 44.3% | 44.3% | **19.3%** | 19.4% |
+| driveway | 0.4% | 0.3% | 1.3% | 1.3% |
+
+Bed on the mulch, lawn on the grass, and all seven plants inside the bed's
+own outline — six matched to the model's ellipses, one carried. The first
+pass is still placing this yard about 0.2 of the frame too high on every
+run; the second pass has corrected it on every run since the merge stopped
+refusing the corrections.
+
+**Still open: a region nobody needs.** The driveway comes back as a sliver
+at the frame edge — 0.4% of the picture, confidence 0.45, with the model's
+own note "only a sliver visible" — and it still gets a name, a colour and a
+swatch on the customer's photo. A confidence or minimum-area floor would
+drop it. That is a product decision and not a bug, and the threshold is easy
+to set wrong: too eager and it hides a narrow bed that is genuinely the job.
+
 ### The second pass was right and we were binning it
 
 The obvious response to the section below was to switch the second pass

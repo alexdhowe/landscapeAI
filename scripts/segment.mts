@@ -282,6 +282,10 @@ async function main() {
       console.log(
         `  second look kept: outlines ${tally.outlinesAccepted}/${tally.outlinesOffered}, ` +
           `plants ${tally.plantsAccepted}/${tally.plantsOffered}` +
+          // Carried plants are not left behind — they moved with their
+          // region. Saying "6/7" without them reads as one plant stranded on
+          // the wall, which is the exact ambiguity that hid "plants 0/0".
+          (tally.plantsCarried > 0 ? ` (+${tally.plantsCarried} carried)` : "") +
           (tally.outlinesOffered > tally.outlinesAccepted
             ? "  ← refused corrections are the merge bounds, not the model"
             : ""),
