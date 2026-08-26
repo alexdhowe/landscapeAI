@@ -62,13 +62,14 @@ deployment.
 | A reload during that wait | ✅ fixed — it bought a second metered vision call for an answer the first one was already producing |
 | A ring of old mulch around every plant | ✅ fixed — the cut-out was 18% wider than the plant and then blurred wider still; the material now reaches the plant's own edge |
 | "Granite that just colours the mulch grey" | ✅ fixed — the filters ran in linearRGB, the noise was never spread across its ramp, one generator served six materials, and the photo's own grain was multiplied back at full detail |
+| A bed of boulders | ✅ fixed — the gauge was a fraction of the frame, which is not a gauge: a "1.5in river rock" was drawn about twelve times life size. It comes from the region's own reported area now |
 | The aerial leg (`/design/[id]/locate`) | ⛔ gated off — deliberately: no paid imagery or geocoder until there is a working MVP |
 
 All six phases are in, they run on Postgres, the contractor console is behind
 a login, the price book is editable, photos live in object storage when a
 bucket is configured, and the whole thing has been designed and opened on a
 phone — on a phone *branch*, for the first time in the twelfth session,
-which is its own story. `npm test` runs 620 tests — with a database and
+which is its own story. `npm test` runs 634 tests — with a database and
 without one.
 
 **It has not been deployed.** The tenth session wrote the configuration —
@@ -95,7 +96,7 @@ store, so a clean checkout runs the demo with nothing to provision.
 ```sh
 npm run doctor    # is this machine set up? checks .env.local, the API key (against the
                   # real API), and the console login — and says what to fix, in English.
-npm test          # Vitest — 620 tests across every phase. No server, no network, no browser.
+npm test          # Vitest — 634 tests across every phase. No server, no network, no browser.
 npm run typecheck
 npm run dev
 npm run build
@@ -621,6 +622,81 @@ under a shrub, the sunlit half of a yard — and none of the material.
 | Buff limestone | between the two | lit, matte |
 | Hardwood / dyed / cedar mulch | strands, not specks | matte, anisotropic grain |
 
+### The stones were the size of dinner plates
+
+The material work above shipped and the next real yard came back looking,
+in the owner's words, "a little bit goofy — maybe the scaling or the angle
+doesn't match". It was the scaling, and it was not subtle once measured.
+
+A material's grain was a base frequency written as a fraction of the
+frame: one period every 29 pixels of a 1600px photo. **That is not a
+gauge.** A photo taken from a front walk and one taken across a parking
+lot show wildly different amounts of ground in the same 1600 pixels, and
+the same constant drew the same stone in both. Against the first bed with
+a number on it — 300 sf, from the model's own `estimated_area_sf` — the
+arithmetic is:
+
+| material | physical | drawn | |
+|---|---|---|---|
+| Washed river rock, 1.5in | 2.5 px | 29 px | ~12× life size |
+| Buff limestone, 3/4in | 1.2 px | 29 px | ~23× |
+| Granite chips, 3/8in | 0.6 px | 29 px | ~46× |
+
+Twelve times life size is a 1.5 inch stone drawn eighteen inches across.
+Nothing about the colour was wrong; the customer was looking at a bed of
+boulders, and a person reads that instantly without being able to name it.
+
+**The photograph carries a ruler already.** The segmentation reports
+`estimated_area_sf` for every region — the model's honest guess from door
+widths, siding courses, walkway widths — and against the polygon's area in
+pixels that is a scale: √(px² ÷ sf) pixels to the foot. Failing that, the
+plant ellipses are a ruler of last resort, because a shrub in a front bed
+is about three feet across. `lib/design/scale.ts` is those two rulers, a
+plausibility range that refuses a nonsense answer rather than believing
+it, and an assumed forty-foot frame for a region that carries neither.
+
+Using a QA-only number to *draw* with is worth stating plainly: it stays
+un-billable, unshown and unpriced, and §1's "the image is a view, never
+the artifact" is exactly the licence. A rough scale is the right input to
+a picture and the wrong input to an invoice.
+
+**The gauge is compressed, not scaled, and that is deliberate.** A 3/8in
+chip in a bed photographed from the street is half a pixel across:
+physically correct and useless, because the customer is choosing between
+granite chips and river rock and the picture has to show a difference. So
+the drawn gauge is `3 · physical^0.6`, which keeps the ordering — river
+rock coarser than limestone coarser than granite, always — while lifting
+the fine end into visibility and holding the coarse end far below the 29px
+that caused this. A test asserts that nothing, at any distance or any
+gauge, can reach it again.
+
+**And the lighting had to go.** The previous pass built river rock out of
+`feDiffuseLighting` over the noise, with a specular sheen — genuinely
+good-looking at the old enormous gauge, and impossible at the correct one.
+`feDiffuseLighting` derives its normals from a fixed **three-pixel**
+kernel, so it is not scale-invariant: measured, it spans 0.43–0.84 of the
+range at a 20px gauge and collapses to 0.63–0.71 at 5px, which is the flat
+wash the ramps were retuned to escape. Greyed noise has no kernel and
+measures the same band at both. So tone comes from the grain itself now,
+and what separates a stone from a shred is the shape of the grain
+(`turbulence` lumps against `fractalNoise` strands), its contrast and its
+colour. At a stone four pixels across, that was all that was ever visible.
+
+Swatches in the picker are unaffected by any of this: a swatch is a macro
+shot, nine inches across the square, so a 1.5in stone is a stone and a
+3/8in chip is a chip at the ratio they actually differ by. Drawing a
+swatch at the photograph's gauge would make every one of them the same
+grey square.
+
+**Still open: the angle.** Half of the owner's guess was right and half is
+untouched. The gauge is one number per region, so stones at the near edge
+of a bed are drawn the same size as stones at the far edge — on a bed
+photographed at a shallow angle the near ones should be visibly larger.
+Fixing it means banding the region by depth, or a projective transform SVG
+filters cannot express; at four or five pixels a stone it is a much
+smaller error than the one just fixed, and it is worth measuring on a real
+photo before building anything.
+
 ### What none of this has been through
 
 There is still no `ANTHROPIC_API_KEY` in this container, so:
@@ -634,7 +710,8 @@ There is still no `ANTHROPIC_API_KEY` in this container, so:
   ground: dark mulch under the beds, green masses where the demo puts its
   plants, concrete on the walk. It answers "does granite still look like
   greyed mulch" and it cannot answer how any of this sits on a real
-  photograph in real light.
+  photograph in real light. The gauge fix above came out of a real one and
+  has not been back through a real one.
 - **The per-megapixel coefficient is still a prior.** See above; the log
   line is how it stops being one.
 

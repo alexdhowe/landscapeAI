@@ -6,6 +6,11 @@ import { getOption } from "@/lib/catalog/options";
 import type { PlantOption } from "@/lib/catalog/plants";
 import { layoutRegionMarkers } from "@/lib/design/markers";
 import {
+  assumedPixelsPerFoot,
+  pixelsPerFoot,
+  renderedGaugePx,
+} from "@/lib/design/scale";
+import {
   closedPathData,
   effectiveOutline,
   insetForRegion,
@@ -20,7 +25,7 @@ import { REGION_KIND_LABELS } from "@/lib/vision/types";
 import { PlantGlyph } from "./plantGlyphs";
 import { SegmentationWait } from "./SegmentationWait";
 import { KIND_COLORS } from "./regionColors";
-import { SwatchFilters } from "./swatches";
+import { SwatchFilters, grainInches, type RegionTexture } from "./swatches";
 
 type Props = {
   photoUrl: string;
@@ -257,6 +262,37 @@ export function PhotoCanvas({
     named.map((region) => ({ id: region.id, polygon: liveOutline(region) })),
   );
 
+  /**
+   * The material filter each swapped region needs, at the gauge this
+   * photograph calls for.
+   *
+   * A material's grain is a size in inches — see `lib/design/scale.ts` —
+   * and how many pixels an inch is depends on how much ground the photo
+   * shows, which the region itself reports. Before this, every material
+   * was drawn at one fixed fraction of the frame: on a 300 sf bed that is
+   * a "1.5in river rock" thirteen times life size, which is what made a
+   * swapped bed look like a bed of boulders.
+   */
+  const textures: RegionTexture[] = regions.flatMap((region) => {
+    const optionId = selections[region.id]?.surfaceOptionId;
+    const option = optionId ? getOption(optionId) : undefined;
+    if (!option) return [];
+    const perFoot =
+      pixelsPerFoot({
+        polygon: liveOutline(region),
+        estimatedAreaSf: region.estimatedAreaSf,
+        plantings: region.plantings,
+      }) ?? assumedPixelsPerFoot();
+    return [
+      {
+        filterId: `tex-${region.id}`,
+        swatch: option.swatch,
+        gaugePx: renderedGaugePx(grainInches(option.swatch), perFoot, w),
+        pixelsPerFoot: (perFoot * w) / 1600,
+      },
+    ];
+  });
+
   return (
     <figure
       ref={frameRef}
@@ -289,7 +325,7 @@ export function PhotoCanvas({
         viewBox={`0 0 ${w} ${h}`}
         preserveAspectRatio="none"
       >
-        <SwatchFilters width={w} edgeBlur={w * 0.0035} />
+        <SwatchFilters textures={textures} edgeBlur={w * 0.0035} />
         <defs>
           {/*
             The photograph's *light*, and nothing else, for multiplying
@@ -417,7 +453,7 @@ export function PhotoCanvas({
                   <path
                     d={d}
                     fill="#ffffff"
-                    filter={`url(#tex-${surfaceOption.swatch})`}
+                    filter={`url(#tex-${region.id})`}
                     opacity={0.96}
                   />
                   {/* The photo's own shading, multiplied back on top so
