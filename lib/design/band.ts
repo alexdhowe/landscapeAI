@@ -14,8 +14,8 @@ import type {
 } from "../pricing/typology";
 import { getTypologyBand } from "../pricing/typology";
 import { getOption } from "../catalog/options";
-import type { ResolvedPlantChoice } from "./plants";
-import { plantScopeLines } from "./plants";
+import type { ResolvedPlantChoice, ResolvedPlantRemoval } from "./plants";
+import { plantScopeLines, removalScopeLines } from "./plants";
 import type { RegionSelection } from "./types";
 
 /**
@@ -48,6 +48,7 @@ export function chosenOptionIds(
 export function inferJobType(
   selections: Record<string, RegionSelection>,
   plantChoices: readonly ResolvedPlantChoice[] = [],
+  removals: readonly ResolvedPlantRemoval[] = [],
 ): JobType | null {
   const jobTypes = new Set<JobType>();
   for (const id of chosenOptionIds(selections)) {
@@ -58,6 +59,10 @@ export function inferJobType(
   // refresh, in a bed it is bed renovation. So a customer who swaps only
   // plants still gets a band, from the same distributions.
   for (const choice of plantChoices) jobTypes.add(choice.jobType);
+  // And taking plants out is a job in its own right: a customer who only
+  // clears an overgrown foundation bed has asked for a refresh and gets a
+  // band for one, from the same distributions.
+  for (const removal of removals) jobTypes.add(removal.jobType);
   for (const jobType of JOB_TYPE_PRIORITY) {
     if (jobTypes.has(jobType)) return jobType;
   }
@@ -77,8 +82,9 @@ export function bandForSelections(
   context: MarketContext,
   config: TypologyConfig,
   plantChoices: readonly ResolvedPlantChoice[] = [],
+  removals: readonly ResolvedPlantRemoval[] = [],
 ): DesignBand | null {
-  const jobType = inferJobType(selections, plantChoices);
+  const jobType = inferJobType(selections, plantChoices, removals);
   if (!jobType) return null;
   const scope = [
     ...new Set([
@@ -86,6 +92,7 @@ export function bandForSelections(
         .map((id) => getOption(id)?.label)
         .filter((label): label is string => Boolean(label)),
       ...plantScopeLines(plantChoices),
+      ...removalScopeLines(removals),
     ]),
   ];
   return { band: getTypologyBand(jobType, context, config), jobType, scope };

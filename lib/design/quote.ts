@@ -25,7 +25,7 @@ import type {
 import type { JobType, MarketContext, TypologyConfig } from "../pricing/typology";
 import type { PlantOption } from "../catalog/plants";
 import { bandForSelections } from "./band";
-import { resolvePlantChoices } from "./plants";
+import { resolvePlantChoices, resolvePlantRemovals } from "./plants";
 import {
   designEngineInput,
   measuredBandForSelections,
@@ -164,10 +164,20 @@ export function quoteProject(
   // customer's band, the internal estimate and the frozen snapshot all
   // read the same list, so none of them can disagree about which plants
   // the customer chose.
+  const regions =
+    project.segmentation.status === "ready" ? project.segmentation.regions : [];
   const plantChoices = resolvePlantChoices(
-    project.segmentation.status === "ready" ? project.segmentation.regions : [],
+    regions,
     project.plantSelections,
     plantCatalog,
+  );
+  // Resolved the same way and for the same reason: a plant the customer
+  // took out is only a removal while it is still a plant in the current
+  // segmentation.
+  const plantRemovals = resolvePlantRemovals(
+    regions,
+    project.clearedPlantings,
+    project.plantSelections,
   );
 
   const typology = bandForSelections(
@@ -175,6 +185,7 @@ export function quoteProject(
     project.marketContext,
     config,
     plantChoices,
+    plantRemovals,
   );
   if (!typology) return null;
 
@@ -220,6 +231,7 @@ export function quoteProject(
     policy,
     now,
     plantChoices,
+    plantRemovals,
   );
 
   if (measured) {
@@ -274,6 +286,7 @@ export function quoteProject(
     config,
     now(),
     plantChoices,
+    plantRemovals,
   );
   const estimate =
     input.engineSelections.length > 0

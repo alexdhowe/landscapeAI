@@ -121,12 +121,38 @@ export function plantOptionsForRegion(
 }
 
 /**
+ * The assembly that takes an existing plant out.
+ *
+ * "Existing shrub removal and disposal", per EA — crew time plus green
+ * waste. It was already in the seed book and already in the foundation
+ * refresh recipe before anything could select it, because a refresh has
+ * always meant taking things out; what is new is that the customer can
+ * now say which things.
+ */
+export const PLANT_REMOVAL_ASSEMBLY = "shrub_removal";
+
+/**
+ * Whether this contractor's book can price taking a plant out.
+ *
+ * The same guardrail as the plant catalog itself (map section 1): nothing
+ * may be selected that the pricing engine cannot price, and the engine
+ * throws on an assembly the book does not hold. A contractor who deletes
+ * the removal assembly stops being offered removals rather than getting a
+ * broken estimate — so this is what the design page asks before it shows
+ * the control, and what the quote checks before it prices one.
+ */
+export function canRemovePlants(book: PriceBook): boolean {
+  return book.assemblies.some((assembly) => assembly.id === PLANT_REMOVAL_ASSEMBLY);
+}
+
+/**
  * The job type a plant swap implies, from the region it stands in.
  *
  * Replanting against the house is a foundation refresh; replanting in a
  * bed is bed renovation. Both are job types the typology distributions
  * already carry, so a plant swap prices from the same evidence every other
- * selection does.
+ * selection does. Taking a plant out is the same question with the same
+ * answer, so removals read this too.
  */
 export function plantJobTypeForRegion(kind: RegionKind): "foundation_planting_refresh" | "bed_renovation" | null {
   if (kind === "foundation_planting") return "foundation_planting_refresh";

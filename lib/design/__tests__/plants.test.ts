@@ -12,8 +12,11 @@ import { plantOptionsFor } from "../../catalog/plants";
 import type { SegmentedRegion } from "../../vision/types";
 import {
   plantAssemblyCounts,
+  plantRemovalCount,
   plantScopeLines,
+  removalScopeLines,
   resolvePlantChoices,
+  resolvePlantRemovals,
 } from "../plants";
 
 const CATALOG = plantOptionsFor(wiPriceBook, plantMetaBySku);
@@ -129,5 +132,60 @@ describe("plantAssemblyCounts", () => {
       ["install_plant_boxwood_green_velvet", 2],
       ["install_plant_hosta_patriot", 1],
     ]);
+  });
+});
+
+describe("resolvePlantRemovals", () => {
+  it("resolves a cleared plant to its region and a job type", () => {
+    const [removal] = resolvePlantRemovals([FOUNDATION], ["f2"], undefined);
+    expect(removal.planting.id).toBe("f2");
+    expect(removal.region.id).toBe("foundation");
+    expect(removal.jobType).toBe("foundation_planting_refresh");
+  });
+
+  it("drops a removal for a plant this segmentation no longer has", () => {
+    // Same rule as a swap, and for the same reason: a stale id must never
+    // bill the crew for digging up a shrub nobody can point at.
+    expect(resolvePlantRemovals([FOUNDATION], ["gone"], undefined)).toEqual([]);
+  });
+
+  it("does not bill a removal for a plant that was replaced instead", () => {
+    // The store keeps these exclusive — one decision about one plant — but
+    // a reader that trusted that and was wrong would bill the removal
+    // twice over, once here and once inside the replacement.
+    expect(resolvePlantRemovals([FOUNDATION], ["f2"], { f2: BOXWOOD })).toEqual([]);
+  });
+
+  it("has nothing to resolve when nothing was cleared", () => {
+    expect(resolvePlantRemovals([FOUNDATION], undefined, undefined)).toEqual([]);
+    expect(resolvePlantRemovals([FOUNDATION], [], undefined)).toEqual([]);
+  });
+});
+
+describe("plantRemovalCount", () => {
+  it("is one shrub_removal per plant taken out", () => {
+    const removals = resolvePlantRemovals([FOUNDATION], ["f1", "f3"], undefined);
+    expect([...plantRemovalCount(removals, true)]).toEqual([["shrub_removal", 2]]);
+  });
+
+  it("prices nothing where the book cannot price a removal", () => {
+    // The engine throws on an assembly the book does not hold. A
+    // contractor who deletes it stops being offered removals; a project
+    // cleared before they did must not throw the whole estimate.
+    const removals = resolvePlantRemovals([FOUNDATION], ["f1"], undefined);
+    expect([...plantRemovalCount(removals, false)]).toEqual([]);
+  });
+});
+
+describe("removalScopeLines", () => {
+  it("counts them, in the customer's words rather than the assembly's", () => {
+    const two = resolvePlantRemovals([FOUNDATION], ["f1", "f3"], undefined);
+    expect(removalScopeLines(two)).toEqual(["2 existing plants taken out"]);
+    const one = resolvePlantRemovals([FOUNDATION], ["f1"], undefined);
+    expect(removalScopeLines(one)).toEqual(["1 existing plant taken out"]);
+  });
+
+  it("says nothing when nothing came out", () => {
+    expect(removalScopeLines([])).toEqual([]);
   });
 });

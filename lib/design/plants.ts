@@ -24,7 +24,7 @@
  * Pure. No I/O.
  */
 import type { PlantOption } from "../catalog/plants";
-import { plantJobTypeForRegion } from "../catalog/plants";
+import { PLANT_REMOVAL_ASSEMBLY, plantJobTypeForRegion } from "../catalog/plants";
 import type { JobType } from "../pricing/typology";
 import type { Planting, SegmentedRegion } from "../vision/types";
 
@@ -89,4 +89,83 @@ export function plantAssemblyCounts(
     counts.set(choice.option.assemblyId, (counts.get(choice.option.assemblyId) ?? 0) + 1);
   }
   return counts;
+}
+
+/**
+ * One plant the customer has taken out.
+ *
+ * Same resolution rules as a swap: a removal is only real if the plant is
+ * still in the current segmentation, because a stale id must never put a
+ * line item on the rep's quote for a shrub nobody can point at.
+ */
+export type ResolvedPlantRemoval = {
+  region: SegmentedRegion;
+  planting: Planting;
+  jobType: JobType;
+};
+
+/**
+ * The plants this design says to take out.
+ *
+ * A plant the customer both replaced and cleared cannot happen — the
+ * store makes the two exclusive, because they are one decision about one
+ * plant — but a reader that trusted that and was wrong would bill the
+ * removal twice, so a replaced plant is skipped here explicitly.
+ */
+export function resolvePlantRemovals(
+  regions: readonly SegmentedRegion[],
+  clearedPlantings: readonly string[] | undefined,
+  plantSelections: Record<string, string> | undefined,
+): ResolvedPlantRemoval[] {
+  if (!clearedPlantings || clearedPlantings.length === 0) return [];
+  const cleared = new Set(clearedPlantings);
+  const removals: ResolvedPlantRemoval[] = [];
+  for (const region of regions) {
+    const jobType = plantJobTypeForRegion(region.kind);
+    if (!jobType) continue;
+    for (const planting of region.plantings ?? []) {
+      if (!cleared.has(planting.id)) continue;
+      if (plantSelections?.[planting.id]) continue;
+      removals.push({ region, planting, jobType });
+    }
+  }
+  return removals;
+}
+
+/**
+ * What taking plants out adds to the engine: one `shrub_removal` per
+ * plant, or nothing at all.
+ *
+ * Empty when the book cannot price a removal. The design page does not
+ * offer the control in that case, but the two are checked independently:
+ * a project cleared while the assembly existed must not throw the whole
+ * estimate the day a contractor deletes it from their book.
+ */
+export function plantRemovalCount(
+  removals: readonly ResolvedPlantRemoval[],
+  priceable: boolean,
+): Map<string, number> {
+  const counts = new Map<string, number>();
+  if (priceable && removals.length > 0) {
+    counts.set(PLANT_REMOVAL_ASSEMBLY, removals.length);
+  }
+  return counts;
+}
+
+/**
+ * The scope line taking plants out adds under the band.
+ *
+ * One line with a count, in the words a homeowner used when they asked
+ * for it — not "shrub removal and disposal", which is the assembly's name
+ * and the contractor's language.
+ */
+export function removalScopeLines(
+  removals: readonly ResolvedPlantRemoval[],
+): string[] {
+  if (removals.length === 0) return [];
+  return [
+    removals.length === 1
+      ? "1 existing plant taken out"
+      : `${removals.length} existing plants taken out`,
+  ];
 }

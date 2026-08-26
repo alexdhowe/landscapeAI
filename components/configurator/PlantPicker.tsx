@@ -36,7 +36,9 @@ export function PlantPicker({
   options,
   chosenOptionId,
   busy,
+  canRemove,
   onChoose,
+  onClear,
   onClose,
 }: {
   region: SegmentedRegion;
@@ -44,7 +46,10 @@ export function PlantPicker({
   options: readonly PlantOption[];
   chosenOptionId?: string;
   busy: boolean;
+  /** This contractor's book can price taking a plant out. */
+  canRemove: boolean;
   onChoose: (optionId: string | null) => void;
+  onClear: () => void;
   onClose: () => void;
 }) {
   const existing = planting.label?.trim();
@@ -154,17 +159,28 @@ export function PlantPicker({
             </div>
           </fieldset>
 
-          {chosenOptionId && (
-            <Button
-              tone="secondary"
-              size="sm"
-              className="mt-3"
-              disabled={busy}
-              onClick={() => onChoose(null)}
-            >
-              Keep {existing ? `the ${existing}` : "what is there"}
-            </Button>
-          )}
+          <div className="mt-3 flex flex-wrap gap-2">
+            {chosenOptionId && (
+              <Button
+                tone="secondary"
+                size="sm"
+                disabled={busy}
+                onClick={() => onChoose(null)}
+              >
+                Keep {existing ? `the ${existing}` : "what is there"}
+              </Button>
+            )}
+            {/* Taking it out and putting something else in are the same
+                slot — one decision about one plant — so this sits beside
+                the list rather than in it, and picking a plant above
+                un-takes-it-out. Only offered where the contractor's book
+                can price the removal. */}
+            {canRemove && (
+              <Button tone="secondary" size="sm" disabled={busy} onClick={onClear}>
+                Take {existing ? `the ${existing}` : "it"} out
+              </Button>
+            )}
+          </div>
         </>
       )}
     </div>
@@ -183,26 +199,57 @@ export function PlantPicker({
 export function PlantStrip({
   region,
   plantSelections,
+  clearedPlantings,
   catalog,
+  canRemove,
+  busy,
   selectedPlantingId,
   onSelectPlanting,
+  onClear,
 }: {
   region: SegmentedRegion;
   plantSelections: Record<string, string> | undefined;
+  clearedPlantings: readonly string[] | undefined;
   catalog: readonly PlantOption[];
+  /** This contractor's book can price taking a plant out. */
+  canRemove: boolean;
+  busy: boolean;
   selectedPlantingId: string | null;
   onSelectPlanting: (plantingId: string) => void;
+  /** Take these plants out, or put them back. */
+  onClear: (plantingIds: string[], cleared: boolean) => void;
 }) {
   const plantings = region.plantings ?? [];
   if (plantings.length === 0) return null;
   const byId = new Map(catalog.map((o) => [o.id, o]));
+  const cleared = new Set(clearedPlantings ?? []);
+  const standing = plantings.filter((plant) => !cleared.has(plant.id));
+  const takenOut = plantings.filter((plant) => cleared.has(plant.id));
+
   return (
     <div className="mt-4 border-t border-bark-200 pt-3">
-      <h3 className="text-2xs font-semibold uppercase tracking-wider text-bark-500">
-        Plants in this area
-      </h3>
+      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+        <h3 className="text-2xs font-semibold uppercase tracking-wider text-bark-500">
+          Plants in this area
+        </h3>
+        {/* Clearing a bed is one instruction about the whole bed, so it is
+            one control rather than a trip through every plant — and it is
+            only offered where the contractor's book can price the
+            removals it implies. */}
+        {canRemove && standing.length > 0 && (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => onClear(standing.map((plant) => plant.id), true)}
+            className="tap-target text-xs font-medium text-bark-600 underline underline-offset-4 hover:text-bark-900 disabled:opacity-50"
+          >
+            Clear {standing.length === plantings.length ? "the plants" : "the rest"}
+          </button>
+        )}
+      </div>
+
       <ul className="mt-2 flex flex-wrap gap-1.5">
-        {plantings.map((plant) => {
+        {standing.map((plant) => {
           const chosen = plantSelections?.[plant.id]
             ? byId.get(plantSelections[plant.id])
             : undefined;
@@ -236,6 +283,46 @@ export function PlantStrip({
           );
         })}
       </ul>
+
+      {/* A plant that is gone is off the photograph entirely, so this list
+          is the only way back to it. It says what it was, because "put the
+          azalea back" is a decision a customer can make and "put plant 3
+          back" is not. */}
+      {takenOut.length > 0 && (
+        <div className="mt-3">
+          <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+            <h4 className="text-2xs font-semibold uppercase tracking-wider text-bark-500">
+              Coming out ({takenOut.length})
+            </h4>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => onClear(takenOut.map((plant) => plant.id), false)}
+              className="tap-target text-xs font-medium text-bark-600 underline underline-offset-4 hover:text-bark-900 disabled:opacity-50"
+            >
+              Put {takenOut.length === 1 ? "it" : "them all"} back
+            </button>
+          </div>
+          <ul className="mt-2 flex flex-wrap gap-1.5">
+            {takenOut.map((plant) => (
+              <li key={plant.id}>
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => onClear([plant.id], false)}
+                  className="flex min-h-11 items-center gap-2 rounded-full border border-dashed border-bark-300 bg-bark-50 px-3 py-1.5 text-sm text-bark-600 transition-colors hover:border-bark-400 hover:text-bark-900 disabled:opacity-50"
+                >
+                  <PlantSwatch kind="shrub" className="size-5 shrink-0 opacity-25" />
+                  <span className="font-medium line-through">
+                    {plant.label?.trim() || "Plant"}
+                  </span>
+                  <span className="text-2xs uppercase tracking-wider">put back</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </div>
   );
 }

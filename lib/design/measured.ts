@@ -20,8 +20,14 @@ import type {
 } from "../pricing/types";
 import type { JobType, MarketContext, TypologyConfig } from "../pricing/typology";
 import { inferJobType } from "./band";
-import type { ResolvedPlantChoice } from "./plants";
-import { plantAssemblyCounts, plantScopeLines } from "./plants";
+import { canRemovePlants } from "../catalog/plants";
+import type { ResolvedPlantChoice, ResolvedPlantRemoval } from "./plants";
+import {
+  plantAssemblyCounts,
+  plantRemovalCount,
+  plantScopeLines,
+  removalScopeLines,
+} from "./plants";
 import type { RegionSelection } from "./types";
 
 /** The measured quantities for one photo region, from the drawn aerial ring. */
@@ -166,6 +172,7 @@ export function designEngineInput(
   config: TypologyConfig,
   capturedAt: string,
   plantChoices: readonly ResolvedPlantChoice[] = [],
+  removals: readonly ResolvedPlantRemoval[] = [],
 ): DesignEngineInput {
   const selectedRegionIds = Object.keys(selections).filter((id) =>
     hasChoice(selections[id]),
@@ -219,7 +226,23 @@ export function designEngineInput(
       },
     });
   }
+  // Taking a plant out is crew time and a disposal fee, per plant, and it
+  // is the same count as the plants themselves — the segmentation found
+  // them standing there, and the customer said which ones go. Priced only
+  // where the org's book still holds the assembly; the engine throws on
+  // one it cannot find, and a contractor editing their book must not be
+  // able to break an estimate somebody already has.
+  for (const [assemblyId, count] of plantRemovalCount(
+    removals,
+    canRemovePlants(config.priceBook),
+  )) {
+    engineSelections.push({
+      assemblyId,
+      quantity: { value: count, unit: "EA", source: "photo", confidence: 0.9, capturedAt },
+    });
+  }
   for (const line of plantScopeLines(plantChoices)) scope.add(line);
+  for (const line of removalScopeLines(removals)) scope.add(line);
 
   return {
     engineSelections,
@@ -243,8 +266,9 @@ export function measuredBandForSelections(
   policy: DisclosurePolicy,
   now: () => string = () => new Date().toISOString(),
   plantChoices: readonly ResolvedPlantChoice[] = [],
+  removals: readonly ResolvedPlantRemoval[] = [],
 ): MeasuredDesignBand | null {
-  const jobType = inferJobType(selections, plantChoices);
+  const jobType = inferJobType(selections, plantChoices, removals);
   if (!jobType) return null;
 
   const input = designEngineInput(
@@ -254,6 +278,7 @@ export function measuredBandForSelections(
     config,
     now(),
     plantChoices,
+    removals,
   );
   const { engineSelections, scope, measuredRegionIds, unmeasuredRegionIds } = input;
   if (measuredRegionIds.length === 0) return null;

@@ -64,6 +64,12 @@ export function Configurator({ projectId }: { projectId: string }) {
   const [selectedRegionId, setSelectedRegionId] = useState<string | null>(null);
   const [selectedPlantingId, setSelectedPlantingId] = useState<string | null>(null);
   const [plantCatalog, setPlantCatalog] = useState<PlantOption[]>([]);
+  /**
+   * Whether this contractor's book can price taking a plant out. Served
+   * beside the catalog and for the same reason: what is offerable is
+   * whatever the current published revision can price.
+   */
+  const [canRemovePlants, setCanRemovePlants] = useState(false);
   const [adjustingRegionId, setAdjustingRegionId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -87,8 +93,10 @@ export function Configurator({ projectId }: { projectId: string }) {
     (async () => {
       const res = await fetch("/api/plants").catch(() => null);
       if (!res?.ok || cancelled) return;
-      const body = (await res.json()) as { plants: PlantOption[] };
-      if (!cancelled) setPlantCatalog(body.plants ?? []);
+      const body = (await res.json()) as { plants: PlantOption[]; canRemove?: boolean };
+      if (cancelled) return;
+      setPlantCatalog(body.plants ?? []);
+      setCanRemovePlants(Boolean(body.canRemove));
     })();
     return () => {
       cancelled = true;
@@ -199,6 +207,29 @@ export function Configurator({ projectId }: { projectId: string }) {
         });
         if (res.ok) {
           setProject((await res.json()) as DesignProject);
+          await refreshBand();
+        }
+      } finally {
+        setBusy(false);
+      }
+    },
+    [projectId, refreshBand],
+  );
+
+  const applyClear = useCallback(
+    async (plantingIds: string[], cleared: boolean) => {
+      if (plantingIds.length === 0) return;
+      setBusy(true);
+      try {
+        const res = await fetch(`/api/projects/${projectId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ clearPlantings: plantingIds, cleared }),
+        });
+        if (res.ok) {
+          setProject((await res.json()) as DesignProject);
+          // Taking plants out is priced — one `shrub_removal` each — so
+          // the band has to move with it, the same as any other choice.
           await refreshBand();
         }
       } finally {
@@ -361,6 +392,7 @@ export function Configurator({ projectId }: { projectId: string }) {
             progress={seg.status === "pending" ? seg.progress : undefined}
             notice={demo ? "Example areas" : undefined}
             plantSelections={project.plantSelections}
+            clearedPlantings={project.clearedPlantings}
             plantCatalog={plantCatalog}
             selectedPlantingId={selectedPlantingId}
             regionOutlines={project.regionOutlines}
@@ -468,7 +500,14 @@ export function Configurator({ projectId }: { projectId: string }) {
                   options={plantOptionsForRegion(plantCatalog, openPlanting.region.kind)}
                   chosenOptionId={project.plantSelections?.[openPlanting.plant.id]}
                   busy={busy}
+                  canRemove={canRemovePlants}
                   onChoose={(optionId) => applyPlant(openPlanting.plant.id, optionId)}
+                  onClear={() => {
+                    void applyClear([openPlanting.plant.id], true);
+                    // The plant is gone from the picture, so the picker
+                    // for it has nothing left to be about.
+                    setSelectedPlantingId(null);
+                  }}
                   onClose={() => setSelectedPlantingId(null)}
                 />
               ) : selectedRegion ? (
@@ -505,8 +544,12 @@ export function Configurator({ projectId }: { projectId: string }) {
               <PlantStrip
                 region={openPlanting?.region ?? selectedRegion!}
                 plantSelections={project.plantSelections}
+                clearedPlantings={project.clearedPlantings}
                 catalog={plantCatalog}
+                canRemove={canRemovePlants}
+                busy={busy}
                 selectedPlantingId={selectedPlantingId}
+                onClear={(plantingIds, cleared) => void applyClear(plantingIds, cleared)}
                 onSelectPlanting={(plantingId) =>
                   setSelectedPlantingId(
                     plantingId === selectedPlantingId ? null : plantingId,

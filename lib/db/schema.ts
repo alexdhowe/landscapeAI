@@ -34,9 +34,10 @@
  *     proprietary data, and an Organization that owns the price book but
  *     imports its bid distributions from a constant is not a tenant.
  */
-import { relations } from "drizzle-orm";
+import { relations, sql } from "drizzle-orm";
 import {
   boolean,
+  check,
   customType,
   doublePrecision,
   foreignKey,
@@ -571,10 +572,28 @@ export const plantSelections = pgTable(
       .references(() => projects.id, { onDelete: "cascade" }),
     /** `${regionId}_plant_${n}`, assigned by the segmentation parser. */
     plantingId: text("planting_id").notNull(),
-    /** A plant catalog option id — `plantsku_<skuId>`. */
-    optionId: text("option_id").notNull(),
+    /**
+     * A plant catalog option id — `plantsku_<skuId>` — or null when the
+     * decision about this plant was to take it out rather than replace it.
+     */
+    optionId: text("option_id"),
+    /**
+     * The customer took this plant out.
+     *
+     * In this table rather than one of its own because replacing a plant
+     * and removing it are the same slot: one decision about one plant, and
+     * a row that held both would be a contradiction the readers would have
+     * to arbitrate. The check constraint says so in the database.
+     */
+    removed: boolean("removed").notNull().default(false),
   },
-  (t) => [primaryKey({ columns: [t.projectId, t.plantingId] })],
+  (t) => [
+    primaryKey({ columns: [t.projectId, t.plantingId] }),
+    check(
+      "plant_selection_is_one_decision",
+      sql`(${t.optionId} is not null) <> ${t.removed}`,
+    ),
+  ],
 );
 
 // ---------------------------------------------------------------------------

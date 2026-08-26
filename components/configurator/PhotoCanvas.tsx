@@ -3,7 +3,9 @@
 import { useRef, useState } from "react";
 
 import { getOption } from "@/lib/catalog/options";
+import type { SwatchId } from "@/lib/catalog/options";
 import type { PlantOption } from "@/lib/catalog/plants";
+import { existingSurfaceSwatch } from "@/lib/design/existingSurface";
 import { layoutRegionMarkers } from "@/lib/design/markers";
 import {
   assumedPixelsPerFoot,
@@ -47,6 +49,15 @@ type Props = {
   notice?: string;
   /** plantingId → the plant the customer put there. */
   plantSelections?: Record<string, string>;
+  /**
+   * The plants the customer took out.
+   *
+   * A cleared plant is not drawn, not tappable, and not cut out of the
+   * material: the bed is painted over where it stood. See
+   * `lib/design/existingSurface.ts` for what a bed with nothing swapped
+   * gets painted in.
+   */
+  clearedPlantings?: readonly string[];
   /** The org's plant catalog, for resolving those choices to a glyph. */
   plantCatalog?: readonly PlantOption[];
   /** Tapping a plant on the photo opens its picker. */
@@ -197,6 +208,7 @@ export function PhotoCanvas({
   progress,
   notice,
   plantSelections,
+  clearedPlantings,
   plantCatalog,
   onSelectPlanting,
   selectedPlantingId = null,
@@ -238,6 +250,10 @@ export function PhotoCanvas({
     ];
   };
 
+  const cleared = new Set(clearedPlantings ?? []);
+  /** Did the customer take this plant out? */
+  const isCleared = (plantingId: string) => cleared.has(plantingId);
+
   const catalogById = new Map((plantCatalog ?? []).map((o) => [o.id, o]));
   /** The plant the customer put here, if they put one here. */
   const chosenPlant = (plantingId: string): PlantOption | undefined => {
@@ -263,6 +279,26 @@ export function PhotoCanvas({
   );
 
   /**
+   * What a region is painted with, or null for one that is still just
+   * photograph.
+   *
+   * Two ways to earn a fill. The obvious one is a swap: the customer
+   * picked a material. The other is clearing the plants — the holes where
+   * they stood cannot be filled from a photograph of the plants, so the
+   * bed stops being a photograph and is drawn in the material it already
+   * has. That is a drawing decision and nothing else: no line item, no
+   * band, no chip in the picker. The customer did not order the mulch
+   * they already own.
+   */
+  const surfaceSwatch = (region: SegmentedRegion): SwatchId | null => {
+    const optionId = selections[region.id]?.surfaceOptionId;
+    const option = optionId ? getOption(optionId) : undefined;
+    if (option) return option.swatch;
+    const hasCleared = (region.plantings ?? []).some((plant) => isCleared(plant.id));
+    return hasCleared ? existingSurfaceSwatch(region) : null;
+  };
+
+  /**
    * The material filter each swapped region needs, at the gauge this
    * photograph calls for.
    *
@@ -274,9 +310,8 @@ export function PhotoCanvas({
    * swapped bed look like a bed of boulders.
    */
   const textures: RegionTexture[] = regions.flatMap((region) => {
-    const optionId = selections[region.id]?.surfaceOptionId;
-    const option = optionId ? getOption(optionId) : undefined;
-    if (!option) return [];
+    const swatch = surfaceSwatch(region);
+    if (!swatch) return [];
     const perFoot =
       pixelsPerFoot({
         polygon: liveOutline(region),
@@ -286,8 +321,8 @@ export function PhotoCanvas({
     return [
       {
         filterId: `tex-${region.id}`,
-        swatch: option.swatch,
-        gaugePx: renderedGaugePx(grainInches(option.swatch), perFoot, w),
+        swatch,
+        gaugePx: renderedGaugePx(grainInches(swatch), perFoot, w),
         pixelsPerFoot: (perFoot * w) / 1600,
       },
     ];
@@ -413,9 +448,11 @@ export function PhotoCanvas({
               {/* Only the plants that are STAYING are punched out. One
                   the customer has replaced is covered by the new material
                   and then drawn over, which is what makes a swap look like
-                  the old plant was taken out rather than hidden. */}
+                  the old plant was taken out rather than hidden — and one
+                  they took out entirely is covered and left covered, which
+                  is what makes it look gone. */}
               {(region.plantings ?? [])
-                .filter((plant) => !chosenPlant(plant.id))
+                .filter((plant) => !chosenPlant(plant.id) && !isCleared(plant.id))
                 .map((plant) => (
                   <ellipse
                     key={plant.id}
@@ -436,15 +473,16 @@ export function PhotoCanvas({
           const outline = liveOutline(region);
           const d = outlinePath(outline, w, h);
           const isAdjusting = region.id === adjustingRegionId;
-          const surfaceOption = selections[region.id]?.surfaceOptionId
-            ? getOption(selections[region.id].surfaceOptionId!)
-            : undefined;
+          // A fill, whether because a material was chosen or because the
+          // plants came out and the bed has to be drawn rather than
+          // photographed.
+          const painted = surfaceSwatch(region) !== null;
           const isSelected = region.id === selectedRegionId;
           const isActive = region.id === activeId;
           const kindColor = KIND_COLORS[region.kind];
           return (
             <g key={region.id}>
-              {surfaceOption ? (
+              {painted ? (
                 // Masked, not clipped: the mask is the region with the
                 // plants punched out of it, so the material lands on the
                 // ground and the planting stays photographic.
@@ -572,7 +610,9 @@ export function PhotoCanvas({
         {regions.map((region) =>
           (region.plantings ?? []).map((plant) => {
             const option = chosenPlant(plant.id);
-            if (!option) return null;
+            // A plant that was taken out has no glyph: the bed is painted
+            // where it stood and there is nothing standing there now.
+            if (!option || isCleared(plant.id)) return null;
             const rx = plant.rx * w * PLANTING_MARGIN;
             const ry = plant.ry * h * PLANTING_MARGIN;
             return (
@@ -639,6 +679,10 @@ export function PhotoCanvas({
         <div aria-hidden>
           {regions.map((region) =>
             (region.plantings ?? []).map((plant) => {
+              // Nothing to point at, and nothing to open: a plant that is
+              // gone is put back from the strip under the picker, where it
+              // is still listed and still says what it was.
+              if (isCleared(plant.id)) return null;
               const option = chosenPlant(plant.id);
               const isOpen = plant.id === selectedPlantingId;
               const isHovered = plant.id === hoveredPlantId;
@@ -690,6 +734,7 @@ export function PhotoCanvas({
           {regions.map((region) =>
             (region.plantings ?? []).map((plant) => {
               if (plant.id !== hoveredPlantId || plant.id === selectedPlantingId) return null;
+              if (isCleared(plant.id)) return null;
               const option = chosenPlant(plant.id);
               return (
                 <p

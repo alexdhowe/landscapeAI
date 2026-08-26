@@ -206,6 +206,67 @@ describe("the store, over Drizzle", () => {
     expect((await store.getProject(created.id)).plantSelections).toBeUndefined();
   });
 
+  it("round-trips plants taken out, and puts them back", async () => {
+    const created = await store.createProject(PHOTO_BYTES, "image/jpeg", "jpg");
+    await store.setSegmentation(created.id, { status: "ready", ...demoSegmentation() });
+    expect((await store.getProject(created.id)).clearedPlantings).toBeUndefined();
+
+    await store.setPlantingsCleared(
+      created.id,
+      ["demo_foundation_plant_1", "demo_foundation_plant_2"],
+      true,
+    );
+    const cleared = await store.getProject(created.id);
+    expect(cleared.clearedPlantings?.sort()).toEqual([
+      "demo_foundation_plant_1",
+      "demo_foundation_plant_2",
+    ]);
+
+    await store.setPlantingsCleared(created.id, ["demo_foundation_plant_1"], false);
+    expect((await store.getProject(created.id)).clearedPlantings).toEqual([
+      "demo_foundation_plant_2",
+    ]);
+    await store.setPlantingsCleared(created.id, ["demo_foundation_plant_2"], false);
+    expect((await store.getProject(created.id)).clearedPlantings).toBeUndefined();
+  });
+
+  it("keeps replacing a plant and removing it to one decision", async () => {
+    // They are the same slot — the check constraint on plant_selections
+    // says so — because a design that held both would bill the crew twice
+    // for taking the same shrub out.
+    const created = await store.createProject(PHOTO_BYTES, "image/jpeg", "jpg");
+    await store.setSegmentation(created.id, { status: "ready", ...demoSegmentation() });
+
+    await store.setPlantSelection(
+      created.id,
+      "demo_bed_plant_1",
+      "plantsku_plant_hosta_patriot",
+    );
+    await store.setPlantingsCleared(created.id, ["demo_bed_plant_1"], true);
+    const takenOut = await store.getProject(created.id);
+    expect(takenOut.clearedPlantings).toEqual(["demo_bed_plant_1"]);
+    expect(takenOut.plantSelections).toBeUndefined();
+
+    await store.setPlantSelection(
+      created.id,
+      "demo_bed_plant_1",
+      "plantsku_plant_hosta_patriot",
+    );
+    const replaced = await store.getProject(created.id);
+    expect(replaced.plantSelections).toEqual({
+      demo_bed_plant_1: "plantsku_plant_hosta_patriot",
+    });
+    expect(replaced.clearedPlantings).toBeUndefined();
+  });
+
+  it("refuses to take out a plant the design does not have", async () => {
+    const created = await store.createProject(PHOTO_BYTES, "image/jpeg", "jpg");
+    await store.setSegmentation(created.id, { status: "ready", ...demoSegmentation() });
+    await expect(
+      store.setPlantingsCleared(created.id, ["no_such_plant"], true),
+    ).rejects.toThrow();
+  });
+
   it("round-trips a corrected outline, and puts the original back", async () => {
     // The model's polygon and the customer's correction are different
     // facts. Both are kept: only one of them can be improved by a better

@@ -63,13 +63,14 @@ deployment.
 | A ring of old mulch around every plant | ✅ fixed — the cut-out was 18% wider than the plant and then blurred wider still; the material now reaches the plant's own edge |
 | "Granite that just colours the mulch grey" | ✅ fixed — the filters ran in linearRGB, the noise was never spread across its ramp, one generator served six materials, and the photo's own grain was multiplied back at full detail |
 | A bed of boulders | ✅ fixed — the gauge was a fraction of the frame, which is not a gauge: a "1.5in river rock" was drawn about twelve times life size. It comes from the region's own reported area now |
+| Taking the plants out | ✅ done — clear one or a whole bed, the bed is repainted in the material it already has, and every removal is bid as `shrub_removal` |
 | The aerial leg (`/design/[id]/locate`) | ⛔ gated off — deliberately: no paid imagery or geocoder until there is a working MVP |
 
 All six phases are in, they run on Postgres, the contractor console is behind
 a login, the price book is editable, photos live in object storage when a
 bucket is configured, and the whole thing has been designed and opened on a
 phone — on a phone *branch*, for the first time in the twelfth session,
-which is its own story. `npm test` runs 634 tests — with a database and
+which is its own story. `npm test` runs 652 tests — with a database and
 without one.
 
 **It has not been deployed.** The tenth session wrote the configuration —
@@ -96,7 +97,7 @@ store, so a clean checkout runs the demo with nothing to provision.
 ```sh
 npm run doctor    # is this machine set up? checks .env.local, the API key (against the
                   # real API), and the console login — and says what to fix, in English.
-npm test          # Vitest — 634 tests across every phase. No server, no network, no browser.
+npm test          # Vitest — 652 tests across every phase. No server, no network, no browser.
 npm run typecheck
 npm run dev
 npm run build
@@ -697,6 +698,61 @@ filters cannot express; at four or five pixels a stone it is a much
 smaller error than the one just fixed, and it is worth measuring on a real
 photo before building anything.
 
+### Taking the plants out
+
+Until now the only thing a customer could do to a plant was swap it for
+another one, which quietly assumed the answer to "where do the plants go"
+was "exactly where they are now". Nobody designing a bed thinks that. The
+first step out of it is being able to take a plant out at all.
+
+**Clearing is priced, because clearing is work.** The crew digs each shrub
+up and hauls it away, and a design that shows eight of them gone without
+bidding their removal hands the contractor a quote they lose money on. The
+`shrub_removal` assembly — "existing shrub removal and disposal", per
+EA — was already in the seed book and already in the foundation-refresh
+recipe before anything could select it, so a removal prices through the
+same engine as every other choice: one EA per plant, the count coming from
+the photo, the scope line reading "3 existing plants taken out" in the
+customer's words rather than the assembly's.
+
+The same guardrail the plant catalog lives under applies (§1: nothing may
+be selected that the engine cannot price). The engine throws on an
+assembly the org's book does not hold, so `/api/plants` now answers
+`canRemove` alongside the catalog, the design page does not draw the
+control without it, and the route refuses the write. Putting plants *back*
+is always allowed — it can only ever subtract a line item.
+
+**Replacing a plant and removing it are one decision, and the database
+says so.** They are the same slot: a design holding both for one shrub
+would bill the crew twice for digging up the same plant, and every reader
+downstream would have to arbitrate. So `plant_selections` holds one row
+per decided plant with a check constraint —
+`(option_id is not null) <> removed` — and choosing a replacement
+un-removes the plant while clearing it drops the replacement. Migration
+0009.
+
+**What fills the hole is the bed itself.** The photograph cannot fill it:
+those pixels are a shrub, and no mask turns a shrub into the mulch behind
+it. The alternative to inventing the missing mulch is to stop treating a
+cleared bed as a photograph — which is what §1 has said from the start,
+that the image is a view generated from the object graph. So a bed with
+plants out is painted edge to edge in the material it already has, at the
+gauge the section above works out, using the same procedural surfaces the
+swap draws and the model's own description of what is there:
+`lib/design/existingSurface.ts` maps "dyed black hardwood mulch, freshly
+installed" onto the swatch that draws it.
+
+That mapping is a **drawing decision and nothing else**: no line item, no
+band, no chip in the picker. The customer did not order the mulch they
+already own, which is why it returns a swatch id rather than a catalog
+option id — an option id would be selectable, and a selection is priced.
+
+Its one interesting bug was caught by its own test. Matching a sentence
+against an ordered list of patterns cannot get both "wood chips" and
+"granite chips" right, whichever order the list is in; asking *which
+family* first — mulch or stone, with mulch winning the words they share —
+and only then which member, can.
+
 ### What none of this has been through
 
 There is still no `ANTHROPIC_API_KEY` in this container, so:
@@ -714,6 +770,12 @@ There is still no `ANTHROPIC_API_KEY` in this container, so:
   has not been back through a real one.
 - **The per-megapixel coefficient is still a prior.** See above; the log
   line is how it stops being one.
+- **A cleared bed has only been seen against a synthetic photo**, where
+  the drawn mulch is a shade lighter than the mulch beside it because the
+  demo's description says "overgrown shrubs in mulch" and the photo's is
+  nearly black. On a real photo the model names the mulch it can see. How
+  well a repainted bed sits against the un-repainted one next to it is the
+  thing to look at first on the next real yard.
 
 ## The photo experience (Phase 2)
 

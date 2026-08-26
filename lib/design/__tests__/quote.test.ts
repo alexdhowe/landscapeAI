@@ -205,6 +205,68 @@ describe("a swapped plant", () => {
     expect(payload.scope).toContain("Boxwood 'Green Velvet'");
   });
 
+  it("bills a removal for every plant the customer takes out", () => {
+    // The decision the owner made when this was built: clearing a bed
+    // costs money. The crew digs each shrub up and hauls it away, and a
+    // design that shows eight gone without bidding their removal hands
+    // the contractor a quote they lose money on.
+    const quote = quoteProject(
+      baseProject({
+        selections: {},
+        clearedPlantings: ["demo_foundation_plant_1", "demo_foundation_plant_2"],
+      }),
+      wiTypologyConfig,
+      wiBandPolicy,
+      now,
+      CATALOG,
+    );
+    expect(quote).not.toBeNull();
+    expect(quote!.jobType).toBe("foundation_planting_refresh");
+    expect(quote!.customerPayload.scope).toContain("2 existing plants taken out");
+    const removal = quote!.estimate!.lineItems.find(
+      (line) => line.assemblyId === "shrub_removal",
+    );
+    expect(removal).toBeDefined();
+    expect(removal!.quantity.value).toBe(2);
+  });
+
+  it("costs more with the plants out than with them left alone", () => {
+    const kept = quoteProject(
+      baseProject(),
+      wiTypologyConfig,
+      wiBandPolicy,
+      now,
+      CATALOG,
+    )!;
+    const cleared = quoteProject(
+      baseProject({ clearedPlantings: ["demo_foundation_plant_1"] }),
+      wiTypologyConfig,
+      wiBandPolicy,
+      now,
+      CATALOG,
+    )!;
+    expect(cleared.estimate!.sellPrice).toBeGreaterThan(kept.estimate!.sellPrice);
+  });
+
+  it("does not bill a removal for a plant that was replaced instead", () => {
+    // Replacing and removing are one slot. Billing both would charge the
+    // customer twice for taking the same shrub out.
+    const quote = quoteProject(
+      baseProject({
+        selections: {},
+        plantSelections: { demo_foundation_plant_1: BOXWOOD },
+        clearedPlantings: ["demo_foundation_plant_1"],
+      }),
+      wiTypologyConfig,
+      wiBandPolicy,
+      now,
+      CATALOG,
+    )!;
+    expect(
+      quote.estimate!.lineItems.some((line) => line.assemblyId === "shrub_removal"),
+    ).toBe(false);
+  });
+
   it("puts one install line item per plant into the internal estimate", () => {
     const quote = quoteProject(
       withPlants({

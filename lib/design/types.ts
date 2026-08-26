@@ -120,6 +120,20 @@ export type DesignProject = {
    */
   plantSelections?: Record<string, string>;
   /**
+   * The plants the customer took out, by planting id.
+   *
+   * A plant is either left alone, replaced with something else, or taken
+   * out — one decision about one plant, and the store keeps the last two
+   * exclusive. Taking one out is a real instruction with a real cost: the
+   * crew has to dig it up and haul it away, and a design that shows eight
+   * shrubs gone without bidding their removal hands the contractor a quote
+   * they lose money on.
+   *
+   * Absent on projects created before plants could be cleared, so every
+   * reader treats it as optional.
+   */
+  clearedPlantings?: string[];
+  /**
    * regionId → the outline after the customer corrected it.
    *
    * A model placing polygon vertices from a photograph gets close and not

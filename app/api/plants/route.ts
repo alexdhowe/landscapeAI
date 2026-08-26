@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { canRemovePlants } from "@/lib/catalog/plants";
 import { resolveOrg } from "@/lib/org/resolve";
 
 /**
@@ -18,7 +19,14 @@ import { resolveOrg } from "@/lib/org/resolve";
 export async function GET() {
   const org = await resolveOrg();
   return NextResponse.json(
-    { plants: org.plantCatalog },
+    {
+      plants: org.plantCatalog,
+      // Whether this contractor quotes taking an existing plant out. The
+      // design page asks before it offers the control, for the same
+      // reason the plant list is served rather than bundled: what is
+      // offerable is whatever the current published revision can price.
+      canRemove: canRemovePlants(org.priceBook),
+    },
     {
       // One list per revision, and revisions are immutable — but the
       // *current* revision changes when somebody publishes, so this is a

@@ -143,6 +143,15 @@ export async function setPlantSelection(
   return (await store()).setPlantSelection(id, plantingId, optionId);
 }
 
+/** Take plants out of the design, or put them back. */
+export async function setPlantingsCleared(
+  id: string,
+  plantingIds: readonly string[],
+  cleared: boolean,
+): Promise<DesignProject> {
+  return (await store()).setPlantingsCleared(id, plantingIds, cleared);
+}
+
 /** Sharing an address supersedes any earlier decline. */
 export async function setLocation(
   id: string,

@@ -197,6 +197,37 @@ export function createFileStore(): ProjectStore {
         // swappable — the store test compares the whole object.
         if (Object.keys(chosen).length === 0) delete project.plantSelections;
         else project.plantSelections = chosen;
+        // Either way this un-clears the plant. Choosing a replacement and
+        // taking it out are one slot — a plant cannot be both — and
+        // passing null means "leave what is growing there", which is the
+        // opposite of taking it out.
+        if (project.clearedPlantings?.includes(plantingId)) {
+          const kept = project.clearedPlantings.filter((id) => id !== plantingId);
+          if (kept.length === 0) delete project.clearedPlantings;
+          else project.clearedPlantings = kept;
+        }
+      });
+    },
+
+    setPlantingsCleared(id: string, plantingIds: readonly string[], cleared: boolean) {
+      return edit(id, (project) => {
+        for (const plantingId of plantingIds) assertPlanting(project, plantingId);
+        const next = new Set(project.clearedPlantings ?? []);
+        for (const plantingId of plantingIds) {
+          if (cleared) next.add(plantingId);
+          else next.delete(plantingId);
+        }
+        // Taking a plant out drops whatever was going to replace it.
+        if (cleared && project.plantSelections) {
+          const chosen = { ...project.plantSelections };
+          for (const plantingId of plantingIds) delete chosen[plantingId];
+          if (Object.keys(chosen).length === 0) delete project.plantSelections;
+          else project.plantSelections = chosen;
+        }
+        // Absent rather than empty, so a project nobody has cleared
+        // round-trips identically to one from before this existed.
+        if (next.size === 0) delete project.clearedPlantings;
+        else project.clearedPlantings = [...next];
       });
     },
 

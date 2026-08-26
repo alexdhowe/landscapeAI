@@ -105,6 +105,20 @@ export type ProjectStore = {
     optionId: string | null,
   ): Promise<DesignProject>;
   /**
+   * Take plants out of the design, or put them back.
+   *
+   * Plural because "clear the plants" is one instruction about a whole
+   * bed: eight round trips to write one decision is eight chances for a
+   * customer to see half a bed cleared. Setting a plant cleared drops any
+   * replacement chosen for it, because replacing and removing are the
+   * same slot — one decision about one plant.
+   */
+  setPlantingsCleared(
+    id: string,
+    plantingIds: readonly string[],
+    cleared: boolean,
+  ): Promise<DesignProject>;
+  /**
    * Correct a region's outline, or pass null to go back to the one the
    * segmentation produced.
    */

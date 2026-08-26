@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { getOption } from "@/lib/catalog/options";
-import { plantOptionsForRegion } from "@/lib/catalog/plants";
+import { canRemovePlants, plantOptionsForRegion } from "@/lib/catalog/plants";
 import { MAX_OUTLINE_POINTS, isUsableOutline } from "@/lib/design/outline";
 import type { RegionSelection } from "@/lib/design/types";
 import { resolveOrg } from "@/lib/org/resolve";
@@ -16,11 +16,21 @@ import {
   setLocation,
   setMarketContext,
   setPlantSelection,
+  setPlantingsCleared,
   setRegionOutline,
   setSelection,
 } from "@/lib/store/projects";
 
 type Params = { params: Promise<{ projectId: string }> };
+
+/**
+ * The most plants one request may take out.
+ *
+ * "Clear the plants" is one bed's worth, and the biggest bed anybody has
+ * segmented held nine. A hundred is far past any real photograph and
+ * bounds what one request can ask the store to write.
+ */
+const MAX_CLEARED_AT_ONCE = 100;
 
 export async function GET(_request: Request, { params }: Params) {
   const { projectId } = await params;
@@ -45,6 +55,9 @@ export async function GET(_request: Request, { params }: Params) {
  *   { plantingId, plantOptionId }                 — swap one plant, or
  *                                                   null to put back what
  *                                                   is growing there
+ *   { clearPlantings: string[], cleared: bool }   — take plants out of the
+ *                                                   design, or put them
+ *                                                   back
  *   { marketContext: "residential" | "hoa_commercial" }
  *   { location: { address, lat, lng, source } }   — confirmed geocode pick
  *   { addressDeclined: true }                     — the no-address path
@@ -62,6 +75,8 @@ export async function PATCH(request: Request, { params }: Params) {
     selection?: unknown;
     plantingId?: unknown;
     plantOptionId?: unknown;
+    clearPlantings?: unknown;
+    cleared?: unknown;
     polygon?: unknown;
     marketContext?: unknown;
     location?: unknown;
@@ -143,6 +158,50 @@ export async function PATCH(request: Request, { params }: Params) {
       }
       return NextResponse.json(
         await setRegionOutline(projectId, patch.regionId, patch.polygon),
+      );
+    }
+
+    // Taking plants out. Before the plantingId branch, which is about
+    // replacing one plant; this is about a whole bed, and the two use
+    // different keys precisely so neither can be mistaken for the other.
+    if (patch.clearPlantings !== undefined) {
+      const ids = patch.clearPlantings;
+      if (
+        !Array.isArray(ids) ||
+        ids.length === 0 ||
+        ids.length > MAX_CLEARED_AT_ONCE ||
+        !ids.every((id) => typeof id === "string" && id.trim().length > 0)
+      ) {
+        return NextResponse.json(
+          { error: `clearPlantings must be 1-${MAX_CLEARED_AT_ONCE} planting ids` },
+          { status: 400 },
+        );
+      }
+      if (typeof patch.cleared !== "boolean") {
+        return NextResponse.json({ error: "cleared must be a boolean" }, { status: 400 });
+      }
+      const project = await getProject(projectId);
+      for (const plantingId of ids) {
+        if (!regionOfPlanting(project, plantingId)) {
+          return NextResponse.json({ error: "Unknown plant" }, { status: 400 });
+        }
+      }
+      // The same guardrail the plant catalog lives under (map section 1):
+      // nothing may be selected that the pricing engine cannot price, and
+      // the engine throws on an assembly this org's book does not hold.
+      // Putting plants *back* is always allowed — it can only ever
+      // subtract a line item.
+      if (patch.cleared) {
+        const org = await resolveOrg();
+        if (!canRemovePlants(org.priceBook)) {
+          return NextResponse.json(
+            { error: "This contractor does not quote plant removal" },
+            { status: 400 },
+          );
+        }
+      }
+      return NextResponse.json(
+        await setPlantingsCleared(projectId, ids, patch.cleared),
       );
     }
 

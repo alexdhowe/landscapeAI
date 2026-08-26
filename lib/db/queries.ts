@@ -14,7 +14,7 @@
  *
  * Server-only.
  */
-import { and, asc, desc, eq, isNotNull, lte, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, lte, sql } from "drizzle-orm";
 
 import type { PlantOption } from "../catalog/plants";
 import { plantOptionsFor } from "../catalog/plants";
@@ -225,10 +225,19 @@ export function toDesignProject(row: ProjectBundle): DesignProject {
       adjusted.map((r) => [r.regionId, r.adjustedPolygon!]),
     );
   }
-  if (row.plantSelections.length > 0) {
+  // One table, two decisions: a row either names what replaces the plant
+  // or says it was taken out. The check constraint keeps it to one.
+  const replaced = row.plantSelections.filter(
+    (p): p is typeof p & { optionId: string } => p.optionId !== null && !p.removed,
+  );
+  if (replaced.length > 0) {
     project.plantSelections = Object.fromEntries(
-      row.plantSelections.map((p) => [p.plantingId, p.optionId]),
+      replaced.map((p) => [p.plantingId, p.optionId]),
     );
+  }
+  const cleared = row.plantSelections.filter((p) => p.removed);
+  if (cleared.length > 0) {
+    project.clearedPlantings = cleared.map((p) => p.plantingId);
   }
   if (row.property) project.location = toLocation(row.property);
   if (row.addressDeclined) project.addressDeclined = true;
@@ -448,6 +457,50 @@ export async function setRegionAdjustedPolygon(
     .where(and(eq(regions.projectId, projectId), eq(regions.regionId, regionId)));
 }
 
+/**
+ * Take plants out of the design, or put them back.
+ *
+ * One statement per direction rather than a round trip per plant: "clear
+ * the plants" is one instruction about a bed, and eight separate writes
+ * is eight chances to leave half a bed cleared.
+ */
+export async function setPlantingsRemoved(
+  db: Database,
+  projectId: string,
+  plantingIds: readonly string[],
+  removed: boolean,
+): Promise<void> {
+  if (plantingIds.length === 0) return;
+  if (!removed) {
+    await db
+      .delete(plantSelections)
+      .where(
+        and(
+          eq(plantSelections.projectId, projectId),
+          inArray(plantSelections.plantingId, [...plantingIds]),
+          eq(plantSelections.removed, true),
+        ),
+      );
+    return;
+  }
+  // Taking a plant out drops whatever was going to replace it: the two
+  // are one decision, and the check constraint refuses to hold both.
+  await db
+    .insert(plantSelections)
+    .values(
+      plantingIds.map((plantingId) => ({
+        projectId,
+        plantingId,
+        optionId: null,
+        removed: true,
+      })),
+    )
+    .onConflictDoUpdate({
+      target: [plantSelections.projectId, plantSelections.plantingId],
+      set: { optionId: null, removed: true },
+    });
+}
+
 export async function upsertPlantSelection(
   db: Database,
   projectId: string,
@@ -467,10 +520,11 @@ export async function upsertPlantSelection(
   }
   await db
     .insert(plantSelections)
-    .values({ projectId, plantingId, optionId })
+    .values({ projectId, plantingId, optionId, removed: false })
     .onConflictDoUpdate({
       target: [plantSelections.projectId, plantSelections.plantingId],
-      set: { optionId },
+      // Choosing a replacement un-takes-out the plant. Same slot.
+      set: { optionId, removed: false },
     });
 }
 

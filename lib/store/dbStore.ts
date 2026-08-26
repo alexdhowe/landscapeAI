@@ -116,6 +116,13 @@ export function createDbStore(): ProjectStore {
       });
     },
 
+    setPlantingsCleared(id: string, plantingIds: readonly string[], cleared: boolean) {
+      return edit(id, async (project) => {
+        for (const plantingId of plantingIds) assertPlanting(project, plantingId);
+        await q.setPlantingsRemoved(await getDb(), id, plantingIds, cleared);
+      });
+    },
+
     /** Sharing an address supersedes any earlier decline. */
     setLocation(id: string, location: ProjectLocation) {
       return edit(id, async () => q.setProjectLocation(await getDb(), id, location));
