@@ -1,87 +1,75 @@
 "use client";
 
-import { useId } from "react";
+import { memo, useId } from "react";
 
 import type { SwatchId } from "@/lib/catalog/options";
+import {
+  facetPath,
+  grainTile,
+  type GrainShape,
+  type TileOptions,
+} from "@/lib/design/grains";
 
 /**
- * Procedural material textures, built from SVG turbulence.
+ * Procedural material surfaces, drawn as the pieces they are made of.
  * Deterministic by construction (fixed seeds) — the visual swap stays a
  * projection of the object graph, and there are no texture assets to
  * license or ship.
  *
  * ---------------------------------------------------------------------
- * Why these are built the way they are
+ * Five faults have been fixed here, and they were found in this order
  * ---------------------------------------------------------------------
- * Four faults have been fixed here, and they were found in this order:
- *
  * 1. **The filters ran in linearRGB**, which is the SVG default. Every
  *    ramp was therefore tuned against a colour space nobody was reading
  *    it in: a table value of 0.28 came out at sRGB 0.57, roughly twice as
  *    light as written, so every material landed somewhere between pale
- *    grey and pale beige. Every filter here declares
- *    `color-interpolation-filters="sRGB"`.
+ *    grey and pale beige.
  *
- * 2. **The noise was never spread.** Measured, not assumed: a greyed
- *    `feTurbulence` field occupies a narrow band of the 0–1 range — 0.40
- *    to 0.62 for fractalNoise, 0.12 to 0.42 for turbulence — so a colour
- *    table indexed 0..1 only ever used a fifth of itself, and every
- *    material came out a flat wash of its own mid tone. `SPREAD` stretches
- *    each generator's measured band onto the ramp first.
+ * 2. **The noise was never spread.** A greyed `feTurbulence` field
+ *    occupies a narrow band of the 0–1 range, so a colour table indexed
+ *    0..1 only ever used a fifth of itself and every material came out a
+ *    flat wash of its own mid tone.
  *
  * 3. **Nothing distinguished a chip from a fibre.** One generator, one
- *    treatment, and river rock at 0.07 against granite chips at 0.09 — a
- *    30% difference in gauge between a 1.5in stone and a 3/8in chip.
+ *    treatment, six materials.
  *
  * 4. **The gauge was a fraction of the frame, which is not a gauge.** The
  *    same constant drew a "1.5in river rock" at 29 pixels whether the
- *    photo showed ten feet of yard or fifty; on a 300 sf bed that is a
- *    stone thirteen times life size, and a bed of them reads — the
- *    owner's word — as "goofy". A spec now carries its grain in
- *    **inches**, and `lib/design/scale.ts` turns that into pixels using
- *    the region's own reported area.
+ *    photo showed ten feet of yard or fifty — on a 300 sf bed, a stone
+ *    thirteen times life size. A spec carries its grain in **inches**
+ *    now, and `lib/design/scale.ts` turns that into pixels using the
+ *    region's own reported area.
+ *
+ * 5. **It was still a cloud, and gravel is objects.** All four fixes
+ *    landed and washed river rock on a real photograph still read as grey
+ *    fabric with blotches in it, because a noise field is continuous: no
+ *    edges, so no pieces, so no material. The pieces are drawn now —
+ *    see `lib/design/grains.ts`, which is where that argument is made in
+ *    full. This file is the colour and the light over the top of them.
  *
  * ---------------------------------------------------------------------
- * Why there is no lighting in here any more
+ * How a material is put together now
  * ---------------------------------------------------------------------
- * There was: `feDiffuseLighting` over the noise, which gave river rock
- * real pebble relief and a specular sheen, and it looked good at the old
- * enormous gauge. It cannot survive the correct one. `feDiffuseLighting`
- * builds its surface normals from a fixed **three-pixel** kernel, so the
- * lit result is not scale-invariant: measured at a 20px gauge it spans
- * 0.43–0.84 of the range, and at the 5px gauge a real photograph calls
- * for it collapses to 0.63–0.71 — a flat wash again, and with it the
- * whole reason the ramps were retuned.
- *
- * Greyed noise has no such kernel: the same generator measures 0.12–0.42
- * at a 5px gauge and 0.12–0.42 at 20px. So tone comes from the grain
- * itself, and what separates a stone from a shred is the shape of the
- * grain (`turbulence` gives lumps with edges between them,
- * `fractalNoise` with an aspect ratio gives strands), its contrast, and
- * its colour. At the gauge a yard photograph actually resolves — a stone
- * four or five pixels across — that is all that was ever visible anyway.
+ * A `<pattern>` of real geometry: a dark ground, and on it a jittered
+ * field of stones or shreds at the material's own gauge, each with its
+ * own size, angle and tone. Then one filter over the painted result for
+ * the two things that are properties of the *bed* rather than of a
+ * piece — the low-frequency patchiness no real bed is without, and the
+ * feathered edge that sits the swap into the photograph instead of on it.
  */
 
-/** Colour ramp: dark end of the grain → light end, per channel. */
+/** Colour ramp: dark end of the material → light end, per channel. */
 type Ramp = { r: number[]; g: number[]; b: number[] };
 
 type TextureSpec = {
   label: string;
   /**
-   * The material's own grain, **in inches of real material**.
-   *
-   * `inches` is one piece: 1.5 for washed river rock, 3/8 for granite
-   * chips. `aspect` is how much longer than wide it lies — 1 for a stone,
-   * four-ish for a shred of hardwood mulch, which is what makes mulch
-   * read as strands rather than specks.
+   * How wide one piece of this material is, **in inches of real
+   * material**: 1.5 for washed river rock, 3/8 for granite chips.
    */
-  grain: {
-    type: "fractalNoise" | "turbulence";
-    inches: number;
-    aspect: number;
-    numOctaves: number;
-    seed: number;
-  };
+  inches: number;
+  /** What one piece looks like and how they pack. */
+  shape: GrainShape;
   ramp: Ramp;
   /**
    * The low-frequency variation that keeps a bed from looking like paint:
@@ -91,137 +79,236 @@ type TextureSpec = {
    * darkest patch gets, as a multiplier.
    */
   mottle: { feet: number; seed: number; depth: number };
-};
-
-/**
- * Each generator's measured output band, mapped onto the ramp.
- *
- * `[slope, intercept]`, applied before the colour table. Both were
- * measured off a rendered canvas rather than reasoned about, and both are
- * invariant to frequency and octave count — which is the property that
- * makes one number right at every gauge. They map the 5th–95th percentile
- * of the field onto 0.20–0.86, leaving the tails room rather than
- * clipping them flat.
- */
-const SPREAD: Record<TextureSpec["grain"]["type"], [number, number]> = {
-  // Measured 0.40 / 0.51 / 0.62 at p5 / mean / p95.
-  fractalNoise: [3.0, -1.0],
-  // Measured 0.12 / 0.26 / 0.42 — |noise|, so it sits low and spreads wide.
-  turbulence: [2.16, -0.05],
+  /**
+   * How much the sun catches the top of one piece. Washed rock is
+   * tumbled and wet-looking; crushed stone is matte; mulch is dust.
+   */
+  sheen: number;
 };
 
 /**
  * The materials.
  *
- * The mid of each ramp is the material's colour in daylight, divided by
- * the mottle's mean (~0.86) so the two together land on it. The
- * photograph's own light takes another ~15% off on top, which is why a
- * granite chip is written here at 0.65 and reads on the picture at about
- * 0.48 — the colour of grey granite in a photograph, not the colour of
- * granite in a showroom.
+ * A ramp's light end is what a piece catching the sun looks like and its
+ * dark end is one in the shade of its neighbour — not a range of
+ * *different* pieces. The tone spread in `shape` decides how far apart
+ * two neighbouring pieces are allowed to be, which is what separates a
+ * bag of mixed river rock from a bag of one quarry's granite.
+ *
+ * Values are written for a photograph, not a showroom: the picture's own
+ * light is multiplied over all of this afterwards and takes another 15%
+ * or so off the top.
  */
 export const SWATCH_SPECS: Record<SwatchId, TextureSpec> = {
-  // -- mulches: soft-edged, matte, lying in strands ---------------------
+  // -- mulches: long shreds, lying every which way, matte --------------
   mulch_brown: {
     label: "Hardwood",
-    grain: { type: "fractalNoise", inches: 1, aspect: 4.5, numOctaves: 4, seed: 7 },
+    inches: 1,
+    shape: { kind: "strand", aspect: 4.5, packing: 0.3, toneSpread: 0.42, seed: 7 },
     ramp: {
-      r: [0.3, 0.4, 0.49, 0.58, 0.68],
-      g: [0.2, 0.27, 0.34, 0.41, 0.49],
-      b: [0.12, 0.17, 0.22, 0.28, 0.34],
+      r: [0.22, 0.33, 0.45, 0.56, 0.67],
+      g: [0.14, 0.21, 0.3, 0.39, 0.48],
+      b: [0.08, 0.13, 0.19, 0.26, 0.33],
     },
-    mottle: { feet: 3, seed: 47, depth: 0.72 },
+    mottle: { feet: 3, seed: 47, depth: 0.78 },
+    sheen: 0,
   },
   mulch_dark: {
     label: "Dyed brown",
-    grain: { type: "fractalNoise", inches: 1, aspect: 4.5, numOctaves: 4, seed: 11 },
+    inches: 1,
+    shape: { kind: "strand", aspect: 4.5, packing: 0.3, toneSpread: 0.38, seed: 11 },
     ramp: {
-      r: [0.17, 0.24, 0.3, 0.37, 0.44],
-      g: [0.11, 0.15, 0.2, 0.25, 0.3],
-      b: [0.07, 0.1, 0.14, 0.18, 0.22],
+      r: [0.11, 0.17, 0.24, 0.32, 0.41],
+      g: [0.07, 0.11, 0.16, 0.22, 0.28],
+      b: [0.05, 0.07, 0.11, 0.15, 0.2],
     },
-    mottle: { feet: 3, seed: 53, depth: 0.74 },
+    mottle: { feet: 3, seed: 53, depth: 0.8 },
+    sheen: 0,
   },
   mulch_red: {
     label: "Cedar",
-    grain: { type: "fractalNoise", inches: 1.1, aspect: 4, numOctaves: 4, seed: 13 },
+    inches: 1.1,
+    shape: { kind: "strand", aspect: 4.2, packing: 0.3, toneSpread: 0.4, seed: 13 },
     ramp: {
-      r: [0.36, 0.47, 0.58, 0.68, 0.78],
-      g: [0.19, 0.26, 0.33, 0.4, 0.47],
-      b: [0.11, 0.16, 0.21, 0.26, 0.31],
+      r: [0.26, 0.36, 0.46, 0.57, 0.68],
+      g: [0.14, 0.2, 0.27, 0.35, 0.43],
+      b: [0.09, 0.13, 0.18, 0.24, 0.3],
     },
-    mottle: { feet: 3, seed: 59, depth: 0.74 },
+    mottle: { feet: 3, seed: 59, depth: 0.8 },
+    sheen: 0,
   },
-  // -- stone: lumps with edges between them, at their real gauge --------
+  // -- stone: discrete pieces, at their real gauge ----------------------
   stone_gray: {
     label: "River rock",
     // 1.5in washed rock: four times the gauge of the granite chips beside
     // it in the picker, because that is four times the stone.
-    grain: { type: "turbulence", inches: 1.5, aspect: 1, numOctaves: 2, seed: 3 },
-    // The brightest step is deliberately hot: washed rock has stones that
-    // catch the sun, and that top end is what is left of the specular
-    // pass this file used to run.
+    inches: 1.5,
+    // Tumbled, so rounded; and a wide tone spread, because a load of
+    // washed river rock is grey and buff and near-white all mixed
+    // together. A single-tone bed of it is the giveaway that it is not
+    // rock at all.
+    shape: { kind: "pebble", aspect: 1.25, packing: 0.7, toneSpread: 0.5, seed: 3 },
     ramp: {
-      r: [0.4, 0.55, 0.7, 0.84, 0.97],
-      g: [0.39, 0.54, 0.69, 0.83, 0.96],
-      b: [0.36, 0.5, 0.64, 0.78, 0.92],
+      r: [0.28, 0.41, 0.54, 0.68, 0.84],
+      g: [0.27, 0.4, 0.53, 0.67, 0.83],
+      b: [0.25, 0.37, 0.49, 0.63, 0.79],
     },
-    mottle: { feet: 3.5, seed: 61, depth: 0.68 },
+    mottle: { feet: 3.5, seed: 61, depth: 0.82 },
+    sheen: 0.3,
   },
   stone_granite: {
     label: "Granite",
-    grain: { type: "turbulence", inches: 0.375, aspect: 1, numOctaves: 2, seed: 5 },
+    inches: 0.375,
+    // Crushed, so angular, and out of one quarry, so the pieces are far
+    // closer to each other in tone than washed rock is.
+    shape: { kind: "chip", aspect: 1.2, packing: 0.68, toneSpread: 0.34, seed: 5 },
     ramp: {
-      r: [0.38, 0.52, 0.65, 0.78, 0.9],
-      g: [0.38, 0.52, 0.65, 0.78, 0.89],
-      b: [0.39, 0.53, 0.66, 0.79, 0.91],
+      r: [0.28, 0.41, 0.55, 0.69, 0.84],
+      g: [0.28, 0.41, 0.55, 0.69, 0.84],
+      b: [0.3, 0.43, 0.57, 0.71, 0.86],
     },
-    mottle: { feet: 2, seed: 41, depth: 0.7 },
+    mottle: { feet: 2, seed: 41, depth: 0.84 },
+    sheen: 0.12,
   },
   stone_buff: {
     label: "Limestone",
-    grain: { type: "turbulence", inches: 0.75, aspect: 1, numOctaves: 2, seed: 9 },
+    inches: 0.75,
+    shape: { kind: "chip", aspect: 1.25, packing: 0.68, toneSpread: 0.3, seed: 9 },
     ramp: {
-      r: [0.6, 0.74, 0.86, 0.94, 1.0],
-      g: [0.53, 0.66, 0.79, 0.88, 0.96],
-      b: [0.36, 0.48, 0.61, 0.71, 0.82],
+      r: [0.47, 0.61, 0.74, 0.86, 0.97],
+      g: [0.41, 0.54, 0.66, 0.78, 0.9],
+      b: [0.27, 0.37, 0.48, 0.6, 0.73],
     },
-    mottle: { feet: 2.5, seed: 43, depth: 0.78 },
+    mottle: { feet: 2.5, seed: 43, depth: 0.86 },
+    sheen: 0.1,
   },
   // -- a replanted bed: foliage, not a surface --------------------------
   planting_mixed: {
     label: "Planted",
-    grain: { type: "fractalNoise", inches: 6, aspect: 1.1, numOctaves: 3, seed: 21 },
+    inches: 5,
+    // Whole plants, not pieces of material: big, round, overlapping
+    // masses of leaf with deep shade between them.
+    shape: { kind: "pebble", aspect: 1.15, packing: 0.6, toneSpread: 0.46, seed: 21 },
     ramp: {
-      r: [0.1, 0.16, 0.22, 0.3, 0.38],
-      g: [0.22, 0.32, 0.42, 0.52, 0.62],
-      b: [0.08, 0.13, 0.18, 0.24, 0.3],
+      r: [0.06, 0.11, 0.17, 0.24, 0.33],
+      g: [0.14, 0.23, 0.33, 0.44, 0.56],
+      b: [0.05, 0.09, 0.14, 0.2, 0.27],
     },
-    mottle: { feet: 3, seed: 21, depth: 0.7 },
+    mottle: { feet: 3, seed: 21, depth: 0.8 },
+    sheen: 0.08,
   },
 };
 
 /** How big one piece of this material is, in inches. */
 export function grainInches(swatch: SwatchId): number {
-  return SWATCH_SPECS[swatch].grain.inches;
+  return SWATCH_SPECS[swatch].inches;
 }
 
-/** Averages a noise field's channels into grey, so a ramp gets one signal. */
-const TO_GREY =
-  "0.34 0.34 0.34 0 0 0.34 0.34 0.34 0 0 0.34 0.34 0.34 0 0 0 0 0 0 1";
+/** A colour off the material's ramp, at `tone` from dark end to light. */
+function rampColor(ramp: Ramp, tone: number, scale = 1): string {
+  const at = (stops: number[]) => {
+    const t = Math.min(0.999999, Math.max(0, tone)) * (stops.length - 1);
+    const i = Math.floor(t);
+    const value = stops[i] + (stops[i + 1] - stops[i]) * (t - i);
+    return Math.round(Math.min(1, Math.max(0, value * scale)) * 255);
+  };
+  return `rgb(${at(ramp.r)},${at(ramp.g)},${at(ramp.b)})`;
+}
 
 /**
- * One material filter, at the gauge this photograph calls for.
+ * One material, drawn as a repeating tile of its own pieces.
  *
- * Applying `filter="url(#<id>)"` to a shape replaces its fill with the
- * generated texture, clipped to a feathered (blurred-alpha) edge so a swap
- * sits into the photo instead of on it.
- *
- * `gaugePx` is how many pixels of *this* frame one piece of the material
- * covers — see `lib/design/scale.ts`, which works it out from the
- * region's own reported area. `edgeBlur` is in view units.
+ * Memoised: at a fine gauge a tile is a couple of thousand shapes, and
+ * nothing about it changes while a customer drags a plant across the
+ * photograph. Without this, every drag frame rebuilds every stone.
  */
-export function TextureFilter({
+export const MaterialPattern = memo(function MaterialPattern({
+  id,
+  swatch,
+  gaugePx,
+  sheenId,
+  ground = true,
+  tile: tileOptions,
+}: {
+  id: string;
+  swatch: SwatchId;
+  gaugePx: number;
+  sheenId: string;
+  /** The dark bed under the pieces. Off for a layer drawn over another. */
+  ground?: boolean;
+  tile?: TileOptions;
+}) {
+  const spec = SWATCH_SPECS[swatch];
+  const tile = grainTile(spec.shape, gaugePx, tileOptions);
+  return (
+    <pattern
+      id={id}
+      patternUnits="userSpaceOnUse"
+      width={tile.size}
+      height={tile.size}
+    >
+      {/* The ground the pieces lie on. Darker than the darkest piece,
+          because what shows between two stones is the shadow down the
+          gap, not more stone. The second layer has none: it has to let
+          the first one through. */}
+      {ground && (
+        <rect
+          width={tile.size}
+          height={tile.size}
+          fill={rampColor(spec.ramp, 0, 0.62)}
+        />
+      )}
+      {tile.grains.map((grain, i) =>
+        grain.points ? (
+          <path
+            key={i}
+            d={facetPath(grain.points)}
+            transform={`translate(${grain.x.toFixed(2)} ${grain.y.toFixed(2)})`}
+            fill={rampColor(spec.ramp, grain.tone)}
+          />
+        ) : (
+          <ellipse
+            key={i}
+            cx={grain.x.toFixed(2)}
+            cy={grain.y.toFixed(2)}
+            rx={grain.rx.toFixed(2)}
+            ry={grain.ry.toFixed(2)}
+            transform={`rotate(${grain.angle.toFixed(1)} ${grain.x.toFixed(2)} ${grain.y.toFixed(2)})`}
+            fill={rampColor(spec.ramp, grain.tone)}
+          />
+        ),
+      )}
+      {/* The sun on the top of each stone, off one shared gradient. What
+          makes a pebble read as round rather than as a grey blob — and
+          the last of what `feDiffuseLighting` used to do, at a scale that
+          survives being drawn small. */}
+      {spec.sheen > 0 &&
+        tile.grains
+          .filter((grain) => !grain.points)
+          .map((grain, i) => (
+            <ellipse
+              key={`s${i}`}
+              cx={grain.x.toFixed(2)}
+              cy={grain.y.toFixed(2)}
+              rx={grain.rx.toFixed(2)}
+              ry={grain.ry.toFixed(2)}
+              transform={`rotate(${grain.angle.toFixed(1)} ${grain.x.toFixed(2)} ${grain.y.toFixed(2)})`}
+              fill={`url(#${sheenId})`}
+              opacity={spec.sheen * (0.5 + grain.tone * 0.5)}
+            />
+          ))}
+    </pattern>
+  );
+});
+
+/**
+ * What is true of the bed rather than of one piece: patchiness, and the
+ * feathered edge.
+ *
+ * Applied to the shape already painted with the pattern, so
+ * `SourceGraphic` is the material itself.
+ */
+function MaterialFilter({
   id,
   swatch,
   gaugePx,
@@ -236,13 +323,7 @@ export function TextureFilter({
   edgeBlur: number;
 }) {
   const spec = SWATCH_SPECS[swatch];
-  const [slope, intercept] = SPREAD[spec.grain.type];
-  // One period per piece, stretched along x for anything that lies in
-  // strands rather than sitting as a lump. The floor is a guard, not a
-  // design: a sub-pixel frequency is aliasing rather than texture.
-  const frequencyX = 1 / Math.max(1.2, gaugePx * spec.grain.aspect);
-  const frequencyY = 1 / Math.max(1.2, gaugePx);
-  const mottlePx = Math.max(gaugePx * 4, spec.mottle.feet * pixelsPerFoot);
+  const mottlePx = Math.max(gaugePx * 6, spec.mottle.feet * pixelsPerFoot);
   return (
     // sRGB, not the linearRGB default: every ramp in this file is written
     // in the colour space it is read in. See the file header.
@@ -254,26 +335,6 @@ export function TextureFilter({
       height="110%"
       colorInterpolationFilters="sRGB"
     >
-      <feTurbulence
-        type={spec.grain.type}
-        baseFrequency={`${frequencyX.toFixed(5)} ${frequencyY.toFixed(5)}`}
-        numOctaves={spec.grain.numOctaves}
-        seed={spec.grain.seed}
-        result="noise"
-      />
-      <feColorMatrix in="noise" type="matrix" values={TO_GREY} result="grey" />
-      {/* The grain's own measured band onto the ramp's full range.
-          Without this every material is a flat wash of its mid tone. */}
-      <feComponentTransfer in="grey" result="spread">
-        <feFuncR type="linear" slope={slope} intercept={intercept} />
-        <feFuncG type="linear" slope={slope} intercept={intercept} />
-        <feFuncB type="linear" slope={slope} intercept={intercept} />
-      </feComponentTransfer>
-      <feComponentTransfer in="spread" result="colored">
-        <feFuncR type="table" tableValues={spec.ramp.r.join(" ")} />
-        <feFuncG type="table" tableValues={spec.ramp.g.join(" ")} />
-        <feFuncB type="table" tableValues={spec.ramp.b.join(" ")} />
-      </feComponentTransfer>
       {/* Patchiness at the scale of a few feet of bed: a real bed is
           never one flat tone across twenty of them. */}
       <feTurbulence
@@ -283,21 +344,29 @@ export function TextureFilter({
         seed={spec.mottle.seed}
         result="mottleNoise"
       />
-      <feColorMatrix in="mottleNoise" type="matrix" values={TO_GREY} result="mottleGrey" />
-      <feComponentTransfer in="mottleGrey" result="mottle">
+      <feColorMatrix
+        in="mottleNoise"
+        type="matrix"
+        values="0.34 0.34 0.34 0 0 0.34 0.34 0.34 0 0 0.34 0.34 0.34 0 0 0 0 0 0 1"
+        result="mottleGrey"
+      />
+      {/* The generator's own measured band onto the ramp's full range —
+          fractalNoise sits between 0.40 and 0.62, so without this the
+          mottle is a constant and does nothing at all. */}
+      <feComponentTransfer in="mottleGrey" result="mottleSpread">
         <feFuncR type="linear" slope={3} intercept={-1} />
         <feFuncG type="linear" slope={3} intercept={-1} />
         <feFuncB type="linear" slope={3} intercept={-1} />
       </feComponentTransfer>
-      <feComponentTransfer in="mottle" result="mottleRamp">
+      <feComponentTransfer in="mottleSpread" result="mottle">
         <feFuncR type="table" tableValues={`${spec.mottle.depth} 1`} />
         <feFuncG type="table" tableValues={`${spec.mottle.depth} 1`} />
         <feFuncB type="table" tableValues={`${spec.mottle.depth} 1`} />
       </feComponentTransfer>
       {/* k1 alone: the product of the two, i.e. a multiply. */}
       <feComposite
-        in="colored"
-        in2="mottleRamp"
+        in="SourceGraphic"
+        in2="mottle"
         operator="arithmetic"
         k1={1}
         k2={0}
@@ -305,7 +374,7 @@ export function TextureFilter({
         k4={0}
         result="surface"
       />
-      {/* Erode before blurring so the feather fades inward — the texture
+      {/* Erode before blurring so the feather fades inward — the material
           must never leak past the region boundary onto the photo. */}
       <feMorphology in="SourceAlpha" operator="erode" radius={edgeBlur} result="eroded" />
       <feGaussianBlur in="eroded" stdDeviation={edgeBlur} result="softEdge" />
@@ -315,35 +384,87 @@ export function TextureFilter({
 }
 
 /**
- * The filters a photo canvas needs: one per region that has been swapped,
- * at that region's own gauge.
+ * The defs a photo canvas needs: one pattern and one filter per region
+ * that has been swapped, at that region's own gauge.
  *
- * One filter per *material* was enough while the gauge was a constant. It
- * is not any more: two beds in the same photograph, one twenty feet from
- * the camera and one sixty, want the same river rock drawn at different
- * sizes. Regions with nothing swapped get no filter at all, which is also
- * fewer than before — the old set built all seven on every render whether
- * anything used them or not.
+ * One set per *material* was enough while the gauge was a constant. It is
+ * not any more: two beds in the same photograph, one twenty feet from the
+ * camera and one sixty, want the same river rock drawn at different
+ * sizes. Regions with nothing swapped get nothing at all.
  */
 export type RegionTexture = {
   /** `tex-<regionId>`, referenced by the region's fill. */
+  fillId: string;
+  /** `tex2-<regionId>`: the second layer, painted over the first. */
+  overlayId: string;
+  /** `texfx-<regionId>`, referenced by the region's filter. */
   filterId: string;
   swatch: SwatchId;
   gaugePx: number;
   pixelsPerFoot: number;
 };
 
-export function SwatchFilters({
+/**
+ * The second layer: a smaller tile, half as many pieces, and a different
+ * handful of them out of the same material.
+ *
+ * 0.71 is not a round fraction on purpose. A tile at half or a third of
+ * the first would line up with it every two or three repeats and buy
+ * nothing.
+ */
+const OVERLAY: TileOptions = { tileScale: 0.71, density: 0.55, seedOffset: 977 };
+
+/** The sun on a stone: one gradient, shared by every piece in every bed. */
+function Sheen({ id }: { id: string }) {
+  return (
+    <radialGradient id={id} cx="0.5" cy="0.5" r="0.5" fx="0.34" fy="0.3">
+      <stop offset="0" stopColor="#ffffff" stopOpacity="0.9" />
+      <stop offset="0.55" stopColor="#ffffff" stopOpacity="0.22" />
+      <stop offset="1" stopColor="#ffffff" stopOpacity="0" />
+    </radialGradient>
+  );
+}
+
+export function MaterialDefs({
   textures,
   edgeBlur,
 }: {
   textures: readonly RegionTexture[];
   edgeBlur: number;
 }) {
+  const uid = useId().replace(/[^a-zA-Z0-9_-]/g, "");
+  const sheenId = `sheen-${uid}`;
   return (
     <defs>
+      <Sheen id={sheenId} />
       {textures.map((texture) => (
-        <TextureFilter
+        <MaterialPattern
+          key={texture.fillId}
+          id={texture.fillId}
+          swatch={texture.swatch}
+          gaugePx={texture.gaugePx}
+          sheenId={sheenId}
+        />
+      ))}
+      {/* The same material again, from a different part of the pile, on a
+          tile that shares no common multiple with the first. One tile of
+          stone across a bed twenty times its width is the same
+          arrangement twenty times over, and the eye finds it — it read as
+          wallpaper on a bed-width strip. Two periods that never line up
+          have a combined period longer than any bed. */}
+      {textures.map((texture) => (
+        <MaterialPattern
+          key={texture.overlayId}
+          id={texture.overlayId}
+          swatch={texture.swatch}
+          gaugePx={texture.gaugePx}
+          sheenId={sheenId}
+          ground={false}
+          tile={OVERLAY}
+        />
+      ))}
+      {textures.map((texture) => (
+        <MaterialFilter
           key={texture.filterId}
           id={texture.filterId}
           swatch={texture.swatch}
@@ -370,8 +491,9 @@ const SWATCH_UNITS = 120;
 
 /** Small square preview of a material for the catalog picker. */
 export function SwatchChip({ swatch }: { swatch: SwatchId }) {
-  const uid = useId();
-  const filterId = `chip${uid.replace(/[^a-zA-Z0-9_-]/g, "")}-${swatch}`;
+  const uid = useId().replace(/[^a-zA-Z0-9_-]/g, "");
+  const fillId = `chip-${uid}-${swatch}`;
+  const sheenId = `chipsheen-${uid}`;
   const perInch = SWATCH_UNITS / SWATCH_INCHES_ACROSS;
   return (
     <svg
@@ -380,15 +502,15 @@ export function SwatchChip({ swatch }: { swatch: SwatchId }) {
       aria-hidden
     >
       <defs>
-        <TextureFilter
-          id={filterId}
+        <Sheen id={sheenId} />
+        <MaterialPattern
+          id={fillId}
           swatch={swatch}
-          gaugePx={SWATCH_SPECS[swatch].grain.inches * perInch}
-          pixelsPerFoot={perInch * 12}
-          edgeBlur={0}
+          gaugePx={SWATCH_SPECS[swatch].inches * perInch}
+          sheenId={sheenId}
         />
       </defs>
-      <rect width={SWATCH_UNITS} height={SWATCH_UNITS} filter={`url(#${filterId})`} />
+      <rect width={SWATCH_UNITS} height={SWATCH_UNITS} fill={`url(#${fillId})`} />
     </svg>
   );
 }

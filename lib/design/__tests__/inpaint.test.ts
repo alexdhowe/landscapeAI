@@ -14,7 +14,13 @@
 import { describe, expect, it } from "vitest";
 
 import type { NormalizedPoint, Planting } from "../../vision/types";
-import { cleanGround, holesToFill, patchFor, planHoles } from "../inpaint";
+import {
+  cleanGround,
+  holesToFill,
+  magnifyFor,
+  patchFor,
+  planHoles,
+} from "../inpaint";
 
 /**
  * The demo foundation planting, which is the awkward case: a strip about
@@ -135,6 +141,22 @@ describe("patchFor", () => {
     expect(patchFor(LONE, ground)?.cx).toBe(0.55);
   });
 
+  it("will not cross a bed for a big patch in different light", () => {
+    // What a real yard reported as a "random artifact": half the bed in
+    // sun, and the size bonus reaching across to grab a bright piece of
+    // it for a hole in the shade.
+    const ground = [
+      { cx: 0.53, cy: 0.65, r: 0.014 },
+      { cx: 0.95, cy: 0.65, r: 0.06 },
+    ];
+    expect(patchFor(LONE, ground)?.cx).toBe(0.53);
+  });
+
+  it("takes the far one anyway when the bed has nothing nearer", () => {
+    const ground = [{ cx: 0.95, cy: 0.65, r: 0.06 }];
+    expect(patchFor(LONE, ground)?.cx).toBe(0.95);
+  });
+
   it("returns nothing when there is no clean ground", () => {
     expect(patchFor(LONE, [])).toBeNull();
   });
@@ -244,6 +266,32 @@ describe("the hole's own size", () => {
     const neighbour: Planting = { id: "n", cx: 0.567, cy: 0.65, rx: 0.03, ry: 0.03 };
     const plans = planHoles([LONE, neighbour], [LONE, neighbour], OPEN);
     expect(plans[0].margin).toBeGreaterThan(1.12);
+  });
+});
+
+describe("magnifyFor", () => {
+  it("draws a patch at life size when it is big enough to serve", () => {
+    expect(magnifyFor(LONE, { cx: 0.5, cy: 0.8, r: 0.05 }, 1.3)).toBe(1);
+  });
+
+  it("blows up a patch too small to fill the hole without stamping", () => {
+    // The failure this exists for: a thumbnail of mulch found between two
+    // shrubs, tiled six times across one hole, reading as hatching.
+    const magnify = magnifyFor(LONE, { cx: 0.5, cy: 0.8, r: 0.006 }, 1.3);
+    expect(magnify).toBeGreaterThan(1);
+    // …but never so far that the ground goes soft against the sharp bed.
+    expect(magnify).toBeLessThanOrEqual(3);
+  });
+
+  it("keeps the repeat under the cap wherever it can", () => {
+    const patch = { cx: 0.5, cy: 0.8, r: 0.02 };
+    const magnify = magnifyFor(LONE, patch, 1.3);
+    const hole = Math.max(LONE.rx, LONE.ry) * 1.3;
+    expect(hole / (patch.r * magnify)).toBeLessThanOrEqual(2.001);
+  });
+
+  it("has nothing to magnify without a patch", () => {
+    expect(magnifyFor(LONE, null, 1.3)).toBe(1);
   });
 });
 

@@ -28,7 +28,7 @@ import { REGION_KIND_LABELS } from "@/lib/vision/types";
 import { PlantGlyph } from "./plantGlyphs";
 import { SegmentationWait } from "./SegmentationWait";
 import { KIND_COLORS } from "./regionColors";
-import { SwatchFilters, grainInches, type RegionTexture } from "./swatches";
+import { MaterialDefs, grainInches, type RegionTexture } from "./swatches";
 
 type Props = {
   photoUrl: string;
@@ -394,7 +394,9 @@ export function PhotoCanvas({
       }) ?? assumedPixelsPerFoot();
     return [
       {
-        filterId: `tex-${region.id}`,
+        fillId: `tex-${region.id}`,
+        overlayId: `tex2-${region.id}`,
+        filterId: `texfx-${region.id}`,
         swatch,
         gaugePx: renderedGaugePx(grainInches(swatch), perFoot, w),
         pixelsPerFoot: (perFoot * w) / 1600,
@@ -434,7 +436,7 @@ export function PhotoCanvas({
         viewBox={`0 0 ${w} ${h}`}
         preserveAspectRatio="none"
       >
-        <SwatchFilters textures={textures} edgeBlur={w * 0.0035} />
+        <MaterialDefs textures={textures} edgeBlur={w * 0.0035} />
         <defs>
           {/*
             The photograph's *light*, and nothing else, for multiplying
@@ -529,7 +531,7 @@ export function PhotoCanvas({
               h,
             );
             return planHoles(holes, region.plantings ?? [], liveOutline(region)).map(
-              ({ planting: plant, margin, patch, above, below }) => {
+              ({ planting: plant, margin, patch, magnify, above, below }) => {
                 // Cut wider than the plant is drawn: a hole that comes up
                 // short leaves a rim of shrub standing around the fill,
                 // and one that runs over refills clean bed with clean bed.
@@ -539,8 +541,12 @@ export function PhotoCanvas({
                   rx: plant.rx * w * margin,
                   ry: plant.ry * h * margin,
                 };
-                const tileW = patch ? patch.r * 2 * w : 0;
-                const tileH = patch ? patch.r * 2 * h : 0;
+                // Magnified rather than repeated more often where the
+                // bed had nothing bigger to offer: the whole photograph
+                // is drawn `magnify` times life size inside the tile, so
+                // the same patch covers more of the hole.
+                const tileW = patch ? patch.r * 2 * w * magnify : 0;
+                const tileH = patch ? patch.r * 2 * h * magnify : 0;
                 return (
                   <g key={`hole-defs-${plant.id}`}>
                     <mask id={`hole-${plant.id}`}>
@@ -557,10 +563,10 @@ export function PhotoCanvas({
                       >
                         <image
                           href={photoUrl}
-                          x={-(patch.cx - patch.r) * w}
-                          y={-(patch.cy - patch.r) * h}
-                          width={w}
-                          height={h}
+                          x={-(patch.cx - patch.r) * w * magnify}
+                          y={-(patch.cy - patch.r) * h * magnify}
+                          width={w * magnify}
+                          height={h * magnify}
                           preserveAspectRatio="none"
                         />
                       </pattern>
@@ -741,13 +747,16 @@ export function PhotoCanvas({
                 // plants punched out of it, so the material lands on the
                 // ground and the planting stays photographic.
                 <g mask={`url(#swap-${region.id})`}>
-                  {/* Textured material, feather-edged into the photo. */}
-                  <path
-                    d={d}
-                    fill="#ffffff"
-                    filter={`url(#tex-${region.id})`}
-                    opacity={0.96}
-                  />
+                  {/* Textured material, feather-edged into the photo.
+                      Two layers of the same stone on tiles that never
+                      line up, so a bed twenty tiles wide does not read as
+                      wallpaper — see `swatches.tsx`. The patchiness and
+                      the feather are filtered over both together, which
+                      is why they share one group. */}
+                  <g filter={`url(#texfx-${region.id})`} opacity={0.96}>
+                    <path d={d} fill={`url(#tex-${region.id})`} />
+                    <path d={d} fill={`url(#tex2-${region.id})`} />
+                  </g>
                   {/* The photo's own shading, multiplied back on top so
                       existing light and shadow read through the swap. */}
                   <image

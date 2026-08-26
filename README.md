@@ -62,9 +62,11 @@ deployment.
 | A reload during that wait | ✅ fixed — it bought a second metered vision call for an answer the first one was already producing |
 | A ring of old mulch around every plant | ✅ fixed — the cut-out was 18% wider than the plant and then blurred wider still; the material now reaches the plant's own edge |
 | "Granite that just colours the mulch grey" | ✅ fixed — the filters ran in linearRGB, the noise was never spread across its ramp, one generator served six materials, and the photo's own grain was multiplied back at full detail |
+| "Tell me that looks like real river rock" | ✅ fixed — it did not, because turbulence is a cloud and gravel is objects: no edges, so no pieces, so grey fabric with blotches in it. The pieces are drawn now — rounded stones, angular chips, shreds of bark, at the material's own gauge, over a dark ground, on two tiles that never line up |
 | A bed of boulders | ✅ fixed — the gauge was a fraction of the frame, which is not a gauge: a "1.5in river rock" was drawn about twelve times life size. It comes from the region's own reported area now |
 | Taking the plants out | ✅ done — clear one or a whole bed, the hole is clone-stamped out of the photograph itself, and every removal is bid as `shrub_removal` |
 | "It fills the hole in like MS Paint" | ✅ fixed — the fill was a repaint in a material nobody chose, clipped to the bed so the half of a shrub standing against the brick survived it. It is real pixels now: a hole cut wide, tiled from the nearest clean piece of that bed, and the slices that stood above or below the bed filled from what was actually behind them |
+| A stamped rectangle where a plant had been | ✅ fixed — the fill was tiling a thumbnail of bed six times across one hole, and reaching across a bed for a big bright patch to do it with. It magnifies a small patch rather than repeating it, and will not cross a bed for one in different light |
 | Moving a plant that is already there | ✅ done — drag it anywhere in its bed, no mode and no toggle; the drop is confined to the outline server-side and each move is bid as `shrub_transplant` |
 | The aerial leg (`/design/[id]/locate`) | ⛔ gated off — deliberately: no paid imagery or geocoder until there is a working MVP |
 
@@ -72,7 +74,7 @@ All six phases are in, they run on Postgres, the contractor console is behind
 a login, the price book is editable, photos live in object storage when a
 bucket is configured, and the whole thing has been designed and opened on a
 phone — on a phone *branch*, for the first time in the twelfth session,
-which is its own story. `npm test` runs 693 tests — with a database and
+which is its own story. `npm test` runs 711 tests — with a database and
 without one.
 
 **It has not been deployed.** The tenth session wrote the configuration —
@@ -99,7 +101,7 @@ store, so a clean checkout runs the demo with nothing to provision.
 ```sh
 npm run doctor    # is this machine set up? checks .env.local, the API key (against the
                   # real API), and the console login — and says what to fix, in English.
-npm test          # Vitest — 693 tests across every phase. No server, no network, no browser.
+npm test          # Vitest — 711 tests across every phase. No server, no network, no browser.
 npm run typecheck
 npm run dev
 npm run build
@@ -679,17 +681,76 @@ good-looking at the old enormous gauge, and impossible at the correct one.
 `feDiffuseLighting` derives its normals from a fixed **three-pixel**
 kernel, so it is not scale-invariant: measured, it spans 0.43–0.84 of the
 range at a 20px gauge and collapses to 0.63–0.71 at 5px, which is the flat
-wash the ramps were retuned to escape. Greyed noise has no kernel and
-measures the same band at both. So tone comes from the grain itself now,
-and what separates a stone from a shred is the shape of the grain
-(`turbulence` lumps against `fractalNoise` strands), its contrast and its
-colour. At a stone four pixels across, that was all that was ever visible.
+wash the ramps were retuned to escape.
 
 Swatches in the picker are unaffected by any of this: a swatch is a macro
 shot, nine inches across the square, so a 1.5in stone is a stone and a
 3/8in chip is a chip at the ratio they actually differ by. Drawing a
 swatch at the photograph's gauge would make every one of them the same
 grey square.
+
+### "Tell me that looks like real river rock"
+
+It did not. Four faults in the material pipeline had been found and fixed
+— the colour space, the unspread noise, one generator serving six
+materials, the gauge — and a bed of washed river rock on a real parking
+lot still came back as flat grey weave with darker blotches in it. The
+report was one sentence and it was right.
+
+The fifth fault was underneath all four:
+
+> **Turbulence is a cloud. Gravel is objects.**
+
+A noise field is continuous. It has no edges, so it has no pieces, so
+whatever colour and contrast it is given it reads as *fabric*. That is why
+every material in the app had the same character however differently it
+was tuned, and why removing the lighting — correct, for the reason above —
+took the last thing that had been faking individual stones. What was
+missing was never tone. It is that a stone has an outline, its neighbour
+has a different outline, and there is a shadow in the gap between them.
+
+So `lib/design/grains.ts` draws the pieces. A jittered field of grains at
+the material's own gauge, each with its own size, rotation and tone, over
+a ground darker than the darkest piece — because what shows between two
+stones is the shadow down the gap, not more stone. Three shapes, because
+three things behave differently in a bed:
+
+| shape | material | why |
+|---|---|---|
+| **pebble** | washed river rock | tumbled, so rounded; and a wide tone spread, because a load of it is grey and buff and near-white mixed together |
+| **chip** | crushed granite, buff limestone | angular facets with flat faces, and out of one quarry, so far closer in tone than washed rock |
+| **strand** | hardwood, dyed, cedar mulch | long, thin, lying every which way, with far more overlap than stone |
+
+The sheen came back with them, at a scale that survives being drawn small:
+one shared radial gradient painted over each pebble, which is what makes a
+stone read as round rather than as a grey blob. It is a property of the
+piece now, not of a three-pixel kernel, so it looks the same at any gauge.
+
+Three things went wrong on the way and each set a constant:
+
+**A tile repeats, and the eye finds it.** A few hundred pixels of stone
+across a few thousand pixels of bed is six copies of one arrangement, and
+it read as wallpaper on a bed-width strip. The fix is a second layer of
+the same material on a tile at 0.71 of the first — not a round fraction on
+purpose, because a tile at half or a third lines up every two or three
+repeats and buys nothing. Two periods that never meet have a combined
+period longer than any bed.
+
+**Evenness in value is worth nothing if it buys structure in space.** An
+attempt to spread the tones evenly rather than randomly — stepping by the
+golden ratio, which fills 0..1 better than any random draw — put a bed of
+gravel in vertical stripes, because pieces are generated in lattice order
+and the index that walked the tones was also the position.
+
+**A tile barely longer than the piece in it *is* the motif.** Spacing was
+a multiple of a piece's width, which for a shred five times longer than it
+is wide meant a tile of two shred-lengths. A bed of mulch came out as
+visible houndstooth. Spacing is a multiple of the piece's *longest*
+dimension now, and a tile is at least six pieces across.
+
+Judged on a contact sheet of every material at the two gauges a real photo
+produces — a bed twelve feet off the camera and one forty — plus a
+bed-width strip of each to check for a repeat, and then on the app itself.
 
 **Still open: the angle.** Half of the owner's guess was right and half is
 untouched. The gauge is one number per region, so stones at the near edge
@@ -782,6 +843,21 @@ separately, because filling them with mulch is the repaint's mistake
 again. The part of the hole above the outline is sampled from further
 above and the part below it from further below, far enough to clear the
 hole: brick stays brick, lawn stays lawn, sky stays sky.
+
+**A patch has to be near, and it has to be big enough.** The first real
+bed put both to the test at once. One hole came back as a stamped
+rectangle with visible hatching in it: the search had found a thumbnail of
+clean mulch between two shrubs and tiled it six times across the hole.
+Another came back bright: the preference for a bigger patch had reached
+across the bed to grab a piece of the sunlit half for a hole in the shade.
+
+Both are fixed at their cause and neither by refusing to fill. A patch too
+small is **magnified rather than repeated more often** — ground blown up
+to twice its size is still ground, ground stamped six times is a pattern —
+capped at three, past which the softness shows against the sharp bed
+around it. And a patch is taken from within a sixth of the frame where the
+region has one that near, because bigger is better only while the light is
+the same light, and near is the only proxy for that available.
 
 One asymmetry is worth stating because it sets a constant. Cutting the
 hole wider than the plant costs a ring of clean bed, which is refilled

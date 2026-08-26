@@ -97,11 +97,31 @@ const HOLE_MARGINS = [1.3, 1.2, 1.12];
 const HOLE_MARGIN = HOLE_MARGINS[HOLE_MARGINS.length - 1];
 
 /**
- * The smallest patch worth tiling, as a fraction of the frame's width.
- * About ten pixels on a phone photograph — below that a "patch" is a few
- * grains of mulch and the repeat starts to read as a pattern.
+ * The smallest piece of ground worth sampling, as a fraction of the
+ * frame's width. Under this it is a handful of pixels and any fill made
+ * from it is noise.
+ *
+ * Deliberately low, because a crowded bed genuinely has nothing bigger:
+ * four shrubs in a strip barely taller than they are leave slivers, and a
+ * fill from a sliver still beats leaving the shrub standing. What keeps a
+ * sliver from reading as a stamped pattern is magnification, below —
+ * which is the fix for the hatched patch a real bed produced, not a
+ * higher floor here.
  */
-const MIN_PATCH = 0.006;
+const MIN_PATCH = 0.005;
+
+/**
+ * How many times a tile may repeat across a hole before the repeat itself
+ * becomes the thing you see.
+ *
+ * Where the region has nothing bigger to offer, the tile is drawn
+ * magnified rather than repeated more often. Ground blown up to twice its
+ * size is ground; ground stamped six times is a pattern. Past three the
+ * softness starts to show against the sharp bed around it, so that is
+ * where magnifying stops and repeating resumes.
+ */
+const MAX_REPEATS = 2;
+const MAX_MAGNIFY = 3;
 
 /** How finely the region is searched for clean ground. */
 const GRID = 44;
@@ -113,6 +133,18 @@ const GRID = 44;
  * size is what decides whether the fill reads as material or as tiling.
  */
 const PATCH_BONUS = 6;
+
+/**
+ * How far a patch may be taken from, as a fraction of the frame.
+ *
+ * A bed is not one colour end to end. Half of it is in the sun and half
+ * under the tree, and a big clean patch of the sunlit half is exactly
+ * what the size bonus above will reach across a bed to grab — which puts
+ * a bright square in a shaded bed, and a bright square is the "random
+ * artifact" a real yard reported. Bigger is better only while the light
+ * is the same light, and near is the only proxy for that available here.
+ */
+const MAX_PATCH_DISTANCE = 0.16;
 
 /** Nothing reaches further than this fraction of the frame, in any sense. */
 const MAX_REACH = 0.3;
@@ -149,6 +181,8 @@ export type HolePlan = {
   /** How far past the plant's own ellipse to cut the hole. */
   margin: number;
   patch: Patch | null;
+  /** How much to blow the patch up before tiling it. 1 is life size. */
+  magnify: number;
   above: number | null;
   below: number | null;
 };
@@ -280,11 +314,16 @@ export function patchFor(
   margin: number = HOLE_MARGIN,
 ): Patch | null {
   const want = Math.max(planting.rx, planting.ry) * margin;
+  const distanceTo = (patch: Patch) =>
+    Math.hypot(patch.cx - planting.cx, patch.cy - planting.cy);
+  // Near enough to be lit the same way, if this region has anything that
+  // near. A bed that does not is a bed where the nearest thing wins.
+  const near = ground.filter((patch) => distanceTo(patch) <= MAX_PATCH_DISTANCE);
+  const candidates = near.length > 0 ? near : ground;
   let best: Patch | null = null;
   let bestScore = Infinity;
-  for (const patch of ground) {
-    const distance = Math.hypot(patch.cx - planting.cx, patch.cy - planting.cy);
-    const score = distance - PATCH_BONUS * Math.min(patch.r, want);
+  for (const patch of candidates) {
+    const score = distanceTo(patch) - PATCH_BONUS * Math.min(patch.r, want);
     if (score < bestScore) {
       bestScore = score;
       best = patch;
@@ -320,6 +359,17 @@ function marginFor(planting: Planting, staying: readonly Planting[]): number {
     if (clear) return margin;
   }
   return HOLE_MARGIN;
+}
+
+/** How far the patch has to be blown up to stay under the repeat cap. */
+export function magnifyFor(
+  planting: Planting,
+  patch: Patch | null,
+  margin: number,
+): number {
+  if (!patch) return 1;
+  const hole = Math.max(planting.rx, planting.ry) * margin;
+  return Math.min(MAX_MAGNIFY, Math.max(1, hole / (patch.r * MAX_REPEATS)));
 }
 
 /** Where a vertical line through `x` enters and leaves the outline. */
@@ -390,10 +440,12 @@ export function planHoles(
   const staying = allPlantings.filter((plant) => !going.has(plant.id));
   return holes.map((planting) => {
     const margin = marginFor(planting, staying);
+    const patch = patchFor(planting, ground, margin);
     return {
       planting,
       margin,
-      patch: patchFor(planting, ground, margin),
+      patch,
+      magnify: magnifyFor(planting, patch, margin),
       ...outsideReach(planting, polygon, margin),
     };
   });
