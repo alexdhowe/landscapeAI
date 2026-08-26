@@ -209,6 +209,19 @@ export function createFileStore(): ProjectStore {
       });
     },
 
+    setPlantPosition(id: string, plantingId: string, point: NormalizedPoint | null) {
+      return edit(id, (project) => {
+        assertPlanting(project, plantingId);
+        const moved = { ...(project.plantPositions ?? {}) };
+        if (point === null) delete moved[plantingId];
+        else moved[plantingId] = point;
+        // Absent rather than empty, so a design nobody has rearranged
+        // round-trips identically to one from before plants could move.
+        if (Object.keys(moved).length === 0) delete project.plantPositions;
+        else project.plantPositions = moved;
+      });
+    },
+
     setPlantingsCleared(id: string, plantingIds: readonly string[], cleared: boolean) {
       return edit(id, (project) => {
         for (const plantingId of plantingIds) assertPlanting(project, plantingId);
@@ -223,6 +236,13 @@ export function createFileStore(): ProjectStore {
           for (const plantingId of plantingIds) delete chosen[plantingId];
           if (Object.keys(chosen).length === 0) delete project.plantSelections;
           else project.plantSelections = chosen;
+        }
+        // A plant that is gone has nowhere to be.
+        if (cleared && project.plantPositions) {
+          const moved = { ...project.plantPositions };
+          for (const plantingId of plantingIds) delete moved[plantingId];
+          if (Object.keys(moved).length === 0) delete project.plantPositions;
+          else project.plantPositions = moved;
         }
         // Absent rather than empty, so a project nobody has cleared
         // round-trips identically to one from before this existed.

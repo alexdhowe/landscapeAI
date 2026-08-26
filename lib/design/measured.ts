@@ -20,10 +20,16 @@ import type {
 } from "../pricing/types";
 import type { JobType, MarketContext, TypologyConfig } from "../pricing/typology";
 import { inferJobType } from "./band";
-import { canRemovePlants } from "../catalog/plants";
-import type { ResolvedPlantChoice, ResolvedPlantRemoval } from "./plants";
+import { canMovePlants, canRemovePlants } from "../catalog/plants";
+import type {
+  ResolvedPlantChoice,
+  ResolvedPlantMove,
+  ResolvedPlantRemoval,
+} from "./plants";
 import {
+  moveScopeLines,
   plantAssemblyCounts,
+  plantMoveCount,
   plantRemovalCount,
   plantScopeLines,
   removalScopeLines,
@@ -173,6 +179,7 @@ export function designEngineInput(
   capturedAt: string,
   plantChoices: readonly ResolvedPlantChoice[] = [],
   removals: readonly ResolvedPlantRemoval[] = [],
+  moves: readonly ResolvedPlantMove[] = [],
 ): DesignEngineInput {
   const selectedRegionIds = Object.keys(selections).filter((id) =>
     hasChoice(selections[id]),
@@ -241,8 +248,18 @@ export function designEngineInput(
       quantity: { value: count, unit: "EA", source: "photo", confidence: 0.9, capturedAt },
     });
   }
+  // Moving a plant is its own work — lift it intact, dig and amend the
+  // new hole, set and water — so it is its own assembly rather than a
+  // removal, and nothing leaves the site.
+  for (const [assemblyId, count] of plantMoveCount(moves, canMovePlants(config.priceBook))) {
+    engineSelections.push({
+      assemblyId,
+      quantity: { value: count, unit: "EA", source: "photo", confidence: 0.9, capturedAt },
+    });
+  }
   for (const line of plantScopeLines(plantChoices)) scope.add(line);
   for (const line of removalScopeLines(removals)) scope.add(line);
+  for (const line of moveScopeLines(moves)) scope.add(line);
 
   return {
     engineSelections,
@@ -267,8 +284,9 @@ export function measuredBandForSelections(
   now: () => string = () => new Date().toISOString(),
   plantChoices: readonly ResolvedPlantChoice[] = [],
   removals: readonly ResolvedPlantRemoval[] = [],
+  moves: readonly ResolvedPlantMove[] = [],
 ): MeasuredDesignBand | null {
-  const jobType = inferJobType(selections, plantChoices, removals);
+  const jobType = inferJobType(selections, plantChoices, removals, moves);
   if (!jobType) return null;
 
   const input = designEngineInput(
@@ -279,6 +297,7 @@ export function measuredBandForSelections(
     now(),
     plantChoices,
     removals,
+    moves,
   );
   const { engineSelections, scope, measuredRegionIds, unmeasuredRegionIds } = input;
   if (measuredRegionIds.length === 0) return null;

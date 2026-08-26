@@ -596,6 +596,33 @@ export const plantSelections = pgTable(
   ],
 );
 
+/**
+ * Where the customer moved a plant to.
+ *
+ * Its own table rather than two more columns on `plant_selections`,
+ * because a position is orthogonal to the decision there: a plant can be
+ * moved *and* swapped, since where it goes and what it is are different
+ * questions. Squeezing it into the one-decision row would have meant
+ * relaxing the check constraint that makes that row trustworthy.
+ *
+ * Normalized coordinates, like every other geometry the photo carries, so
+ * they survive the image being re-encoded or re-scaled.
+ */
+export const plantPositions = pgTable(
+  "plant_positions",
+  {
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    /** `${regionId}_plant_${n}`, assigned by the segmentation parser. */
+    plantingId: text("planting_id").notNull(),
+    /** Fractions of the image, origin top-left. */
+    cx: doublePrecision("cx").notNull(),
+    cy: doublePrecision("cy").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.projectId, t.plantingId] })],
+);
+
 // ---------------------------------------------------------------------------
 // The frozen record
 // ---------------------------------------------------------------------------
@@ -735,6 +762,7 @@ export const projectRelations = relations(projects, ({ one, many }) => ({
   regions: many(regions),
   selections: many(selections),
   plantSelections: many(plantSelections),
+  plantPositions: many(plantPositions),
   snapshots: many(estimateSnapshots),
   deltas: many(measurementDeltas),
 }));
@@ -797,6 +825,13 @@ export const priceBookRevisionRelations = relations(
 export const deltaRelations = relations(measurementDeltas, ({ one }) => ({
   project: one(projects, {
     fields: [measurementDeltas.projectId],
+    references: [projects.id],
+  }),
+}));
+
+export const plantPositionRelations = relations(plantPositions, ({ one }) => ({
+  project: one(projects, {
+    fields: [plantPositions.projectId],
     references: [projects.id],
   }),
 }));

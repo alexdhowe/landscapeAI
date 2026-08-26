@@ -250,6 +250,30 @@ const fixedAssemblies: Assembly[] = [
     ],
   },
   {
+    /**
+     * Moving a plant the yard already has, rather than buying one.
+     *
+     * Priced as its own assembly because it is its own work: lift the
+     * root ball intact, carry it, dig and amend the new hole, set,
+     * backfill and water. Slower than a removal (0.5 h) because the plant
+     * has to survive it, and slower than planting a #3 container (0.33 h)
+     * because the hole it comes out of has to be dug first — 0.83 h is
+     * the two added together, and there is no disposal because nothing
+     * leaves the site.
+     *
+     * A WI-average placeholder like everything else in this file (see
+     * "Seed data" in the README): a contractor sets their own number in
+     * `/pricebook` and this stops being a guess.
+     */
+    id: "shrub_transplant",
+    name: "Transplant an existing shrub",
+    unit: "EA",
+    components: [
+      { costItemId: "labor_crew", productionRate: 1.2 },
+      { costItemId: "planting_soil", qtyPerUnit: 0.05 },
+    ],
+  },
+  {
     id: "boulder_place_18",
     name: "Accent boulder placement, 18in",
     unit: "EA",

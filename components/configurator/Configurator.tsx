@@ -17,6 +17,7 @@ import { Skeleton, SkeletonText } from "@/components/ui/Skeleton";
 import { CatalogPicker } from "./CatalogPicker";
 import { PhotoCanvas, RegionStrip } from "./PhotoCanvas";
 import { OutlineControls } from "./OutlineControls";
+import { PlantMoveControls } from "./PlantMoveControls";
 import { PlantPicker, PlantStrip } from "./PlantPicker";
 import { PriceRail, type BandPayload } from "./PriceRail";
 import { SubmitLead } from "./SubmitLead";
@@ -70,6 +71,8 @@ export function Configurator({ projectId }: { projectId: string }) {
    * whatever the current published revision can price.
    */
   const [canRemovePlants, setCanRemovePlants] = useState(false);
+  /** …and whether it can price moving one. */
+  const [canMovePlants, setCanMovePlants] = useState(false);
   const [adjustingRegionId, setAdjustingRegionId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -93,10 +96,15 @@ export function Configurator({ projectId }: { projectId: string }) {
     (async () => {
       const res = await fetch("/api/plants").catch(() => null);
       if (!res?.ok || cancelled) return;
-      const body = (await res.json()) as { plants: PlantOption[]; canRemove?: boolean };
+      const body = (await res.json()) as {
+        plants: PlantOption[];
+        canRemove?: boolean;
+        canMove?: boolean;
+      };
       if (cancelled) return;
       setPlantCatalog(body.plants ?? []);
       setCanRemovePlants(Boolean(body.canRemove));
+      setCanMovePlants(Boolean(body.canMove));
     })();
     return () => {
       cancelled = true;
@@ -230,6 +238,28 @@ export function Configurator({ projectId }: { projectId: string }) {
           setProject((await res.json()) as DesignProject);
           // Taking plants out is priced — one `shrub_removal` each — so
           // the band has to move with it, the same as any other choice.
+          await refreshBand();
+        }
+      } finally {
+        setBusy(false);
+      }
+    },
+    [projectId, refreshBand],
+  );
+
+  const applyPlantPosition = useCallback(
+    async (plantingId: string, point: NormalizedPoint | null) => {
+      setBusy(true);
+      try {
+        const res = await fetch(`/api/projects/${projectId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ plantingId, plantAt: point }),
+        });
+        if (res.ok) {
+          setProject((await res.json()) as DesignProject);
+          // Moving a plant is crew time — one transplant each — so the
+          // band moves with it.
           await refreshBand();
         }
       } finally {
@@ -393,6 +423,12 @@ export function Configurator({ projectId }: { projectId: string }) {
             notice={demo ? "Example areas" : undefined}
             plantSelections={project.plantSelections}
             clearedPlantings={project.clearedPlantings}
+            plantPositions={project.plantPositions}
+            onMovePlant={
+              locked || !canMovePlants
+                ? undefined
+                : (plantingId, point) => void applyPlantPosition(plantingId, point)
+            }
             plantCatalog={plantCatalog}
             selectedPlantingId={selectedPlantingId}
             regionOutlines={project.regionOutlines}
@@ -533,6 +569,24 @@ export function Configurator({ projectId }: { projectId: string }) {
                     onChange={(polygon) => void applyOutline(selectedRegion.id, polygon)}
                     onReset={() => void applyOutline(selectedRegion.id, null)}
                   />
+                  {canMovePlants && (
+                    <PlantMoveControls
+                      region={selectedRegion}
+                      plantPositions={project.plantPositions}
+                      selectedPlanting={
+                        (selectedRegion.plantings ?? []).find(
+                          (plant) => plant.id === selectedPlantingId,
+                        ) ?? null
+                      }
+                      busy={busy}
+                      onMove={(plantingId, point) =>
+                        void applyPlantPosition(plantingId, point)
+                      }
+                      onPutBack={(plantingId) =>
+                        void applyPlantPosition(plantingId, null)
+                      }
+                    />
+                  )}
                 </>
               ) : null}
 

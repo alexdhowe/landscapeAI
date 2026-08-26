@@ -134,6 +134,21 @@ export type DesignProject = {
    */
   clearedPlantings?: string[];
   /**
+   * plantingId → where the customer moved that plant to, normalized.
+   *
+   * The segmentation says where a plant *is*; this says where the design
+   * wants it. Beside the segmentation rather than inside it, for the same
+   * reason a corrected outline is: what the photo found and what the
+   * customer decided are different facts, and only one of them can be
+   * improved by a better prompt.
+   *
+   * Orthogonal to the two decisions in `plantSelections` /
+   * `clearedPlantings` — a plant can be moved and swapped, because where
+   * it goes and what it is are different questions. A cleared plant's
+   * position is meaningless and is dropped with it.
+   */
+  plantPositions?: Record<string, NormalizedPoint>;
+  /**
    * regionId → the outline after the customer corrected it.
    *
    * A model placing polygon vertices from a photograph gets close and not

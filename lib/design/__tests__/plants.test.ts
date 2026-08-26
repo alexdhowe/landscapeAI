@@ -11,11 +11,14 @@ import { plantMetaBySku, wiPriceBook } from "../../../seed/pricebook.seed";
 import { plantOptionsFor } from "../../catalog/plants";
 import type { SegmentedRegion } from "../../vision/types";
 import {
+  moveScopeLines,
   plantAssemblyCounts,
+  plantMoveCount,
   plantRemovalCount,
   plantScopeLines,
   removalScopeLines,
   resolvePlantChoices,
+  resolvePlantMoves,
   resolvePlantRemovals,
 } from "../plants";
 
@@ -187,5 +190,78 @@ describe("removalScopeLines", () => {
 
   it("says nothing when nothing came out", () => {
     expect(removalScopeLines([])).toEqual([]);
+  });
+});
+
+describe("resolvePlantMoves", () => {
+  it("resolves a moved plant to its region and a job type", () => {
+    const [move] = resolvePlantMoves([FOUNDATION], { f2: [0.5, 0.8] }, undefined);
+    expect(move.planting.id).toBe("f2");
+    expect(move.region.id).toBe("foundation");
+    expect(move.to).toEqual([0.5, 0.8]);
+    expect(move.jobType).toBe("foundation_planting_refresh");
+  });
+
+  it("is not a move when the plant came back to where it started", () => {
+    // A tap that wobbled, or a "put it back". Neither is crew time.
+    expect(resolvePlantMoves([FOUNDATION], { f2: [0.4, 0.75] }, undefined)).toEqual([]);
+  });
+
+  it("does not move a plant that was taken out", () => {
+    // Cleared wins: a plant that is leaving the site has nowhere to be,
+    // and billing a transplant for it would bill for lifting it twice.
+    expect(resolvePlantMoves([FOUNDATION], { f2: [0.5, 0.8] }, ["f2"])).toEqual([]);
+  });
+
+  it("drops a move for a plant this segmentation no longer has", () => {
+    expect(resolvePlantMoves([FOUNDATION], { gone: [0.5, 0.8] }, undefined)).toEqual([]);
+  });
+
+  it("has nothing to resolve when nothing was moved", () => {
+    expect(resolvePlantMoves([FOUNDATION], undefined, undefined)).toEqual([]);
+    expect(resolvePlantMoves([FOUNDATION], {}, undefined)).toEqual([]);
+  });
+
+  it("still moves a plant that is also being replaced", () => {
+    // Two decisions about one plant: what goes there, and where it goes.
+    // The crew lifts what is standing there whatever goes back in.
+    const moves = resolvePlantMoves([FOUNDATION], { f2: [0.5, 0.8] }, undefined);
+    expect(moves).toHaveLength(1);
+  });
+});
+
+describe("plantMoveCount", () => {
+  it("is one transplant per plant moved", () => {
+    const moves = resolvePlantMoves(
+      [FOUNDATION],
+      { f1: [0.5, 0.8], f3: [0.3, 0.85] },
+      undefined,
+    );
+    expect([...plantMoveCount(moves, true)]).toEqual([["shrub_transplant", 2]]);
+  });
+
+  it("prices nothing where the book cannot price a transplant", () => {
+    // Same guard as a removal: the engine throws on an assembly the book
+    // does not hold, and a contractor who deletes it must not break the
+    // estimate of a project somebody already rearranged.
+    const moves = resolvePlantMoves([FOUNDATION], { f1: [0.5, 0.8] }, undefined);
+    expect([...plantMoveCount(moves, false)]).toEqual([]);
+  });
+});
+
+describe("moveScopeLines", () => {
+  it("counts them, in the customer's words rather than the assembly's", () => {
+    const two = resolvePlantMoves(
+      [FOUNDATION],
+      { f1: [0.5, 0.8], f3: [0.3, 0.85] },
+      undefined,
+    );
+    expect(moveScopeLines(two)).toEqual(["2 plants moved"]);
+    const one = resolvePlantMoves([FOUNDATION], { f1: [0.5, 0.8] }, undefined);
+    expect(moveScopeLines(one)).toEqual(["1 plant moved"]);
+  });
+
+  it("says nothing when nothing moved", () => {
+    expect(moveScopeLines([])).toEqual([]);
   });
 });

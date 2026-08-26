@@ -24,7 +24,13 @@
  * Pure. No I/O.
  */
 import type { PlantOption } from "../catalog/plants";
-import { PLANT_REMOVAL_ASSEMBLY, plantJobTypeForRegion } from "../catalog/plants";
+import {
+  PLANT_REMOVAL_ASSEMBLY,
+  PLANT_TRANSPLANT_ASSEMBLY,
+  plantJobTypeForRegion,
+} from "../catalog/plants";
+import type { NormalizedPoint } from "../vision/types";
+import { isPlantMoved } from "./plantPlacement";
 import type { JobType } from "../pricing/typology";
 import type { Planting, SegmentedRegion } from "../vision/types";
 
@@ -167,5 +173,71 @@ export function removalScopeLines(
     removals.length === 1
       ? "1 existing plant taken out"
       : `${removals.length} existing plants taken out`,
+  ];
+}
+
+/**
+ * One plant the customer moved somewhere else in its bed.
+ *
+ * Moving is orthogonal to the replace/remove decision — where a plant
+ * goes and what it is are different questions — so a moved plant may
+ * also be a swapped one, and both are billed: the crew lifts what is
+ * there, and plants what was chosen, in the new spot.
+ *
+ * A cleared plant is not here. It has nowhere to be.
+ */
+export type ResolvedPlantMove = {
+  region: SegmentedRegion;
+  planting: Planting;
+  /** Where it is going, normalized. */
+  to: NormalizedPoint;
+  jobType: JobType;
+};
+
+export function resolvePlantMoves(
+  regions: readonly SegmentedRegion[],
+  plantPositions: Record<string, NormalizedPoint> | undefined,
+  clearedPlantings: readonly string[] | undefined,
+): ResolvedPlantMove[] {
+  if (!plantPositions || Object.keys(plantPositions).length === 0) return [];
+  const cleared = new Set(clearedPlantings ?? []);
+  const moves: ResolvedPlantMove[] = [];
+  for (const region of regions) {
+    const jobType = plantJobTypeForRegion(region.kind);
+    if (!jobType) continue;
+    for (const planting of region.plantings ?? []) {
+      if (cleared.has(planting.id)) continue;
+      if (!isPlantMoved(planting, plantPositions)) continue;
+      moves.push({ region, planting, to: plantPositions[planting.id], jobType });
+    }
+  }
+  return moves;
+}
+
+/**
+ * What moving plants adds to the engine: one `shrub_transplant` each, or
+ * nothing where the book cannot price one.
+ *
+ * A moved plant that is *also* being replaced still bills the
+ * transplant — the crew lifts the existing plant out of the way whatever
+ * goes back in — and the install for its replacement is billed
+ * separately, by `plantAssemblyCounts`.
+ */
+export function plantMoveCount(
+  moves: readonly ResolvedPlantMove[],
+  priceable: boolean,
+): Map<string, number> {
+  const counts = new Map<string, number>();
+  if (priceable && moves.length > 0) {
+    counts.set(PLANT_TRANSPLANT_ASSEMBLY, moves.length);
+  }
+  return counts;
+}
+
+/** The scope line moving plants adds under the band. */
+export function moveScopeLines(moves: readonly ResolvedPlantMove[]): string[] {
+  if (moves.length === 0) return [];
+  return [
+    moves.length === 1 ? "1 plant moved" : `${moves.length} plants moved`,
   ];
 }

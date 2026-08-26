@@ -5,7 +5,8 @@ import { useRef, useState } from "react";
 import { getOption } from "@/lib/catalog/options";
 import type { SwatchId } from "@/lib/catalog/options";
 import type { PlantOption } from "@/lib/catalog/plants";
-import { existingSurfaceSwatch } from "@/lib/design/existingSurface";
+import { holesToFill, planHoles } from "@/lib/design/inpaint";
+import { isPlantMoved } from "@/lib/design/plantPlacement";
 import { layoutRegionMarkers } from "@/lib/design/markers";
 import {
   assumedPixelsPerFoot,
@@ -21,7 +22,7 @@ import {
 } from "@/lib/design/outline";
 import type { RegionSelection, SegmentationProgress } from "@/lib/design/types";
 import type { NormalizedPoint } from "@/lib/vision/types";
-import type { SegmentedRegion } from "@/lib/vision/types";
+import type { Planting, SegmentedRegion } from "@/lib/vision/types";
 import { REGION_KIND_LABELS } from "@/lib/vision/types";
 
 import { PlantGlyph } from "./plantGlyphs";
@@ -52,12 +53,22 @@ type Props = {
   /**
    * The plants the customer took out.
    *
-   * A cleared plant is not drawn, not tappable, and not cut out of the
-   * material: the bed is painted over where it stood. See
-   * `lib/design/existingSurface.ts` for what a bed with nothing swapped
-   * gets painted in.
+   * A cleared plant is not drawn and not tappable, and the hole it leaves
+   * is filled out of the photograph itself — see the clone-stamp layer
+   * below, and `lib/design/inpaint.ts` for where it reaches for pixels.
    */
   clearedPlantings?: readonly string[];
+  /** plantingId → where the customer moved that plant to. */
+  plantPositions?: Record<string, NormalizedPoint>;
+  /**
+   * Move a plant to a new spot. Given, a plant on the photo is draggable.
+   *
+   * No mode and no toggle: you put your finger on the shrub and you move
+   * it. A tap still opens the picker — the two are told apart by whether
+   * the pointer travelled, which is what every direct-manipulation
+   * surface does and what "drag and drop" means to the person doing it.
+   */
+  onMovePlant?: (plantingId: string, point: NormalizedPoint) => void;
   /** The org's plant catalog, for resolving those choices to a glyph. */
   plantCatalog?: readonly PlantOption[];
   /** Tapping a plant on the photo opens its picker. */
@@ -129,6 +140,17 @@ const PLANTING_CORE = 1 / PLANTING_MASK_MARGIN;
  * beside it.
  */
 const MATERIAL_INSET = 0.006;
+
+/**
+ * How far a pointer has to travel before a press on a plant is a drag
+ * rather than a tap, as a fraction of the frame.
+ *
+ * This is what lets a plant be draggable without a mode: press and lift
+ * opens the picker, press and travel moves the plant. About seven pixels
+ * on a 1600px photo — past a fingertip's wobble, short of anything
+ * deliberate.
+ */
+const DRAG_THRESHOLD = 0.0045;
 
 /**
  * The path drawn for a region.
@@ -209,6 +231,8 @@ export function PhotoCanvas({
   notice,
   plantSelections,
   clearedPlantings,
+  plantPositions,
+  onMovePlant,
   plantCatalog,
   onSelectPlanting,
   selectedPlantingId = null,
@@ -228,6 +252,23 @@ export function PhotoCanvas({
     regionId: string;
     polygon: NormalizedPoint[];
     index: number;
+  } | null>(null);
+  /**
+   * The plant under the finger, held locally so it follows at frame rate.
+   * The server hears about it once, on release — and it is the server that
+   * confines it to the bed, because a browser can be told anything.
+   */
+  const [draggingPlant, setDraggingPlant] = useState<{
+    plantingId: string;
+    /** Where the pointer went down, to measure travel against. */
+    from: NormalizedPoint;
+    point: NormalizedPoint;
+    /**
+     * Whether the pointer has travelled far enough to be a drag rather
+     * than a tap. Until it has, nothing moves and nothing is written —
+     * a press that never travels is somebody opening the picker.
+     */
+    dragging: boolean;
   } | null>(null);
 
   /**
@@ -253,6 +294,38 @@ export function PhotoCanvas({
   const cleared = new Set(clearedPlantings ?? []);
   /** Did the customer take this plant out? */
   const isCleared = (plantingId: string) => cleared.has(plantingId);
+
+  /**
+   * Where a plant is drawn: under the finger if it is being dragged right
+   * now, else where the customer put it, else where the photo found it.
+   */
+  const positionOf = (plant: Planting): NormalizedPoint =>
+    draggingPlant?.plantingId === plant.id && draggingPlant.dragging
+      ? draggingPlant.point
+      : plantPositions?.[plant.id] ?? [plant.cx, plant.cy];
+
+  /** Has this plant left the spot the photograph found it in? */
+  const hasMoved = (plant: Planting) =>
+    !isCleared(plant.id) && isPlantMoved(plant, plantPositions);
+
+  /**
+   * The plants that have left their old spot, including the one under the
+   * finger — a hole has to open as the drag starts, not when it ends, or
+   * the plant appears to be in two places while it moves.
+   */
+  const movedIds = new Set(
+    regions.flatMap((region) =>
+      (region.plantings ?? [])
+        .filter(
+          (plant) =>
+            hasMoved(plant) ||
+            (draggingPlant?.plantingId === plant.id &&
+              draggingPlant.dragging &&
+              !isCleared(plant.id)),
+        )
+        .map((plant) => plant.id),
+    ),
+  );
 
   const catalogById = new Map((plantCatalog ?? []).map((o) => [o.id, o]));
   /** The plant the customer put here, if they put one here. */
@@ -282,20 +355,21 @@ export function PhotoCanvas({
    * What a region is painted with, or null for one that is still just
    * photograph.
    *
-   * Two ways to earn a fill. The obvious one is a swap: the customer
-   * picked a material. The other is clearing the plants — the holes where
-   * they stood cannot be filled from a photograph of the plants, so the
-   * bed stops being a photograph and is drawn in the material it already
-   * has. That is a drawing decision and nothing else: no line item, no
-   * band, no chip in the picker. The customer did not order the mulch
-   * they already own.
+   * One way to earn a fill, and only one: the customer picked a material.
+   *
+   * Taking the plants out used to earn one too — the bed was repainted
+   * whole in a guess at the mulch already in it, because the holes had to
+   * be filled with something. That was wrong twice over: it changed
+   * everything the customer was looking at in order to fix the one thing
+   * they asked about, and being clipped to the outline it could not reach
+   * the half of a shrub standing against the brick. Holes are filled out
+   * of the photograph now (see the clone-stamp layer below), which
+   * touches nothing but the hole and reaches wherever the plant did.
    */
   const surfaceSwatch = (region: SegmentedRegion): SwatchId | null => {
     const optionId = selections[region.id]?.surfaceOptionId;
     const option = optionId ? getOption(optionId) : undefined;
-    if (option) return option.swatch;
-    const hasCleared = (region.plantings ?? []).some((plant) => isCleared(plant.id));
-    return hasCleared ? existingSurfaceSwatch(region) : null;
+    return option ? option.swatch : null;
   };
 
   /**
@@ -420,6 +494,119 @@ export function PhotoCanvas({
             <stop offset={String(PLANTING_CORE)} stopColor="#000000" />
             <stop offset="1" stopColor="#ffffff" />
           </radialGradient>
+          {/* The same feather the other way up, for a plant being drawn
+              somewhere else: white shows the stamped plant, black lets the
+              bed underneath it through. */}
+          <radialGradient id="planting-fade-in">
+            <stop offset={String(PLANTING_CORE)} stopColor="#ffffff" />
+            <stop offset="1" stopColor="#000000" />
+          </radialGradient>
+          {/*
+            One hole per plant coming out or moving on.
+
+            Three things per hole: the feathered shape of the hole itself,
+            a tile of clean ground to fill it with, and — where the plant
+            stood taller or wider than its bed — the slices of the hole
+            that were never over that bed at all, which have to be filled
+            from what was actually behind them.
+
+            The tile is a `<pattern>` rather than the whole photograph
+            drawn at an offset, because a bed of shrubs rarely has a
+            shrub's worth of clean ground anywhere in it: see
+            `lib/design/inpaint.ts` for why a sliding donor could not
+            work. The tile is phased on the hole's centre so a seam never
+            lands in the middle of the fill.
+          */}
+          {regions.flatMap((region) => {
+            const holes = holesToFill(region.plantings ?? [], {
+              cleared,
+              moved: movedIds,
+            });
+            if (holes.length === 0) return [];
+            const regionPath = closedPathData(
+              smoothOutline(liveOutline(region)),
+              w,
+              h,
+            );
+            return planHoles(holes, region.plantings ?? [], liveOutline(region)).map(
+              ({ planting: plant, margin, patch, above, below }) => {
+                // Cut wider than the plant is drawn: a hole that comes up
+                // short leaves a rim of shrub standing around the fill,
+                // and one that runs over refills clean bed with clean bed.
+                const shape = {
+                  cx: plant.cx * w,
+                  cy: plant.cy * h,
+                  rx: plant.rx * w * margin,
+                  ry: plant.ry * h * margin,
+                };
+                const tileW = patch ? patch.r * 2 * w : 0;
+                const tileH = patch ? patch.r * 2 * h : 0;
+                return (
+                  <g key={`hole-defs-${plant.id}`}>
+                    <mask id={`hole-${plant.id}`}>
+                      <ellipse {...shape} fill="url(#planting-fade-in)" />
+                    </mask>
+                    {patch && (
+                      <pattern
+                        id={`patch-${plant.id}`}
+                        patternUnits="userSpaceOnUse"
+                        x={shape.cx - tileW / 2}
+                        y={shape.cy - tileH / 2}
+                        width={tileW}
+                        height={tileH}
+                      >
+                        <image
+                          href={photoUrl}
+                          x={-(patch.cx - patch.r) * w}
+                          y={-(patch.cy - patch.r) * h}
+                          width={w}
+                          height={h}
+                          preserveAspectRatio="none"
+                        />
+                      </pattern>
+                    )}
+                    {/* The hole, minus the bed, minus the half of it the
+                        other donor covers. Black paints away: what is
+                        left is exactly the slice that stood above the
+                        outline, or below it. */}
+                    {above !== null && (
+                      <mask id={`hole-above-${plant.id}`}>
+                        <ellipse {...shape} fill="url(#planting-fade-in)" />
+                        <rect x={0} y={shape.cy} width={w} height={h} fill="#000000" />
+                        <path d={regionPath} fill="#000000" />
+                      </mask>
+                    )}
+                    {below !== null && (
+                      <mask id={`hole-below-${plant.id}`}>
+                        <ellipse {...shape} fill="url(#planting-fade-in)" />
+                        <rect x={0} y={0} width={w} height={shape.cy} fill="#000000" />
+                        <path d={regionPath} fill="#000000" />
+                      </mask>
+                    )}
+                  </g>
+                );
+              },
+            );
+          })}
+          {/* One mask per moved plant, at the spot it is moving to. */}
+          {regions.flatMap((region) =>
+            (region.plantings ?? [])
+              .filter((plant) => hasMoved(plant) && !chosenPlant(plant.id))
+              .map((plant) => {
+                const [cx, cy] = positionOf(plant);
+                return (
+                  <mask key={`move-${plant.id}`} id={`move-${plant.id}`}>
+                    <ellipse
+                      cx={cx * w}
+                      cy={cy * h}
+                      rx={plant.rx * w * PLANTING_MASK_MARGIN}
+                      ry={plant.ry * h * PLANTING_MASK_MARGIN}
+                      fill="url(#planting-fade-in)"
+                    />
+                  </mask>
+                );
+              }),
+          )}
           {regions.map((region) => (
             // The region, minus the plants standing in it. White shows the
             // new material, black lets the photograph through — so
@@ -452,7 +639,10 @@ export function PhotoCanvas({
                   they took out entirely is covered and left covered, which
                   is what makes it look gone. */}
               {(region.plantings ?? [])
-                .filter((plant) => !chosenPlant(plant.id) && !isCleared(plant.id))
+                .filter(
+                  (plant) =>
+                    !chosenPlant(plant.id) && !isCleared(plant.id) && !hasMoved(plant),
+                )
                 .map((plant) => (
                   <ellipse
                     key={plant.id}
@@ -466,6 +656,70 @@ export function PhotoCanvas({
             </mask>
           ))}
         </defs>
+
+        {/*
+          The holes, filled out of the photograph itself.
+
+          A plant that is coming out — or moving somewhere else — leaves a
+          shrub-shaped hole, and this is what goes in it: the picture's own
+          pixels. Nothing else on the photograph is touched, and because
+          the hole is the plant's ellipse rather than the bed, it reaches
+          wherever the plant did — over the lawn, up the brick, into the
+          sky.
+
+          Two passes. The bed first, tiled from the nearest clean piece of
+          this region, which is what the customer is looking at across
+          most of the hole. Then, over the top, the slices that were never
+          over the bed: what stood above the outline is filled from higher
+          up and what stood below it from lower down, so a shrub against
+          brick leaves brick and one leaning over the lawn leaves lawn.
+        */}
+        {regions.map((region) => {
+          const holes = holesToFill(region.plantings ?? [], {
+            cleared,
+            moved: movedIds,
+          });
+          if (holes.length === 0) return null;
+          const donor = (dy: number) => (
+            <image
+              href={photoUrl}
+              x={0}
+              y={dy}
+              width={w}
+              height={h}
+              preserveAspectRatio="none"
+            />
+          );
+          return (
+            <g key={`fill-${region.id}`}>
+              {planHoles(holes, region.plantings ?? [], liveOutline(region)).map(
+                ({ planting: plant, margin, patch, above, below }) => (
+                  <g key={plant.id}>
+                    {patch && (
+                      <rect
+                        x={(plant.cx - plant.rx * margin) * w}
+                        y={(plant.cy - plant.ry * margin) * h}
+                        width={plant.rx * margin * 2 * w}
+                        height={plant.ry * margin * 2 * h}
+                        fill={`url(#patch-${plant.id})`}
+                        mask={`url(#hole-${plant.id})`}
+                      />
+                    )}
+                    {/* Drawn at +y, so the pixel landing here came from
+                        that much higher up the photograph. */}
+                    {above !== null && (
+                      <g mask={`url(#hole-above-${plant.id})`}>{donor(above * h)}</g>
+                    )}
+                    {below !== null && (
+                      <g mask={`url(#hole-below-${plant.id})`}>{donor(-below * h)}</g>
+                    )}
+                  </g>
+                ),
+              )}
+            </g>
+          );
+        })}
+
         {regions.map((region) => {
           // One path, used for the tint, the stroke, the selection ring and
           // the hit target, so what the customer sees and what they can tap
@@ -607,6 +861,39 @@ export function PhotoCanvas({
             from here, and we have no scale in feet from a single
             photograph — so the picture says "this plant, here", and the
             picker says how big it gets. */}
+        {/*
+          A moved plant, drawn as itself.
+
+          Its own pixels, translated: the photograph already contains this
+          shrub, and the honest way to show it three feet to the left is to
+          show *it* three feet to the left rather than a drawn stand-in.
+          The bed it came from has been painted over by the fill above, so
+          what is left behind is bed rather than a ghost.
+
+          Translation only, no scale. A plant moved much nearer the camera
+          should get bigger and this does not do that — an upscaled crop of
+          a photograph is a blurry lie, and the moves this is for are
+          along a bed rather than across a yard.
+        */}
+        {regions.map((region) =>
+          (region.plantings ?? [])
+            .filter((plant) => hasMoved(plant) && !chosenPlant(plant.id))
+            .map((plant) => {
+              const [cx, cy] = positionOf(plant);
+              return (
+                <g key={`stamp-${plant.id}`} mask={`url(#move-${plant.id})`}>
+                  <image
+                    href={photoUrl}
+                    x={(cx - plant.cx) * w}
+                    y={(cy - plant.cy) * h}
+                    width={w}
+                    height={h}
+                    preserveAspectRatio="none"
+                  />
+                </g>
+              );
+            }),
+        )}
         {regions.map((region) =>
           (region.plantings ?? []).map((plant) => {
             const option = chosenPlant(plant.id);
@@ -615,10 +902,11 @@ export function PhotoCanvas({
             if (!option || isCleared(plant.id)) return null;
             const rx = plant.rx * w * PLANTING_MARGIN;
             const ry = plant.ry * h * PLANTING_MARGIN;
+            const [cx, cy] = positionOf(plant);
             return (
               <g
                 key={plant.id}
-                transform={`translate(${plant.cx * w} ${plant.cy * h}) scale(${rx} ${ry})`}
+                transform={`translate(${cx * w} ${cy * h}) scale(${rx} ${ry})`}
               >
                 <PlantGlyph kind={option.glyph} />
               </g>
@@ -694,8 +982,12 @@ export function PhotoCanvas({
               // the region the customer has actually opened, which is
               // where they are looking for something to change.
               const inOpenRegion = region.id === selectedRegionId;
-              const ring =
-                isOpen || isHovered
+              const position = positionOf(plant);
+              const isDragging =
+                draggingPlant?.plantingId === plant.id && draggingPlant.dragging;
+              const ring = isDragging
+                ? "ring-2 ring-white bg-white/20"
+                : isOpen || isHovered
                   ? "ring-2 ring-white/90 bg-white/10"
                   : inOpenRegion
                     ? "ring-1 ring-white/45 hover:ring-2 hover:ring-white/90"
@@ -710,13 +1002,60 @@ export function PhotoCanvas({
                   // browser pass can check where it actually landed.
                   data-cx={plant.cx}
                   data-cy={plant.cy}
-                  onClick={() => onSelectPlanting(plant.id, region.id)}
+                  onClick={() => {
+                    // A press that travelled was a drag, and a drag is not
+                    // a request to open the picker.
+                    if (!draggingPlant?.dragging) onSelectPlanting(plant.id, region.id);
+                  }}
                   onMouseEnter={() => setHoveredPlantId(plant.id)}
                   onMouseLeave={() => setHoveredPlantId(null)}
-                  className={`absolute -translate-x-1/2 -translate-y-1/2 rounded-full transition-all ${ring}`}
+                  {...(onMovePlant
+                    ? {
+                        onPointerDown: (event: React.PointerEvent<HTMLButtonElement>) => {
+                          const at = atPointer(event);
+                          if (!at) return;
+                          event.currentTarget.setPointerCapture(event.pointerId);
+                          setDraggingPlant({
+                            plantingId: plant.id,
+                            from: at,
+                            point: at,
+                            dragging: false,
+                          });
+                        },
+                        onPointerMove: (event: React.PointerEvent<HTMLButtonElement>) => {
+                          if (draggingPlant?.plantingId !== plant.id) return;
+                          const at = atPointer(event);
+                          if (!at) return;
+                          const travelled = Math.hypot(
+                            at[0] - draggingPlant.from[0],
+                            at[1] - draggingPlant.from[1],
+                          );
+                          const dragging =
+                            draggingPlant.dragging || travelled > DRAG_THRESHOLD;
+                          if (!dragging) return;
+                          setDraggingPlant({ ...draggingPlant, point: at, dragging });
+                        },
+                        onPointerUp: (event: React.PointerEvent<HTMLButtonElement>) => {
+                          if (draggingPlant?.plantingId !== plant.id) return;
+                          event.currentTarget.releasePointerCapture(event.pointerId);
+                          if (draggingPlant.dragging) {
+                            onMovePlant(plant.id, draggingPlant.point);
+                          }
+                          // Cleared on the next tick, so the click that
+                          // follows this can still see it was a drag.
+                          const wasDragging = draggingPlant.dragging;
+                          if (wasDragging) setTimeout(() => setDraggingPlant(null), 0);
+                          else setDraggingPlant(null);
+                        },
+                        onPointerCancel: () => setDraggingPlant(null),
+                      }
+                    : {})}
+                  className={`absolute -translate-x-1/2 -translate-y-1/2 touch-none rounded-full transition-all ${
+                    onMovePlant ? "cursor-grab active:cursor-grabbing" : ""
+                  } ${ring}`}
                   style={{
-                    left: `${plant.cx * 100}%`,
-                    top: `${plant.cy * 100}%`,
+                    left: `${position[0] * 100}%`,
+                    top: `${position[1] * 100}%`,
                     width: `${plant.rx * 2 * PLANTING_MARGIN * 100}%`,
                     height: `${plant.ry * 2 * PLANTING_MARGIN * 100}%`,
                   }}
@@ -751,8 +1090,8 @@ export function PhotoCanvas({
                   // the one inline transform.
                   className="pointer-events-none absolute z-10 whitespace-nowrap rounded-full bg-bark-950/85 px-2.5 py-1 text-2xs font-medium text-white shadow-e2 sm:text-xs"
                   style={{
-                    left: `${plant.cx * 100}%`,
-                    top: `${Math.max(0, plant.cy - plant.ry * PLANTING_MARGIN) * 100}%`,
+                    left: `${positionOf(plant)[0] * 100}%`,
+                    top: `${Math.max(0, positionOf(plant)[1] - plant.ry * PLANTING_MARGIN) * 100}%`,
                     transform: "translate(-50%, -120%)",
                   }}
                 >

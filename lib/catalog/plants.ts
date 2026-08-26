@@ -132,6 +132,26 @@ export function plantOptionsForRegion(
 export const PLANT_REMOVAL_ASSEMBLY = "shrub_removal";
 
 /**
+ * The assembly that moves a plant the yard already has.
+ *
+ * Distinct from removal and from installing a new one, because it is
+ * distinct work: the plant has to come out intact and go back in
+ * somewhere else, and nothing leaves the site.
+ */
+export const PLANT_TRANSPLANT_ASSEMBLY = "shrub_transplant";
+
+/**
+ * Whether this contractor's book can price moving a plant.
+ *
+ * Same guardrail as removal: the engine throws on an assembly the book
+ * does not hold, so a contractor who does not transplant is not offered
+ * the control rather than shown a broken estimate.
+ */
+export function canMovePlants(book: PriceBook): boolean {
+  return book.assemblies.some((assembly) => assembly.id === PLANT_TRANSPLANT_ASSEMBLY);
+}
+
+/**
  * Whether this contractor's book can price taking a plant out.
  *
  * The same guardrail as the plant catalog itself (map section 1): nothing

@@ -1,0 +1,100 @@
+/**
+ * Where a plant ends up once the customer has dragged it.
+ *
+ * Two facts have to stay apart: where the segmentation saw the plant, and
+ * where the design puts it. What is asserted here is that the second wins
+ * when it exists, that a drag which went nowhere is not a move — a
+ * transplant is billed off that answer — and that a drop outside the bed
+ * lands back inside it, because a plant on the driveway is a mistake
+ * nobody notices until a crew is standing in the yard.
+ */
+import { describe, expect, it } from "vitest";
+
+import type { NormalizedPoint, Planting } from "../../vision/types";
+import {
+  confineToRegion,
+  isInsidePolygon,
+  isPlantMoved,
+  plantPosition,
+} from "../plantPlacement";
+
+const SHRUB: Planting = { id: "p1", cx: 0.3, cy: 0.6, rx: 0.04, ry: 0.04 };
+
+const BED: NormalizedPoint[] = [
+  [0.1, 0.5],
+  [0.5, 0.5],
+  [0.5, 0.7],
+  [0.1, 0.7],
+];
+
+describe("plantPosition", () => {
+  it("uses where the photo saw it, with nothing else to go on", () => {
+    expect(plantPosition(SHRUB, undefined)).toEqual([0.3, 0.6]);
+    expect(plantPosition(SHRUB, {})).toEqual([0.3, 0.6]);
+  });
+
+  it("uses where the customer put it, once they have", () => {
+    expect(plantPosition(SHRUB, { p1: [0.4, 0.65] })).toEqual([0.4, 0.65]);
+  });
+
+  it("is not confused by another plant's move", () => {
+    expect(plantPosition(SHRUB, { p2: [0.4, 0.65] })).toEqual([0.3, 0.6]);
+  });
+});
+
+describe("isPlantMoved", () => {
+  it("is false for a plant nobody has touched", () => {
+    expect(isPlantMoved(SHRUB, undefined)).toBe(false);
+  });
+
+  it("is false for a drag that ended where it started", () => {
+    // A tap that wobbled. Under a pixel on a 1600px photo, and billing a
+    // transplant for it would put a line on the estimate for nothing.
+    expect(isPlantMoved(SHRUB, { p1: [0.3, 0.6] })).toBe(false);
+    expect(isPlantMoved(SHRUB, { p1: [0.3004, 0.6002] })).toBe(false);
+  });
+
+  it("is true once the plant has actually gone somewhere", () => {
+    expect(isPlantMoved(SHRUB, { p1: [0.32, 0.6] })).toBe(true);
+  });
+});
+
+describe("isInsidePolygon", () => {
+  it("knows the middle from the outside", () => {
+    expect(isInsidePolygon(BED, [0.3, 0.6])).toBe(true);
+    expect(isInsidePolygon(BED, [0.3, 0.9])).toBe(false);
+    expect(isInsidePolygon(BED, [0.7, 0.6])).toBe(false);
+  });
+});
+
+describe("confineToRegion", () => {
+  it("leaves a drop that landed in the bed alone", () => {
+    expect(confineToRegion(BED, [0.3, 0.6])).toEqual([0.3, 0.6]);
+  });
+
+  it("pulls a drop just outside back in, rather than refusing it", () => {
+    // A fingertip on a phone overshoots. Refusing would read as the drag
+    // not working, so it lands on the nearest ground instead.
+    const landed = confineToRegion(BED, [0.3, 0.78]);
+    expect(isInsidePolygon(BED, landed)).toBe(true);
+    expect(landed[0]).toBeCloseTo(0.3, 1);
+  });
+
+  it("pulls a drop a long way outside back in too", () => {
+    const landed = confineToRegion(BED, [0.95, 0.05]);
+    expect(isInsidePolygon(BED, landed)).toBe(true);
+  });
+
+  it("lands inside the line rather than on it", () => {
+    // A plant centred on the boundary reads as half out of the bed, and
+    // the next test of an exact edge point is a coin toss.
+    const landed = confineToRegion(BED, [0.3, 1]);
+    expect(landed[1]).toBeLessThan(0.7);
+  });
+
+  it("hands back a degenerate outline untouched", () => {
+    // A region with two vertices cannot contain anything. That is a bug
+    // upstream, and refusing to move a plant is not how to report it.
+    expect(confineToRegion([[0.1, 0.1], [0.2, 0.2]], [0.9, 0.9])).toEqual([0.9, 0.9]);
+  });
+});

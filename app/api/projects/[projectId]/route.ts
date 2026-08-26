@@ -1,8 +1,17 @@
 import { NextResponse } from "next/server";
 
 import { getOption } from "@/lib/catalog/options";
-import { canRemovePlants, plantOptionsForRegion } from "@/lib/catalog/plants";
-import { MAX_OUTLINE_POINTS, isUsableOutline } from "@/lib/design/outline";
+import {
+  canMovePlants,
+  canRemovePlants,
+  plantOptionsForRegion,
+} from "@/lib/catalog/plants";
+import {
+  MAX_OUTLINE_POINTS,
+  effectiveOutline,
+  isUsableOutline,
+} from "@/lib/design/outline";
+import { confineToRegion } from "@/lib/design/plantPlacement";
 import type { RegionSelection } from "@/lib/design/types";
 import { resolveOrg } from "@/lib/org/resolve";
 import { regionOfPlanting } from "@/lib/store/gates";
@@ -15,6 +24,7 @@ import {
   getProject,
   setLocation,
   setMarketContext,
+  setPlantPosition,
   setPlantSelection,
   setPlantingsCleared,
   setRegionOutline,
@@ -58,6 +68,9 @@ export async function GET(_request: Request, { params }: Params) {
  *   { clearPlantings: string[], cleared: bool }   — take plants out of the
  *                                                   design, or put them
  *                                                   back
+ *   { plantingId, plantAt: [x, y] | null }       — move one plant, or null
+ *                                                   to put it back where
+ *                                                   the photo found it
  *   { marketContext: "residential" | "hoa_commercial" }
  *   { location: { address, lat, lng, source } }   — confirmed geocode pick
  *   { addressDeclined: true }                     — the no-address path
@@ -75,6 +88,7 @@ export async function PATCH(request: Request, { params }: Params) {
     selection?: unknown;
     plantingId?: unknown;
     plantOptionId?: unknown;
+    plantAt?: unknown;
     clearPlantings?: unknown;
     cleared?: unknown;
     polygon?: unknown;
@@ -202,6 +216,56 @@ export async function PATCH(request: Request, { params }: Params) {
       }
       return NextResponse.json(
         await setPlantingsCleared(projectId, ids, patch.cleared),
+      );
+    }
+
+    // Moving a plant. Before the plantOptionId branch, which also carries
+    // a plantingId: these are different questions about the same plant,
+    // and the key is what tells them apart.
+    if (patch.plantAt !== undefined) {
+      if (typeof patch.plantingId !== "string" || !patch.plantingId.trim()) {
+        return NextResponse.json({ error: "plantingId must be a string" }, { status: 400 });
+      }
+      const project = await getProject(projectId);
+      const region = regionOfPlanting(project, patch.plantingId);
+      if (!region) {
+        return NextResponse.json({ error: "Unknown plant" }, { status: 400 });
+      }
+      // null puts it back where the photo found it.
+      if (patch.plantAt === null) {
+        return NextResponse.json(
+          await setPlantPosition(projectId, patch.plantingId, null),
+        );
+      }
+      const at = patch.plantAt;
+      if (
+        !Array.isArray(at) ||
+        at.length !== 2 ||
+        !at.every((n) => typeof n === "number" && Number.isFinite(n) && n >= 0 && n <= 1)
+      ) {
+        return NextResponse.json(
+          { error: "plantAt must be [x, y] between 0 and 1, or null" },
+          { status: 400 },
+        );
+      }
+      const org = await resolveOrg();
+      if (!canMovePlants(org.priceBook)) {
+        return NextResponse.json(
+          { error: "This contractor does not quote moving a plant" },
+          { status: 400 },
+        );
+      }
+      // Confined server-side, not in the canvas: a browser can be told
+      // anything, and the outline is what the crew will work to. A drop
+      // just outside the bed lands on the nearest point inside rather
+      // than being refused, because a fingertip on a phone misses by a
+      // few pixels and refusing would read as the drag not working.
+      const confined = confineToRegion(
+        effectiveOutline(region, project.regionOutlines),
+        [at[0], at[1]],
+      );
+      return NextResponse.json(
+        await setPlantPosition(projectId, patch.plantingId, confined),
       );
     }
 

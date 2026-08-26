@@ -116,6 +116,13 @@ export function createDbStore(): ProjectStore {
       });
     },
 
+    setPlantPosition(id: string, plantingId: string, point: NormalizedPoint | null) {
+      return edit(id, async (project) => {
+        assertPlanting(project, plantingId);
+        await q.setPlantPositionRow(await getDb(), id, plantingId, point);
+      });
+    },
+
     setPlantingsCleared(id: string, plantingIds: readonly string[], cleared: boolean) {
       return edit(id, async (project) => {
         for (const plantingId of plantingIds) assertPlanting(project, plantingId);

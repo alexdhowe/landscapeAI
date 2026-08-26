@@ -25,7 +25,11 @@ import type {
 import type { JobType, MarketContext, TypologyConfig } from "../pricing/typology";
 import type { PlantOption } from "../catalog/plants";
 import { bandForSelections } from "./band";
-import { resolvePlantChoices, resolvePlantRemovals } from "./plants";
+import {
+  resolvePlantChoices,
+  resolvePlantMoves,
+  resolvePlantRemovals,
+} from "./plants";
 import {
   designEngineInput,
   measuredBandForSelections,
@@ -180,12 +184,21 @@ export function quoteProject(
     project.plantSelections,
   );
 
+  // Where a plant goes is a separate question from what it is, so a
+  // moved plant may also be a swapped one and both are billed.
+  const plantMoves = resolvePlantMoves(
+    regions,
+    project.plantPositions,
+    project.clearedPlantings,
+  );
+
   const typology = bandForSelections(
     project.selections,
     project.marketContext,
     config,
     plantChoices,
     plantRemovals,
+    plantMoves,
   );
   if (!typology) return null;
 
@@ -232,6 +245,7 @@ export function quoteProject(
     now,
     plantChoices,
     plantRemovals,
+    plantMoves,
   );
 
   if (measured) {
@@ -287,6 +301,7 @@ export function quoteProject(
     now(),
     plantChoices,
     plantRemovals,
+    plantMoves,
   );
   const estimate =
     input.engineSelections.length > 0

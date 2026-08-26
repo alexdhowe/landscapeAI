@@ -62,6 +62,7 @@ import {
   projects,
   properties,
   regions,
+  plantPositions,
   plantSelections,
   selections,
   typologyDistributions,
@@ -78,6 +79,7 @@ type ProjectRow = typeof projects.$inferSelect;
 type RegionRow = typeof regions.$inferSelect;
 type SelectionRow = typeof selections.$inferSelect;
 type PlantSelectionRow = typeof plantSelections.$inferSelect;
+type PlantPositionRow = typeof plantPositions.$inferSelect;
 type SnapshotRow = typeof estimateSnapshots.$inferSelect;
 type DeltaRow = typeof measurementDeltas.$inferSelect;
 type PropertyRow = typeof properties.$inferSelect;
@@ -88,6 +90,7 @@ type ProjectBundle = ProjectRow & {
   regions: RegionRow[];
   selections: SelectionRow[];
   plantSelections: PlantSelectionRow[];
+  plantPositions: PlantPositionRow[];
   snapshots: SnapshotRow[];
   deltas: DeltaRow[];
 };
@@ -239,6 +242,11 @@ export function toDesignProject(row: ProjectBundle): DesignProject {
   if (cleared.length > 0) {
     project.clearedPlantings = cleared.map((p) => p.plantingId);
   }
+  if (row.plantPositions.length > 0) {
+    project.plantPositions = Object.fromEntries(
+      row.plantPositions.map((p) => [p.plantingId, [p.cx, p.cy] as NormalizedPoint]),
+    );
+  }
   if (row.property) project.location = toLocation(row.property);
   if (row.addressDeclined) project.addressDeclined = true;
   if (aerialRegions.length > 0) project.aerialRegions = aerialRegions;
@@ -262,6 +270,7 @@ const projectWith = {
   regions: { orderBy: [asc(regions.position)] },
   selections: { orderBy: [asc(selections.regionId)] },
   plantSelections: { orderBy: [asc(plantSelections.plantingId)] },
+  plantPositions: { orderBy: [asc(plantPositions.plantingId)] },
   snapshots: { orderBy: [asc(estimateSnapshots.seq)] },
   deltas: { orderBy: [asc(measurementDeltas.correctedAt), asc(measurementDeltas.seq)] },
 };
@@ -483,6 +492,15 @@ export async function setPlantingsRemoved(
       );
     return;
   }
+  // A plant that is gone has nowhere to be: drop any position with it.
+  await db
+    .delete(plantPositions)
+    .where(
+      and(
+        eq(plantPositions.projectId, projectId),
+        inArray(plantPositions.plantingId, [...plantingIds]),
+      ),
+    );
   // Taking a plant out drops whatever was going to replace it: the two
   // are one decision, and the check constraint refuses to hold both.
   await db
@@ -498,6 +516,39 @@ export async function setPlantingsRemoved(
     .onConflictDoUpdate({
       target: [plantSelections.projectId, plantSelections.plantingId],
       set: { optionId: null, removed: true },
+    });
+}
+
+/**
+ * Move a plant, or put it back where the photo found it.
+ *
+ * Null deletes the row rather than storing the original position: "where
+ * the photo found it" is already recorded, in the segmentation, and a
+ * second copy of it is a second thing to keep in sync.
+ */
+export async function setPlantPositionRow(
+  db: Database,
+  projectId: string,
+  plantingId: string,
+  point: NormalizedPoint | null,
+): Promise<void> {
+  if (point === null) {
+    await db
+      .delete(plantPositions)
+      .where(
+        and(
+          eq(plantPositions.projectId, projectId),
+          eq(plantPositions.plantingId, plantingId),
+        ),
+      );
+    return;
+  }
+  await db
+    .insert(plantPositions)
+    .values({ projectId, plantingId, cx: point[0], cy: point[1] })
+    .onConflictDoUpdate({
+      target: [plantPositions.projectId, plantPositions.plantingId],
+      set: { cx: point[0], cy: point[1] },
     });
 }
 

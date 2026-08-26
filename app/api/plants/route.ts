@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { canRemovePlants } from "@/lib/catalog/plants";
+import { canMovePlants, canRemovePlants } from "@/lib/catalog/plants";
 import { resolveOrg } from "@/lib/org/resolve";
 
 /**
@@ -26,6 +26,8 @@ export async function GET() {
       // reason the plant list is served rather than bundled: what is
       // offerable is whatever the current published revision can price.
       canRemove: canRemovePlants(org.priceBook),
+      /** …and whether it can price moving one. */
+      canMove: canMovePlants(org.priceBook),
     },
     {
       // One list per revision, and revisions are immutable — but the

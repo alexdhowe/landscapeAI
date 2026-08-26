@@ -113,6 +113,18 @@ export type ProjectStore = {
    * replacement chosen for it, because replacing and removing are the
    * same slot — one decision about one plant.
    */
+  /**
+   * Move a plant to a new spot in the design, or pass null to put it back
+   * where the photo found it.
+   *
+   * Orthogonal to replacing and removing: where a plant goes and what it
+   * is are different questions, and a customer can answer both.
+   */
+  setPlantPosition(
+    id: string,
+    plantingId: string,
+    point: NormalizedPoint | null,
+  ): Promise<DesignProject>;
   setPlantingsCleared(
     id: string,
     plantingIds: readonly string[],

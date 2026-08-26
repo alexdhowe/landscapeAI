@@ -63,14 +63,16 @@ deployment.
 | A ring of old mulch around every plant | ✅ fixed — the cut-out was 18% wider than the plant and then blurred wider still; the material now reaches the plant's own edge |
 | "Granite that just colours the mulch grey" | ✅ fixed — the filters ran in linearRGB, the noise was never spread across its ramp, one generator served six materials, and the photo's own grain was multiplied back at full detail |
 | A bed of boulders | ✅ fixed — the gauge was a fraction of the frame, which is not a gauge: a "1.5in river rock" was drawn about twelve times life size. It comes from the region's own reported area now |
-| Taking the plants out | ✅ done — clear one or a whole bed, the bed is repainted in the material it already has, and every removal is bid as `shrub_removal` |
+| Taking the plants out | ✅ done — clear one or a whole bed, the hole is clone-stamped out of the photograph itself, and every removal is bid as `shrub_removal` |
+| "It fills the hole in like MS Paint" | ✅ fixed — the fill was a repaint in a material nobody chose, clipped to the bed so the half of a shrub standing against the brick survived it. It is real pixels now: a hole cut wide, tiled from the nearest clean piece of that bed, and the slices that stood above or below the bed filled from what was actually behind them |
+| Moving a plant that is already there | ✅ done — drag it anywhere in its bed, no mode and no toggle; the drop is confined to the outline server-side and each move is bid as `shrub_transplant` |
 | The aerial leg (`/design/[id]/locate`) | ⛔ gated off — deliberately: no paid imagery or geocoder until there is a working MVP |
 
 All six phases are in, they run on Postgres, the contractor console is behind
 a login, the price book is editable, photos live in object storage when a
 bucket is configured, and the whole thing has been designed and opened on a
 phone — on a phone *branch*, for the first time in the twelfth session,
-which is its own story. `npm test` runs 652 tests — with a database and
+which is its own story. `npm test` runs 693 tests — with a database and
 without one.
 
 **It has not been deployed.** The tenth session wrote the configuration —
@@ -97,7 +99,7 @@ store, so a clean checkout runs the demo with nothing to provision.
 ```sh
 npm run doctor    # is this machine set up? checks .env.local, the API key (against the
                   # real API), and the console login — and says what to fix, in English.
-npm test          # Vitest — 652 tests across every phase. No server, no network, no browser.
+npm test          # Vitest — 693 tests across every phase. No server, no network, no browser.
 npm run typecheck
 npm run dev
 npm run build
@@ -731,27 +733,98 @@ per decided plant with a check constraint —
 un-removes the plant while clearing it drops the replacement. Migration
 0009.
 
-**What fills the hole is the bed itself.** The photograph cannot fill it:
-those pixels are a shrub, and no mask turns a shrub into the mulch behind
-it. The alternative to inventing the missing mulch is to stop treating a
-cleared bed as a photograph — which is what §1 has said from the start,
-that the image is a view generated from the object graph. So a bed with
-plants out is painted edge to edge in the material it already has, at the
-gauge the section above works out, using the same procedural surfaces the
-swap draws and the model's own description of what is there:
-`lib/design/existingSurface.ts` maps "dyed black hardwood mulch, freshly
-installed" onto the swatch that draws it.
+**What fills the hole is the photograph.** The first answer to this was to
+stop treating a cleared bed as a photograph and repaint it whole in the
+material the model said was already there. Tested against a real yard it
+was wrong twice over, and the report was blunt: *"it basically just paints
+over the plant with a bed that I don't choose, but then anything outside of
+that bed that gets removed does not actually get removed... it looks like
+we're filling in with MS Paint."*
 
-That mapping is a **drawing decision and nothing else**: no line item, no
-band, no chip in the picker. The customer did not order the mulch they
-already own, which is why it returns a swatch id rather than a catalog
-option id — an option id would be selectable, and a selection is priced.
+Both halves of that are the same mistake. A repaint changes everything the
+customer was looking at in order to fix the one thing they asked about, and
+a material fill is clipped to the region outline while a shrub is not: the
+half of it standing against the brick, or leaning over the lawn, survived.
+`lib/design/existingSurface.ts` and the repaint went with it.
 
-Its one interesting bug was caught by its own test. Matching a sentence
-against an ordered list of patterns cannot get both "wood chips" and
-"granite chips" right, whichever order the list is in; asking *which
-family* first — mulch or stone, with mulch winning the words they share —
-and only then which member, can.
+So the hole is **clone-stamped** — filled with the picture's own pixels,
+the way a retoucher would. Nothing else on the photograph is touched, and
+because the hole is the plant's ellipse rather than the bed, it reaches
+wherever the plant did.
+
+The obvious clone stamp is to draw the whole photograph shifted by a
+plant's width and let what was beside the shrub land where the shrub was.
+That was built, and it ghosted on the first render, for two reasons that
+turn out to be the same arithmetic:
+
+- **A shift shorter than the hole samples the hole.** Sliding by a
+  plant-and-a-half leaves a third of the hole reading its own pixels, so
+  the shrub was removed and a blurred shrub appeared in its place. Nothing
+  shorter than twice the hole works, in any direction.
+- **Twice the hole leaves the bed.** A foundation planting is a strip about
+  as tall as the shrubs standing in it, spaced about their own width apart.
+  Two hole-heights up is the brick, two down is the lawn, two sideways is
+  the next shrub. There is no direction with a whole hole's worth of clean
+  bed in it — which is why the first render filled a mulch bed with brick
+  and lawn and a copy of the neighbouring shrub.
+
+`lib/design/inpaint.ts` answers it with a **patch** instead of a shift. It
+searches the region for the largest piece of ground that is inside the
+outline and clear of every plant — including the plants that are also
+coming out, or one hole fills from another — preferring one near the hole,
+and tiles it across. Mulch, gravel and turf are stochastic, so a repeat
+reads as more of the same material rather than as a pattern; and a patch
+small enough to fit between two shrubs still exists in beds where no
+whole-hole donor does.
+
+The slices of a plant that were **never over the bed** are filled
+separately, because filling them with mulch is the repaint's mistake
+again. The part of the hole above the outline is sampled from further
+above and the part below it from further below, far enough to clear the
+hole: brick stays brick, lawn stays lawn, sky stays sky.
+
+One asymmetry is worth stating because it sets a constant. Cutting the
+hole wider than the plant costs a ring of clean bed, which is refilled
+with clean bed and cannot be seen; cutting it narrower leaves a rim of
+shrub standing around the fill, which is the whole complaint. So the hole
+is cut generously — a segmentation that under-sizes an ellipse is an
+ordinary failure and this is what absorbs it — and narrowed only where it
+would otherwise reach a plant the customer is keeping.
+
+### Moving a plant that is already there
+
+Swapping a plant and taking one out both still assumed the answer to
+"where do the plants go" is "exactly where they are now". The third verb is
+the same plant, somewhere else in the same bed.
+
+**There is no mode.** The plants on the photo are draggable, always: put a
+finger on the shrub and move it. A first pass put that behind a "Move the
+plants" toggle and it was wrong — a toggle is a thing to find and turn on
+before the direct thing works, which is the opposite of direct. Press and
+lift opens the picker, press and travel moves the plant, and a threshold in
+`PhotoCanvas` is where the two part company. `PlantMoveControls` keeps the
+paths a drag cannot serve: arrow keys and a screen reader, a nudge for a
+thumb that got it roughly right, and a way back for one plant or all of
+them.
+
+**A drop is confined server-side**, in `lib/design/plantPlacement.ts`,
+before the write. A plant dragged onto the driveway is not a design, it is
+a mistake nobody notices until a rep is standing in the yard — and a
+browser can be told anything, while the outline is what the crew will work
+to. The confinement is a nudge and not a rejection: a drop a little outside
+the bed is what a fingertip on a phone does, and refusing it would read as
+the drag not working, so it lands on the nearest point inside instead.
+
+**Moving is priced, because moving is work.** A `shrub_transplant`
+assembly — lift the plant intact, dig and amend the new hole, set and water
+— is one EA per plant moved, gated behind the same `canMove` handshake as a
+removal so nothing can be selected that the engine cannot price. Where a
+plant is moved *and* replaced, both are billed: the crew lifts what is
+standing there whatever goes back in. A drag that ends where it started is
+not a move and bills nothing.
+
+The old spot is a hole like any other, so it is clone-stamped shut before
+the plant is stamped down in its new one.
 
 ### What none of this has been through
 
@@ -770,12 +843,18 @@ There is still no `ANTHROPIC_API_KEY` in this container, so:
   has not been back through a real one.
 - **The per-megapixel coefficient is still a prior.** See above; the log
   line is how it stops being one.
-- **A cleared bed has only been seen against a synthetic photo**, where
-  the drawn mulch is a shade lighter than the mulch beside it because the
-  demo's description says "overgrown shrubs in mulch" and the photo's is
-  nearly black. On a real photo the model names the mulch it can see. How
-  well a repainted bed sits against the un-repainted one next to it is the
-  thing to look at first on the next real yard.
+- **A cleared bed has only been seen against a synthetic photo.** On the
+  synthetic yard the fill is indistinguishable from the bed around it, but
+  that yard's mulch is flat: no shadow across it, no sun on one end. A
+  tiled patch on a real photograph will carry whatever light was on the
+  patch, and how visible that is on a bed with a shadow falling across it
+  is the thing to look at first on the next real yard.
+- **The hole is only ever as big as the model says the plant is.** On a
+  test photo drawn with shrubs deliberately larger than the segmentation's
+  ellipses, the fill lands correctly and a ring of shrub remains around it,
+  because that is where the plant was reported to end. The generous cut
+  absorbs a small under-estimate and cannot absorb a large one; the fix for
+  a large one belongs in the segmentation, not here.
 
 ## The photo experience (Phase 2)
 

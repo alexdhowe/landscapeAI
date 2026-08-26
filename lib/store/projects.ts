@@ -143,6 +143,15 @@ export async function setPlantSelection(
   return (await store()).setPlantSelection(id, plantingId, optionId);
 }
 
+/** Move a plant, or pass null to put it back where the photo found it. */
+export async function setPlantPosition(
+  id: string,
+  plantingId: string,
+  point: NormalizedPoint | null,
+): Promise<DesignProject> {
+  return (await store()).setPlantPosition(id, plantingId, point);
+}
+
 /** Take plants out of the design, or put them back. */
 export async function setPlantingsCleared(
   id: string,
