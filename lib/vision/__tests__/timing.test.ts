@@ -11,7 +11,12 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { formatVisionTiming, reportVisionTiming, visionTotalMs } from "../timing";
+import {
+  formatEstimateAccuracy,
+  formatVisionTiming,
+  reportVisionTiming,
+  visionTotalMs,
+} from "../timing";
 import type { RefinementTiming, VisionTiming } from "../timing";
 
 const TALLY = {
@@ -156,5 +161,26 @@ describe("reportVisionTiming", () => {
     expect(captured({ status: "merged", ms: 10, annotateMs: 1, tally: TALLY })[0].level).toBe(
       "info",
     );
+  });
+});
+
+describe("formatEstimateAccuracy", () => {
+  // The customer is shown a countdown now, and the per-megapixel term
+  // behind it is a prior rather than a measurement. This line is how that
+  // stops being true: it is what a later session calibrates from.
+  it("says what was promised, what it cost, and on what size of photo", () => {
+    expect(formatEstimateAccuracy(150_100, 152_300, 0.2)).toBe(
+      "[vision] estimate 150.1s vs actual 152.3s (+2.2s, 0.20 MP)",
+    );
+  });
+
+  it("signs an over-estimate the other way", () => {
+    expect(formatEstimateAccuracy(233_700, 150_000, 1.92)).toBe(
+      "[vision] estimate 233.7s vs actual 150.0s (−83.7s, 1.92 MP)",
+    );
+  });
+
+  it("says so rather than inventing a size it could not read", () => {
+    expect(formatEstimateAccuracy(100_000, 100_000, null)).toContain("size unknown");
   });
 });

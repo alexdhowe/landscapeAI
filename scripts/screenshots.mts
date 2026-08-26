@@ -232,6 +232,70 @@ async function shoot(page: Page, viewport: Viewport, name: string) {
   console.log(`  · ${file}`);
 }
 
+/**
+ * The three states of the segmentation wait, driven from the wire.
+ *
+ * Reading, refining (with a real first-pass time and the names the first
+ * pass found), and one that has run well past its estimate — the last
+ * because "taking longer than usual" is the state that has to be right
+ * and is the least likely to be seen before a customer sees it.
+ */
+async function waitStates(page: Page, viewport: Viewport, projectId: string) {
+  const res = await page.request.get(`${BASE}/api/projects/${projectId}`);
+  if (!res.ok()) return;
+  const project = (await res.json()) as Record<string, unknown>;
+  const measured = { firstPassMs: 58_000, refineMs: 98_600, totalMs: 156_600 };
+  const found = ["Front lawn", "Bed along front walk", "Foundation planting"];
+  const states: { name: string; agoMs: number; progress: Record<string, unknown> }[] = [
+    {
+      name: "reading",
+      agoMs: 22_000,
+      progress: { stage: "reading", estimate: measured },
+    },
+    {
+      name: "refining",
+      agoMs: 96_000,
+      progress: { stage: "refining", estimate: measured, firstPassMs: 58_000, found },
+    },
+    {
+      name: "overdue",
+      agoMs: 340_000,
+      progress: { stage: "refining", estimate: measured, firstPassMs: 58_000, found },
+    },
+  ];
+
+  const url = `**/api/projects/${projectId}`;
+  for (const state of states) {
+    await page.route(url, async (route) => {
+      if (route.request().method() !== "GET") return route.continue();
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          ...project,
+          segmentation: {
+            status: "pending",
+            progress: {
+              startedAt: new Date(Date.now() - state.agoMs).toISOString(),
+              ...state.progress,
+            },
+          },
+        }),
+      });
+    });
+    await page.reload({ waitUntil: "networkidle" });
+    await shoot(page, viewport, `design-wait-${state.name}`);
+    await page.unroute(url);
+  }
+  // Back to the real project, so everything after this is the real flow.
+  await page.reload({ waitUntil: "networkidle" });
+  await page
+    .locator("ul[aria-describedby='region-strip-help'] button")
+    .first()
+    .waitFor({ timeout: 60_000 })
+    .catch(() => console.log("  (regions did not come back after the wait shots)"));
+}
+
 /** Upload a photo through /start and land on the design page. */
 async function uploadAndDesign(page: Page, viewport: Viewport): Promise<string | null> {
   // The clock §2 cares about starts when the customer lands on /start, so
@@ -269,6 +333,16 @@ async function uploadAndDesign(page: Page, viewport: Viewport): Promise<string |
     .catch(() => console.log("  (no regions appeared)"));
   console.log(`  landing → labelled regions: ${Date.now() - started} ms`);
   await shoot(page, viewport, "design-regions");
+
+  // The wait itself, which nothing else in this script can reach.
+  //
+  // Segmentation with no ANTHROPIC_API_KEY answers in milliseconds, and
+  // with one it answers in about two minutes — so the screen a customer
+  // spends most of their first visit looking at is the one surface here
+  // that has never been in a screenshot. The three states are faked at
+  // the wire: the design page reads the wait out of the project it polls,
+  // so answering that poll with a pending project is enough to drive it.
+  await waitStates(page, viewport, page.url().split("/design/")[1]);
 
   // Swap a surface and wait for the band. Not every region has options —
   // turf has nothing in the catalog yet — so walk them until one does.

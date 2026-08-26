@@ -57,6 +57,13 @@
       "when": 1787597473170,
       "tag": "0007_adjusted_outlines",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1787711471033,
+      "tag": "0008_segmentation_progress",
+      "breakpoints": true
     }
   ]
 }

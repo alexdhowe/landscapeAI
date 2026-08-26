@@ -12,12 +12,13 @@ import {
   insetOutline,
   smoothOutline,
 } from "@/lib/design/outline";
-import type { RegionSelection } from "@/lib/design/types";
+import type { RegionSelection, SegmentationProgress } from "@/lib/design/types";
 import type { NormalizedPoint } from "@/lib/vision/types";
 import type { SegmentedRegion } from "@/lib/vision/types";
 import { REGION_KIND_LABELS } from "@/lib/vision/types";
 
 import { PlantGlyph } from "./plantGlyphs";
+import { SegmentationWait } from "./SegmentationWait";
 import { KIND_COLORS } from "./regionColors";
 import { SwatchFilters } from "./swatches";
 
@@ -29,6 +30,8 @@ type Props = {
   onSelectRegion: (regionId: string) => void;
   /** Segmentation is still running: show the wait over the photo. */
   pending?: boolean;
+  /** What the server last said about that wait, if it has said anything. */
+  progress?: SegmentationProgress;
   /**
    * A short label pinned to the picture itself. Used for the one thing a
    * customer must not have to infer: that these outlines are a stock
@@ -55,21 +58,45 @@ type Props = {
 };
 
 /**
- * How much bigger than reported the plant cut-outs are drawn.
+ * How much bigger than reported a plant is *drawn* — its tap target, its
+ * hover ring, and the glyph that replaces it when the customer swaps it.
  *
- * The two ways to be wrong here are not equally bad. Too small and gravel
- * lands across a shrub's outer leaves, which is the thing this exists to
- * prevent and which is instantly visible. Too big and a little of the old
- * bed shows in a ring around the plant — which is what a real bed looks
- * like, since nothing is mulched right up to a stem. So the margin goes
- * outward, and a model that draws an ellipse round the dense middle of a
- * shrub still covers its edges.
+ * A little larger than the model's ellipse on purpose: a target the exact
+ * size of a small perennial is hard to hit with a thumb, and a new shrub
+ * drawn smaller than the one it replaces reads as a downgrade.
  *
  * Display only. The stored ellipse stays exactly what the model reported,
  * because that is the plant's extent and a later per-plant swap needs the
  * real number, not one padded for masking.
  */
 const PLANTING_MARGIN = 1.18;
+
+/**
+ * How far out of the material a staying plant is cut, and where that cut
+ * stops being total.
+ *
+ * These two numbers are the answer to "there is an unfilled area around
+ * each plant". The old mask punched a hard hole 18% wider than the plant
+ * and then blurred the whole group, which grew it again — the material
+ * stopped a third of a plant's width short of the plant, and what showed
+ * in the gap was the old surface the customer had just replaced. On a bed
+ * of eight shrubs that is eight brown rings in a grey bed.
+ *
+ * The two ways to be wrong are still not equal: gravel across a shrub's
+ * leaves is worse than a hair of old mulch at its base. So the cut is
+ * *total* out to the plant's own reported edge — `PLANTING_CORE` is
+ * 1 / `PLANTING_MASK_MARGIN`, so the solid part of the hole ends exactly
+ * there — and only the last 12% is a fade. Nothing lands on a leaf, and
+ * nothing is left unpainted more than a finger's width from one.
+ *
+ * The generosity that used to live here now lives where it belongs: the
+ * segmentation prompt asks the model to cover a plant's whole visible
+ * mass including its outer foliage. That is a claim about the plant, made
+ * by the pass that can see it, rather than a fudge factor applied to
+ * every plant equally by the pass that cannot.
+ */
+const PLANTING_MASK_MARGIN = 1.12;
+const PLANTING_CORE = 1 / PLANTING_MASK_MARGIN;
 
 /**
  * The most a swapped material is painted inside its outline, as a fraction
@@ -162,6 +189,7 @@ export function PhotoCanvas({
   selectedRegionId,
   onSelectRegion,
   pending = false,
+  progress,
   notice,
   plantSelections,
   plantCatalog,
@@ -263,22 +291,64 @@ export function PhotoCanvas({
       >
         <SwatchFilters width={w} edgeBlur={w * 0.0035} />
         <defs>
-          {/* Desaturated, brightened copy of the photo: multiplied over a
-              texture it re-applies the photo's shadows without its color. */}
-          <filter id="photo-shading">
+          {/*
+            The photograph's *light*, and nothing else, for multiplying
+            back over a swapped material.
+
+            This is where "swap the mulch for granite and it just colours
+            the mulch grey" was coming from. The old version desaturated
+            the photo, lifted it and multiplied it back at full detail —
+            so every shred of the old mulch, and all of its darkness, came
+            straight through the new stone. The customer was shown their
+            own mulch in grey.
+
+            What belongs here is the illumination and none of the
+            material: a tree's shadow across the bed, the sunlit half of a
+            yard, the shade under a porch. Those are large and soft;
+            mulch grain and gravel speckle are small and hard. So the
+            luminance is blurred well past the scale of any material's
+            grain and kept only at that scale.
+
+            The transfer then compresses what is left around white:
+            black in the photo becomes 0.62 rather than 0, so a dark
+            existing surface tints the new one instead of drowning it,
+            while a real shadow still reads as a shadow. Written in sRGB
+            so those numbers mean what they say (see swatches.tsx).
+          */}
+          <filter id="photo-shading" colorInterpolationFilters="sRGB">
             <feColorMatrix type="saturate" values="0" />
+            <feGaussianBlur stdDeviation={w * 0.006} />
             <feComponentTransfer>
-              <feFuncR type="gamma" amplitude="1" exponent="0.5" offset="0.3" />
-              <feFuncG type="gamma" amplitude="1" exponent="0.5" offset="0.3" />
-              <feFuncB type="gamma" amplitude="1" exponent="0.5" offset="0.3" />
+              <feFuncR type="linear" slope="0.5" intercept="0.52" />
+              <feFuncG type="linear" slope="0.5" intercept="0.52" />
+              <feFuncB type="linear" slope="0.5" intercept="0.52" />
             </feComponentTransfer>
           </filter>
-          {/* Takes the hard edge off the plant cut-outs: a shrub is not an
-              ellipse, and a crisp oval of untouched photo reads as a
-              mistake where a soft one reads as a plant. */}
-          <filter id="planting-soften">
-            <feGaussianBlur stdDeviation={w * 0.003} />
-          </filter>
+          {/*
+            The soft edge of a plant cut-out.
+
+            A shrub is not an ellipse, and a crisp oval of untouched photo
+            reads as a mistake where a soft one reads as a plant. This
+            used to be a Gaussian blur over the whole group of ellipses,
+            which softened them by growing them: a blur spreads a shape
+            outward as well as inward, so the hole in the material ended
+            up wider than the plant it was protecting, on top of a margin
+            that was already 18% wide. That is the ring of old mulch left
+            around every shrub when the surface was swapped.
+
+            A radial gradient does the same job without the growth, and
+            does it per plant for free: `objectBoundingBox` units mean the
+            stops are fractions of *each* ellipse, so a small perennial
+            and a large yew get a feather in proportion. Black — the
+            photograph — holds solidly out to the plant's own edge, then
+            gives way to the new material across the last tenth. Nothing
+            is painted on a leaf, and nothing is left unpainted more than
+            a finger's width from one.
+          */}
+          <radialGradient id="planting-fade">
+            <stop offset={String(PLANTING_CORE)} stopColor="#000000" />
+            <stop offset="1" stopColor="#ffffff" />
+          </radialGradient>
           {regions.map((region) => (
             // The region, minus the plants standing in it. White shows the
             // new material, black lets the photograph through — so
@@ -308,20 +378,18 @@ export function PhotoCanvas({
                   the customer has replaced is covered by the new material
                   and then drawn over, which is what makes a swap look like
                   the old plant was taken out rather than hidden. */}
-              <g filter="url(#planting-soften)">
-                {(region.plantings ?? [])
-                  .filter((plant) => !chosenPlant(plant.id))
-                  .map((plant) => (
-                    <ellipse
-                      key={plant.id}
-                      cx={plant.cx * w}
-                      cy={plant.cy * h}
-                      rx={plant.rx * w * PLANTING_MARGIN}
-                      ry={plant.ry * h * PLANTING_MARGIN}
-                      fill="#000000"
-                    />
-                  ))}
-              </g>
+              {(region.plantings ?? [])
+                .filter((plant) => !chosenPlant(plant.id))
+                .map((plant) => (
+                  <ellipse
+                    key={plant.id}
+                    cx={plant.cx * w}
+                    cy={plant.cy * h}
+                    rx={plant.rx * w * PLANTING_MASK_MARGIN}
+                    ry={plant.ry * h * PLANTING_MASK_MARGIN}
+                    fill="url(#planting-fade)"
+                  />
+                ))}
             </mask>
           ))}
         </defs>
@@ -362,7 +430,7 @@ export function PhotoCanvas({
                     height={h}
                     preserveAspectRatio="none"
                     filter="url(#photo-shading)"
-                    opacity={0.75}
+                    opacity={0.9}
                     style={{ mixBlendMode: "multiply" }}
                   />
                 </g>
@@ -630,7 +698,15 @@ export function PhotoCanvas({
         </p>
       )}
 
-      {pending && <SegmentationWait />}
+      {pending && (
+        <SegmentationWait
+          progress={progress}
+          // The picture is already loaded and its natural size is the
+          // stored size, so the browser can predict the wait before the
+          // server gets a word in.
+          photoPixels={dims ? dims.w * dims.h : null}
+        />
+      )}
     </figure>
   );
 }
@@ -723,39 +799,3 @@ export function RegionStrip({
   );
 }
 
-/**
- * The wait, choreographed over the photo instead of beside it.
- *
- * §2's thesis is a customer playing inside thirty seconds, and most of
- * that budget is one vision call. A spinner in the corner spends it
- * looking broken. A band of light travelling down the customer's own
- * photograph spends it looking like something is being read — which is
- * exactly what is happening — and it keeps their picture, the thing they
- * came for, on screen the entire time.
- */
-function SegmentationWait() {
-  return (
-    <div className="absolute inset-0" aria-live="polite">
-      <div className="absolute inset-0 bg-bark-950/45" />
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-x-0 top-0 h-1/3 animate-sweep bg-gradient-to-b from-transparent via-white/30 to-transparent"
-      />
-      <div className="absolute inset-x-0 bottom-0 flex flex-col gap-2 bg-gradient-to-t from-bark-950/90 to-transparent px-4 pb-4 pt-14 sm:px-5 sm:pb-5">
-        <p className="text-sm font-medium text-white sm:text-base">
-          Looking at your yard…
-        </p>
-        <p className="text-xs text-canopy-200 sm:text-sm">
-          Finding the lawn, the beds and the hardscape. A few seconds.
-        </p>
-        {/* Placeholder chips in the shape of the labels that are coming,
-            so nothing jumps when they arrive. */}
-        <div aria-hidden className="mt-1 flex gap-2">
-          <div className="skeleton h-6 w-24 rounded-full opacity-40" />
-          <div className="skeleton h-6 w-20 rounded-full opacity-30" />
-          <div className="skeleton h-6 w-28 rounded-full opacity-20" />
-        </div>
-      </div>
-    </div>
-  );
-}

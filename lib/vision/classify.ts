@@ -101,12 +101,41 @@ function textOf(response: { content: { type: string }[] }): string {
 }
 
 /**
+ * What `classifyPhoto` will tell a caller while it is still working.
+ *
+ * One event, and it is the only one worth having: the first pass has
+ * landed, here is what it found and what it cost. Everything the wait
+ * needs to stop guessing follows from that — the second pass's remaining
+ * time is a multiple of the first pass's measured one, and the region
+ * names are something true to put on the screen a minute before the
+ * outlines arrive.
+ *
+ * Best-effort by contract: a caller that throws in here must not fail a
+ * segmentation that is otherwise going fine, so the call site swallows it.
+ */
+export type SegmentationProgressReport = {
+  firstPassMs: number;
+  /** The labels the first pass gave what it found, in its own order. */
+  found: string[];
+  /** Whether a second pass is going to run. */
+  refining: boolean;
+};
+
+/** Whether the refinement pass will run, for a caller sizing the wait. */
+export { refinementEnabled };
+
+/**
  * Segment a yard photo into labeled regions. Returns the demo overlay
  * (clearly marked source: "demo") when no Anthropic credentials are set.
+ *
+ * `onFirstPass` is called once, between the passes, so a route can record
+ * how far along the wait is. It is never awaited for its result and never
+ * allowed to fail the call.
  */
 export async function classifyPhoto(
   imageData: Buffer,
   mediaType: VisionImageMediaType,
+  onFirstPass?: (report: SegmentationProgressReport) => void | Promise<void>,
 ): Promise<SegmentationResult> {
   const credential = readCredential();
   if (credential.status !== "present") {
@@ -152,6 +181,25 @@ export async function classifyPhoto(
   const first = parseSegmentation(textOf(response), "claude");
   const report = (refinement: RefinementTiming) =>
     reportVisionTiming({ firstPassMs, regions: first.regions.length, refinement });
+
+  const willRefine = first.regions.length > 0 && refinementEnabled();
+  // Told before the second pass starts, because the whole point of it is
+  // to be on the customer's screen during the second pass.
+  if (onFirstPass) {
+    try {
+      await onFirstPass({
+        firstPassMs,
+        found: first.regions.map((region) => region.label).filter(Boolean),
+        refining: willRefine,
+      });
+    } catch (error) {
+      // A progress write that fails costs the customer a progress bar.
+      // It must not cost them their segmentation.
+      console.warn(
+        `[vision] could not record progress: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
 
   if (first.regions.length === 0) {
     report({ status: "no-regions" });

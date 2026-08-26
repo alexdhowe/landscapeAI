@@ -10,6 +10,7 @@ import type { EstimateSnapshot, LeadContact } from "../lead/types";
 import type { LngLat } from "../measure/area";
 import type { Quantity } from "../pricing/types";
 import type { MarketContext } from "../pricing/typology";
+import type { SegmentationEstimate } from "../vision/estimate";
 import type { NormalizedPoint, SegmentationResult } from "../vision/types";
 
 export type RegionSelection = {
@@ -24,8 +25,43 @@ export type ProjectPhoto = {
   mediaType: string;
 };
 
+/** Which of the two vision passes is running right now. */
+export type SegmentationStage = "reading" | "refining";
+
+/**
+ * What a segmentation that is still running can say about itself.
+ *
+ * The vision call takes 55–170 seconds (README, "The other number"), and
+ * a wait that long has to be able to answer "is this working?" without
+ * the customer guessing. Everything here is written by the vision route
+ * as the passes complete, and read by the design page while it polls, so
+ * what the customer sees is what the server actually did rather than an
+ * animation timed to a guess.
+ *
+ * Absent on a project whose segmentation started before this existed, and
+ * on one whose pass never got as far as recording anything — so every
+ * reader treats it as optional and falls back to its own estimate.
+ */
+export type SegmentationProgress = {
+  /** When the vision route started work, ISO. */
+  startedAt: string;
+  stage: SegmentationStage;
+  /** What the wait was predicted to cost, from the photo's pixel count. */
+  estimate: SegmentationEstimate;
+  /** What the first pass actually took, once it has finished. */
+  firstPassMs?: number;
+  /**
+   * The names the first pass gave the regions it found.
+   *
+   * There purely so the second half of the wait has something true in it:
+   * the customer sees "Front lawn, Bed along the walk, Driveway" appear
+   * a minute before the outlines do.
+   */
+  found?: string[];
+};
+
 export type SegmentationState =
-  | { status: "pending" }
+  | { status: "pending"; progress?: SegmentationProgress }
   | { status: "failed"; error: string }
   | ({ status: "ready" } & SegmentationResult);
 

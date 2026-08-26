@@ -1,0 +1,19 @@
+-- What a still-running segmentation can say about itself.
+--
+-- The vision call takes 55-170 seconds and the wait animation was designed for
+-- six. A band of light travelling down the photograph is honest for six seconds
+-- and dishonest for two minutes: it says nothing about whether the call is
+-- working, how far through it is, or how much longer it will be, and a customer
+-- with no way to tell working from hung closes the tab.
+--
+-- So the vision route records the wait as it happens -- when it started, which
+-- of the two passes is running, what the wait was estimated to cost from the
+-- photo's pixel count, what the first pass actually took, and the region names
+-- it found -- and the design page polls it. What the customer watches is then
+-- what the server did, rather than an animation timed against a guess.
+--
+-- One column rather than five: this is one object with one lifetime, written
+-- whole at each stage transition and cleared the moment there is an answer.
+-- Null on every row whose segmentation has finished, which is nearly all of
+-- them.
+ALTER TABLE "projects" ADD COLUMN "segmentation_progress" jsonb;

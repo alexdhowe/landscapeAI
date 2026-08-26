@@ -102,6 +102,34 @@ export function formatVisionTiming(timing: VisionTiming): string {
 }
 
 /**
+ * What the wait was predicted to cost against what it cost.
+ *
+ * The customer is now shown a countdown, and a countdown is a promise. The
+ * per-megapixel term behind it is a prior rather than a measurement (see
+ * `lib/vision/estimate.ts`), because every photo run through this so far
+ * has been a small web image. This line is how that stops being true:
+ * twenty real uploads and the coefficient is arithmetic rather than
+ * judgement.
+ *
+ * Pure, and beside the timing line rather than inside it, because a
+ * segmentation that nobody was waiting on — a re-run, a script — has no
+ * estimate to compare against.
+ */
+export function formatEstimateAccuracy(
+  estimateMs: number,
+  actualMs: number,
+  megapixels: number | null,
+): string {
+  const size = megapixels === null ? "size unknown" : `${megapixels.toFixed(2)} MP`;
+  const drift = actualMs - estimateMs;
+  const sign = drift >= 0 ? "+" : "−";
+  return (
+    `[vision] estimate ${seconds(estimateMs)} vs actual ${seconds(actualMs)}` +
+    ` (${sign}${seconds(Math.abs(drift))}, ${size})`
+  );
+}
+
+/**
  * A skipped second look is a problem an operator should see among the
  * warnings; everything else is routine measurement. One line either way,
  * so a run always produces exactly one of these to collect.

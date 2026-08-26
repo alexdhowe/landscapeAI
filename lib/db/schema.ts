@@ -54,7 +54,7 @@ import {
 
 import type { PlantMeta } from "../catalog/types";
 import type { ConfirmableUnit } from "../confirm/types";
-import type { RegionSelection } from "../design/types";
+import type { RegionSelection, SegmentationProgress } from "../design/types";
 import type { LeadContact } from "../lead/types";
 import type { ReconciliationReport } from "../measure/reconcile";
 import type {
@@ -383,6 +383,14 @@ export const projects = pgTable(
       .notNull()
       .default("pending"),
     segmentationError: text("segmentation_error"),
+    /**
+     * What a still-running segmentation can say about itself: when it
+     * started, which of the two passes it is on, what it was estimated to
+     * cost, and the names the first pass found. Null unless the status is
+     * "pending" — it is the wait's own state, and there is no wait once
+     * there is an answer.
+     */
+    segmentationProgress: jsonb("segmentation_progress").$type<SegmentationProgress>(),
     /** "claude" for a real vision call, "demo" for the no-API-key fallback. */
     segmentationSource: text("segmentation_source", { enum: ["claude", "demo"] }),
     /** Vertical elements the photo can see and the aerial cannot. */

@@ -30,6 +30,34 @@ import { SubmitLead } from "./SubmitLead";
  * All pricing happens server-side; this component only ever sees the
  * customer-facing band.
  */
+/**
+ * How often the design page asks what the segmentation is doing.
+ *
+ * Every two and a half seconds for up to three minutes is at most ~70
+ * reads against a budget of 120 a minute (lib/ratelimit/policy.ts), and
+ * it is what makes the stage transition in the middle of the wait
+ * visible. It stops the moment there is an answer.
+ */
+const POLL_MS = 2_500;
+
+/**
+ * How long a pending segmentation is believed to be alive.
+ *
+ * Long enough to cover the slowest wait anybody has measured with room to
+ * spare, short enough that a server that died mid-call does not leave the
+ * customer watching a bar for a request nobody is running. Past it, this
+ * tab starts the call itself.
+ */
+const RUNNING_FOR_MS = 6 * 60_000;
+
+/** Is somebody already running this photo through the vision call? */
+function alreadyRunning(project: DesignProject): boolean {
+  const seg = project.segmentation;
+  if (seg.status !== "pending" || !seg.progress) return false;
+  const startedAt = Date.parse(seg.progress.startedAt);
+  return Number.isFinite(startedAt) && Date.now() - startedAt < RUNNING_FOR_MS;
+}
+
 export function Configurator({ projectId }: { projectId: string }) {
   const [project, setProject] = useState<DesignProject | null>(null);
   const [band, setBand] = useState<BandPayload | null>(null);
@@ -67,38 +95,76 @@ export function Configurator({ projectId }: { projectId: string }) {
     };
   }, []);
 
-  // Load the project; kick off segmentation if it hasn't run yet.
+  // Load the project; kick off segmentation if it hasn't run yet, and
+  // watch it while it runs.
+  //
+  // The watching is the new part and it is what the progress bar is made
+  // of. The POST below stays open for the whole 55-170 seconds and
+  // answers once, at the end; the stage transition in the middle — the
+  // first pass landing, with the names it found — reaches the page only
+  // because this polls for it. POLL_MS against the READ budget (120 a
+  // minute) is two orders of magnitude inside it.
   useEffect(() => {
     let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    const watch = () => {
+      timer = setTimeout(async () => {
+        const res = await fetch(`/api/projects/${projectId}`).catch(() => null);
+        if (cancelled || !res?.ok) return;
+        const latest = (await res.json()) as DesignProject;
+        if (cancelled) return;
+        // A poll may never overwrite an answer. The POST is the
+        // authority on the finished segmentation and can land first.
+        setProject((current) =>
+          current && current.segmentation.status !== "pending" ? current : latest,
+        );
+        if (latest.segmentation.status === "pending") watch();
+        // A tab that only watched — a reload, a second tab — still has to
+        // pick the band up when the answer lands, because it never went
+        // through the POST that used to be the only path to it.
+        else void refreshBand();
+      }, POLL_MS);
+    };
+
     (async () => {
       const res = await fetch(`/api/projects/${projectId}`);
       if (!res.ok) {
         if (!cancelled) setError("This design could not be found.");
         return;
       }
-      let loaded = (await res.json()) as DesignProject;
+      const loaded = (await res.json()) as DesignProject;
       if (cancelled) return;
       setProject(loaded);
 
-      if (loaded.segmentation.status === "pending" && !segmentationStarted.current) {
-        segmentationStarted.current = true;
-        const visionRes = await fetch("/api/vision", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ projectId }),
-        });
-        if (cancelled) return;
-        if (visionRes.ok || visionRes.status === 502) {
-          loaded = (await visionRes.json()) as DesignProject;
-          setProject(loaded);
-        } else {
-          setError("We couldn't analyze this photo. Try another one.");
+      if (loaded.segmentation.status === "pending") {
+        watch();
+        // A reload during a two-minute wait is exactly what an impatient
+        // customer does, and it used to buy a second vision call: a
+        // second metered request against the same photo, for an answer
+        // the first one was already producing. A segmentation that has
+        // recently reported progress is running somewhere, so this tab
+        // watches rather than starts one.
+        if (!alreadyRunning(loaded) && !segmentationStarted.current) {
+          segmentationStarted.current = true;
+          const visionRes = await fetch("/api/vision", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ projectId }),
+          });
+          if (cancelled) return;
+          if (visionRes.ok || visionRes.status === 502) {
+            setProject((await visionRes.json()) as DesignProject);
+          } else {
+            setError("We couldn't analyze this photo. Try another one.");
+          }
         }
       }
       void refreshBand();
     })();
     return () => {
       cancelled = true;
+      if (timer) clearTimeout(timer);
     };
   }, [projectId, refreshBand]);
 
@@ -292,6 +358,7 @@ export function Configurator({ projectId }: { projectId: string }) {
             selectedRegionId={selectedRegionId}
             onSelectRegion={selectRegion}
             pending={seg.status === "pending"}
+            progress={seg.status === "pending" ? seg.progress : undefined}
             notice={demo ? "Example areas" : undefined}
             plantSelections={project.plantSelections}
             plantCatalog={plantCatalog}

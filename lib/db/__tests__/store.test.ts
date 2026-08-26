@@ -235,6 +235,31 @@ describe("the store, over Drizzle", () => {
     expect((await store.getProject(created.id)).regionOutlines).toBeUndefined();
   });
 
+  it("round-trips the wait's own progress, and clears it once there is an answer", async () => {
+    // The customer's progress bar is a report of what the server did, so
+    // what the server wrote has to survive the trip through Postgres —
+    // and has to disappear the moment the segmentation answers, because
+    // there is no wait to describe once there is a result.
+    const created = await store.createProject(PHOTO_BYTES, "image/jpeg", "jpg");
+    const progress = {
+      startedAt: "2026-08-26T14:00:00.000Z",
+      stage: "refining" as const,
+      estimate: { firstPassMs: 56_200, refineMs: 95_500, totalMs: 151_700 },
+      firstPassMs: 56_200,
+      found: ["Front lawn", "Bed along front walk"],
+    };
+    await store.setSegmentation(created.id, { status: "pending", progress });
+
+    const waiting = (await store.getProject(created.id)).segmentation;
+    expect(waiting.status).toBe("pending");
+    expect(waiting.status === "pending" ? waiting.progress : null).toEqual(progress);
+
+    await store.setSegmentation(created.id, { status: "ready", ...demoSegmentation() });
+    const answered = await store.getProject(created.id);
+    expect(answered.segmentation.status).toBe("ready");
+    expect(JSON.stringify(answered)).not.toContain("firstPassMs");
+  });
+
   it("refuses a correction to a region the design does not have", async () => {
     const created = await store.createProject(PHOTO_BYTES, "image/jpeg", "jpg");
     await store.setSegmentation(created.id, { status: "ready", ...demoSegmentation() });

@@ -58,13 +58,17 @@ deployment.
 | "Push it out" pushing it in | ✅ fixed — the offset read its amount through `Math.abs`, so both nudge buttons moved the edge the same way |
 | What the vision call costs | ✅ instrumented — every segmentation logs one line: total, first pass, second look, and how much of the second look survived the merge |
 | The vision call's latency | ⚖️ accepted — 56-75s per upload against §2's thirty. The accuracy is worth the wait; do not optimise it away without asking |
+| The wait the customer sits through | ✅ **honest** — a bar off the two real passes, an estimate from the photo's own pixel count, and the region names on screen a minute before the outlines |
+| A reload during that wait | ✅ fixed — it bought a second metered vision call for an answer the first one was already producing |
+| A ring of old mulch around every plant | ✅ fixed — the cut-out was 18% wider than the plant and then blurred wider still; the material now reaches the plant's own edge |
+| "Granite that just colours the mulch grey" | ✅ fixed — the filters ran in linearRGB, the noise was never spread across its ramp, one generator served six materials, and the photo's own grain was multiplied back at full detail |
 | The aerial leg (`/design/[id]/locate`) | ⛔ gated off — deliberately: no paid imagery or geocoder until there is a working MVP |
 
 All six phases are in, they run on Postgres, the contractor console is behind
 a login, the price book is editable, photos live in object storage when a
 bucket is configured, and the whole thing has been designed and opened on a
 phone — on a phone *branch*, for the first time in the twelfth session,
-which is its own story. `npm test` runs 590 tests — with a database and
+which is its own story. `npm test` runs 620 tests — with a database and
 without one.
 
 **It has not been deployed.** The tenth session wrote the configuration —
@@ -91,7 +95,7 @@ store, so a clean checkout runs the demo with nothing to provision.
 ```sh
 npm run doctor    # is this machine set up? checks .env.local, the API key (against the
                   # real API), and the console login — and says what to fix, in English.
-npm test          # Vitest — 590 tests across every phase. No server, no network, no browser.
+npm test          # Vitest — 620 tests across every phase. No server, no network, no browser.
 npm run typecheck
 npm run dev
 npm run build
@@ -102,8 +106,11 @@ npm run segment   # dev-only: segment one photo and write what every stage did t
 
 npm run shots     # dev-only: drive the customer flow in a real browser at
                   # 390x844 and 1440x900, capture every surface, and audit
-                  # horizontal scroll and 44px tap targets. Needs a running
-                  # server; see "Looking at it" below.
+                  # horizontal scroll and 44px tap targets. Includes the three
+                  # states of the segmentation wait, which no run with a key
+                  # is slow enough and no run without one is long enough to
+                  # reach — they are driven by answering the design page's own
+                  # poll. Needs a running server; see "Looking at it" below.
 
 npm run db:generate   # regenerate migrations from lib/db/schema.ts
 npm run db:migrate    # apply them
@@ -455,6 +462,181 @@ and both would have been live on day one.
   drill (`measurement_deltas` is the one loss this product cannot absorb),
   where logs go, and the smoke tests to run against the deployment before
   anyone is given the address.
+
+## Two minutes, a ring of old mulch, and grey paint
+
+Three things the owner asked for after looking at a real yard on a real
+screen. They are unrelated in the code and identical in kind: each is a
+place where the product knew something true and showed the customer
+something else.
+
+### The wait was designed for six seconds and takes a hundred and fifty
+
+The vision call runs 55–170 seconds. What filled that time was a band of
+light travelling down the photograph, three grey placeholder pills, and
+the words "a few seconds". It was written before anyone had timed the
+call, and for six seconds it is the right idea — the customer's own
+photograph, visibly being read. For two and a half minutes it says
+nothing about whether anything is happening, how far along it is, or how
+much longer it will be, and a customer who cannot tell working from hung
+either reloads or leaves.
+
+**What is on the screen now is a report, not an animation.** The two
+vision passes are a real sequence, and the route records the transition
+between them as it happens: `segmentation_progress` on the project
+(migration 0008) carries when the wait started, which pass is running,
+what it was estimated to cost, what the first pass actually took, and the
+region names it found. The design page polls that every 2.5 seconds while
+its own POST sits open for the duration. So the tick against "finding the
+lawn, beds and hardscape" appears because the first pass finished, not
+because a timer said it should have — and when the outline work is still a
+minute away, the customer already has `Front lawn · Bed along front walk ·
+Foundation planting` on screen in their own yard's words.
+
+**The estimate.** `lib/vision/estimate.ts` sizes the wait from the stored
+photo's pixel count, read out of its header by `lib/image/dimensions.ts`
+rather than by decoding it — a second and a half of pure-JS decode on the
+critical path of the request whose job is to *start* the call promptly is
+not a trade worth making for a countdown. Two of the three coefficients
+are fitted to the only measurements that exist, the `[vision]
+segmentation …` lines from the last two sessions: 54 s + 10 s per
+megapixel puts that 0.2 MP photo's first pass at 56.0 s against 56.2 s
+measured, and 1.7× puts its second pass at 95.2 s against 95.6 s.
+
+The per-megapixel term is the one number here that is **a prior rather
+than a measurement**, because every photo anybody has run through this has
+been a small web image. It is deliberately small, and it was halved once
+already during this session after watching what the first version put on
+the screen: a coefficient big enough to claim a phone photo takes three
+times as long as a web image announced "about 4 minutes left" to a
+customer on the strength of no evidence at all. What dominates this call
+is output tokens — up to 16,000 of polygon coordinates — and the number of
+regions in a yard is set by the yard, not by the pixel count. It is also
+calibratable without guessing: every real segmentation now logs
+`[vision] estimate 150.1s vs actual 152.3s (+2.2s, 0.20 MP)`, so twenty
+real uploads settle that coefficient by arithmetic.
+
+**An estimate will still be wrong sometimes, so the rules in
+`lib/design/wait.ts` are about what a wrong estimate is not allowed to
+do.** A bar never claims a pass has finished — within a stage it
+approaches that stage's share and never arrives, and only the server
+moves it across a boundary, so a bar stuck at 47% means the first pass is
+genuinely still running. A bar never stalls either: past its estimate it
+keeps closing the gap asymptotically, so an overrun looks slow rather
+than broken. A countdown that has run out stops predicting and says
+"Any moment now", and a long overrun says "Still working. Big photos
+take longer — keep this page open and it will finish." Under ninety
+seconds it becomes a real ticking `1:20`, because by then it is derived
+from the first pass's *measured* time rather than from a pixel count.
+
+**And a reload during the wait no longer buys a second vision call.** It
+used to: a pending segmentation was indistinguishable from an unstarted
+one, so the impatient customer's refresh — at minute one of two — started
+a whole second metered call for an answer the first one was already
+producing. A segmentation that has reported progress inside the last six
+minutes is running somewhere, and a tab that finds one watches instead of
+starting one. Past six minutes it is presumed dead and this tab takes it
+on.
+
+**How to look at it without a key.** Segmentation with no
+`ANTHROPIC_API_KEY` answers in milliseconds, so the screen a customer
+spends most of their first visit looking at was the one surface `npm run
+shots` could never reach. It reaches it now: `design-wait-reading`,
+`design-wait-refining` and `design-wait-overdue` at both viewports, driven
+by answering the design page's own poll with a pending project. The
+overdue state is in there deliberately — "taking longer than usual" is the
+state most likely to be seen first by a customer and least likely to be
+seen first by us.
+
+### A ring of old mulch around every plant
+
+Swap a bed to granite and every shrub in it sat in a wide brown halo of
+the mulch that had just been replaced. On a bed of eight, eight halos.
+
+The mask that keeps gravel off the plants was drawing each cut-out 18%
+wider than the plant and then running a Gaussian blur over the whole
+group — and a blur softens a shape by growing it, so the hole ended up
+around a third wider than the plant it was protecting. The comment above
+the constant argued, correctly, that gravel across a shrub's leaves is a
+worse failure than a little old bed showing at its base. It was right
+about the direction and wrong about the distance.
+
+Both halves are fixed and the reasoning is unchanged. The cut-out is now
+**total out to the plant's own reported edge and fades over the next
+12%** — a radial gradient in `objectBoundingBox` units, so the stops are
+fractions of *each* ellipse and a small perennial and a large yew get a
+feather in proportion, with no blur and therefore no growth. Nothing lands
+on a leaf; nothing is left unpainted more than a finger's width from one.
+
+The generosity that used to live in that constant now lives where it
+belongs: the segmentation prompt already asks the model to cover a plant's
+whole visible mass including its outer foliage. That is a claim about the
+plant, made by the pass that can see it, rather than a fudge factor
+applied equally to every plant by the pass that cannot. The prompt is
+deliberately **not** being retuned to compensate — three earlier sessions
+went at the prompt on an assumption nobody had checked.
+
+### "It kind of just colors the mulch gray"
+
+Granite chips over dark mulch came out looking like dark mulch someone had
+greyed. It was four separate faults compounding, and the last of them was
+doing most of the damage:
+
+1. **The filters ran in linearRGB**, the SVG default. Every colour ramp in
+   `swatches.tsx` had been tuned against a colour space nobody read it in:
+   a table value of 0.28 comes out at sRGB 0.57, about twice as light as
+   written. That is why every material landed somewhere between pale grey
+   and pale beige whatever its ramp said.
+2. **The noise was never spread.** Measured rather than assumed: a
+   `feTurbulence` fractalNoise field averaged across its channels lands
+   between 0.40 and 0.62, so a colour table indexed 0..1 only ever used
+   its middle fifth. Every material was a nearly flat wash of its own mid
+   tone.
+3. **One generator served six materials.** Same noise type, same octaves,
+   same flat treatment, and river rock at 0.07 against granite chips at
+   0.09 — a 30% difference in gauge between a 1.5in washed stone and a
+   3/8in chip, which is to say the picker offered two swatches of the same
+   grey under different names.
+4. **The photograph's own grain was multiplied back at full detail.** The
+   shading pass desaturated the photo, lifted it, and multiplied it over
+   the new material — so every shred of the old mulch, and all of its
+   darkness, came straight through the stone. The customer really was
+   being shown their own mulch in grey.
+
+Each is fixed at its cause. Filters declare `sRGB`, so a ramp value is the
+colour it says it is. A `spread` term maps each generator's measured range
+onto the full ramp before colouring. A spec now carries its own grain, its
+own gauge and its own treatment: stone is lit, with individual pieces
+catching light and washed river rock carrying a specular sheen; mulch is
+matte and runs in strands; and a low-frequency mottle keeps twenty feet of
+bed from being one flat tone. And the shading pass now blurs the
+luminance well past the scale of any material's grain before multiplying
+it, so what carries through is the *light* in the photograph — the shadow
+under a shrub, the sunlit half of a yard — and none of the material.
+
+| material | gauge | treatment |
+|---|---|---|
+| Washed river rock | 1.5in, coarsest here | lit hard, wet sheen |
+| Granite chips | 3/8in, four times finer | lit, faint sheen |
+| Buff limestone | between the two | lit, matte |
+| Hardwood / dyed / cedar mulch | strands, not specks | matte, anisotropic grain |
+
+### What none of this has been through
+
+There is still no `ANTHROPIC_API_KEY` in this container, so:
+
+- **The two-pass progress has never run against a real vision call.** The
+  stage transition, the found names and the `estimate vs actual` line are
+  exercised by unit tests and by faked wire responses, not by a call that
+  took two minutes. The first real upload is the acceptance test.
+- **The materials were judged against a synthetic yard**, generated to
+  match `lib/vision/demo.ts` so the demo overlay lands on plausible
+  ground: dark mulch under the beds, green masses where the demo puts its
+  plants, concrete on the walk. It answers "does granite still look like
+  greyed mulch" and it cannot answer how any of this sits on a real
+  photograph in real light.
+- **The per-megapixel coefficient is still a prior.** See above; the log
+  line is how it stops being one.
 
 ## The photo experience (Phase 2)
 

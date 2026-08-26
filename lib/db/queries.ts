@@ -109,7 +109,11 @@ function toSegmentedRegion(row: RegionRow): SegmentedRegion {
 }
 
 function toSegmentation(row: ProjectBundle): SegmentationState {
-  if (row.segmentationStatus === "pending") return { status: "pending" };
+  if (row.segmentationStatus === "pending") {
+    return row.segmentationProgress
+      ? { status: "pending", progress: row.segmentationProgress }
+      : { status: "pending" };
+  }
   if (row.segmentationStatus === "failed") {
     return { status: "failed", error: row.segmentationError ?? "" };
   }
@@ -385,6 +389,10 @@ export async function replaceSegmentation(
       .set({
         segmentationStatus: segmentation.status,
         segmentationError: segmentation.status === "failed" ? segmentation.error : null,
+        // The wait's own state, and only the wait's: an answered
+        // segmentation has nothing to report progress about.
+        segmentationProgress:
+          segmentation.status === "pending" ? (segmentation.progress ?? null) : null,
         segmentationSource:
           segmentation.status === "ready" ? segmentation.source : null,
         verticalElements:
