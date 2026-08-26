@@ -18,6 +18,7 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 
 import { envFilePath, parseEnvFile } from "../lib/env/localFile";
+import { BRAND_NAME } from "../lib/site/brand";
 import { cleanKey, looksLikeAnthropicKey } from "../lib/vision/credentials";
 
 const ROOT = process.cwd();
@@ -43,7 +44,7 @@ const fail = (m: string, fix: string) => {
 // copies of this would eventually disagree about what the file says.
 
 async function main() {
-  console.log(`\nlandscapeAI setup check`);
+  console.log(`\n${BRAND_NAME} setup check`);
   console.log(`Project folder: ${ROOT}\n`);
 
   console.log("Environment file");

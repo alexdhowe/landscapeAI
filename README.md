@@ -1,4 +1,4 @@
-# LandscapeAI
+# MyScape
 
 Design-to-estimate MVP for landscape contractors. A homeowner uploads a photo,
 plays with their yard, sees a budget band; the aerial pass measures the real
@@ -7,6 +7,23 @@ property and narrows it; a rep confirms on site and every correction is logged.
 The full build plan lives in [`project-map.md`](./project-map.md). Read it
 before touching anything — section 1 lists architectural invariants that are
 not negotiable.
+
+## The name
+
+The product is **MyScape**. It is spelled once, in `lib/site/brand.ts`, and
+the surfaces that show it — the wordmark on every customer page and the
+contractor console, the metadata that titles every page, the OG image drawn
+for shared links — import it from there. A test reads those files and fails
+if any of them spells the name for itself, because a header saying one thing
+while the browser tab says another is drift nobody notices in review: each
+file looks correct on its own.
+
+Renamed from LandscapeAI. Deliberately **not** renamed, because they are
+identifiers rather than branding and changing them breaks or orphans
+things: the npm package (`landscape-ai`), the Render service and Fly app
+names, the local Postgres database in `drizzle.config.ts`, and the git
+repository. Those are a deployment decision for whenever there is a
+deployment.
 
 ## Status
 
@@ -47,7 +64,7 @@ All six phases are in, they run on Postgres, the contractor console is behind
 a login, the price book is editable, photos live in object storage when a
 bucket is configured, and the whole thing has been designed and opened on a
 phone — on a phone *branch*, for the first time in the twelfth session,
-which is its own story. `npm test` runs 581 tests — with a database and
+which is its own story. `npm test` runs 590 tests — with a database and
 without one.
 
 **It has not been deployed.** The tenth session wrote the configuration —
@@ -74,7 +91,7 @@ store, so a clean checkout runs the demo with nothing to provision.
 ```sh
 npm run doctor    # is this machine set up? checks .env.local, the API key (against the
                   # real API), and the console login — and says what to fix, in English.
-npm test          # Vitest — 581 tests across every phase. No server, no network, no browser.
+npm test          # Vitest — 590 tests across every phase. No server, no network, no browser.
 npm run typecheck
 npm run dev
 npm run build

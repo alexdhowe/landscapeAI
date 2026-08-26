@@ -1,5 +1,7 @@
 import Link from "next/link";
 
+import { BRAND_NAME } from "@/lib/site/brand";
+
 /**
  * The mark and the name, in the display face. The one thing that appears
  * on both the customer surfaces and the contractor console, which is most
@@ -35,7 +37,7 @@ export function Wordmark({
       <span
         className={`display text-lg ${tone === "light" ? "text-white" : "text-bark-900"}`}
       >
-        LandscapeAI
+        {BRAND_NAME}
       </span>
       {suffix ? (
         <span

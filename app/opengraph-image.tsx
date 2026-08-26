@@ -1,7 +1,8 @@
 import { ImageResponse } from "next/og";
 
-export const alt =
-  "LandscapeAI — photograph your yard, swap what's in it, see what it costs";
+import { BRAND_NAME } from "@/lib/site/brand";
+
+export const alt = `${BRAND_NAME} — photograph your yard, swap what's in it, see what it costs`;
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 
@@ -34,7 +35,7 @@ export default function OpengraphImage() {
             />
             <rect x="10" y="45" width="44" height="5.5" rx="2.75" fill="#f0f6f1" />
           </svg>
-          <div style={{ fontSize: 40, letterSpacing: -1 }}>LandscapeAI</div>
+          <div style={{ fontSize: 40, letterSpacing: -1 }}>{BRAND_NAME}</div>
         </div>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>

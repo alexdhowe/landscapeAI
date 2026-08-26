@@ -49,7 +49,7 @@ export async function geocodeAddress(query: string): Promise<GeocodeResult> {
     const res = await fetch(url, {
       headers: {
         // Nominatim usage policy requires an identifying User-Agent.
-        "User-Agent": "landscapeAI-mvp/0.1 (dev)",
+        "User-Agent": "MyScape-mvp/0.1 (dev)",
         Accept: "application/json",
       },
       signal: AbortSignal.timeout(TIMEOUT_MS),

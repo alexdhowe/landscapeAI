@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Fraunces, Inter } from "next/font/google";
 
+import { BRAND_NAME, HEADLINE, TAGLINE, TITLE_TEMPLATE } from "@/lib/site/brand";
 import { siteUrl } from "@/lib/site/url";
 
 import "./globals.css";
@@ -23,9 +24,6 @@ const fraunces = Fraunces({
   display: "swap",
 });
 
-const SITE_NAME = "LandscapeAI";
-const TAGLINE =
-  "Photograph your yard, swap what's in it, and see what projects like yours cost — before anyone visits.";
 
 export const metadata: Metadata = {
   // Relative OG/icon URLs need a base. Resolved at request time from
@@ -33,16 +31,16 @@ export const metadata: Metadata = {
   // lib/site/url.ts for why the NEXT_PUBLIC_ variable alone was a trap.
   metadataBase: new URL(siteUrl()),
   title: {
-    default: `${SITE_NAME} — see what your yard could be`,
+    default: HEADLINE,
     // Every route sets its own title; this is the frame around it.
-    template: `%s · ${SITE_NAME}`,
+    template: TITLE_TEMPLATE,
   },
   description: TAGLINE,
-  applicationName: SITE_NAME,
+  applicationName: BRAND_NAME,
   openGraph: {
     type: "website",
-    siteName: SITE_NAME,
-    title: `${SITE_NAME} — see what your yard could be`,
+    siteName: BRAND_NAME,
+    title: HEADLINE,
     description: TAGLINE,
   },
   twitter: { card: "summary_large_image" },
