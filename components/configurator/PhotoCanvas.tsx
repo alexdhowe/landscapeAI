@@ -29,7 +29,9 @@ import { PlantGlyph } from "./plantGlyphs";
 import { SegmentationWait } from "./SegmentationWait";
 import { KIND_COLORS } from "./regionColors";
 import { MaterialDefs, grainInches, type RegionTexture } from "./swatches";
-import { depthBands, fitGroundPlane, type DepthBand } from "@/lib/design/perspective";
+import { depthBands, depthScale, fitGroundPlane, type DepthBand } from "@/lib/design/perspective";
+import { addedPlantEllipse, plantAspect } from "@/lib/design/addedPlants";
+import type { AddedPlant } from "@/lib/design/types";
 
 type Props = {
   photoUrl: string;
@@ -61,6 +63,17 @@ type Props = {
   clearedPlantings?: readonly string[];
   /** plantingId → where the customer moved that plant to. */
   plantPositions?: Record<string, NormalizedPoint>;
+  /**
+   * Plants the customer put in that the photograph never had.
+   *
+   * Drawn at the size the catalog says they grow to, against the
+   * region's own scale and the perspective at the row they stand in —
+   * the whole reason to drop a plant on a photograph rather than pick it
+   * off a list is finding out it will not fit before a crew plants it.
+   */
+  addedPlants?: readonly AddedPlant[];
+  /** Move one, or pass null to take it back out. */
+  onMoveAddedPlant?: (addedPlantId: string, point: NormalizedPoint | null) => void;
   /**
    * Move a plant to a new spot. Given, a plant on the photo is draggable.
    *
@@ -279,6 +292,8 @@ export function PhotoCanvas({
   clearedPlantings,
   plantPositions,
   onMovePlant,
+  addedPlants = [],
+  onMoveAddedPlant,
   plantCatalog,
   onSelectPlanting,
   selectedPlantingId = null,
@@ -349,6 +364,50 @@ export function PhotoCanvas({
     draggingPlant?.plantingId === plant.id && draggingPlant.dragging
       ? draggingPlant.point
       : plantPositions?.[plant.id] ?? [plant.cx, plant.cy];
+
+  /**
+   * Where an added plant stands, following the finger while it is being
+   * dragged so it does not jump on release.
+   */
+  const addedPosition = (plant: AddedPlant): NormalizedPoint =>
+    draggingPlant?.plantingId === plant.id && draggingPlant.dragging
+      ? draggingPlant.point
+      : plant.at;
+
+  /**
+   * How big to draw an added plant, and what to draw.
+   *
+   * Null where the option is not in this book or the region is not in
+   * this segmentation — the same rule the pricing side keeps, so the
+   * picture never shows a plant the estimate does not carry.
+   */
+  const addedShape = (plant: AddedPlant) => {
+    const option = (plantCatalog ?? []).find((o) => o.id === plant.optionId);
+    const region = regions.find((r) => r.id === plant.regionId);
+    if (!option || !region) return null;
+    const outline = liveOutline(region);
+    const perFoot =
+      pixelsPerFoot({
+        polygon: outline,
+        estimatedAreaSf: region.estimatedAreaSf,
+        plantings: region.plantings,
+      }) ?? assumedPixelsPerFoot();
+    const rows = outline.map(([, y]) => y);
+    const middle = (Math.min(...rows) + Math.max(...rows)) / 2;
+    const plane = fitGroundPlane(region.plantings);
+    const [, cy] = addedPosition(plant);
+    return {
+      option,
+      ...addedPlantEllipse({
+        spreadFt: option.matureSpreadFt,
+        perFoot: (perFoot * w) / 1600,
+        frameWidth: w,
+        frameHeight: h,
+        depth: plane ? depthScale(plane, cy, middle) : 1,
+        aspect: plantAspect(region.plantings),
+      }),
+    };
+  };
 
   /** Has this plant left the spot the photograph found it in? */
   const hasMoved = (plant: Planting) =>
@@ -469,6 +528,10 @@ export function PhotoCanvas({
   return (
     <figure
       ref={frameRef}
+      // How a plant dragged off the palette finds the photograph: the
+      // gesture starts in another component, so the drop asks the
+      // document what is under the pointer and looks for this.
+      data-photo-frame=""
       className="relative overflow-hidden rounded-xl bg-bark-900 shadow-e3 sm:rounded-2xl"
     >
       {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -1072,6 +1135,30 @@ export function PhotoCanvas({
               );
             }),
         )}
+        {/*
+          Plants the customer put in, at the size they grow to.
+
+          Everything the last two sessions built pays off here: the
+          region's own scale turns the catalog's mature spread into
+          pixels, and the perspective fitted to that region's plants makes
+          the same shrub bigger at the front of the bed than at the back.
+          A five-foot viburnum dropped at the near edge is drawn five feet
+          across, which is the answer to "will it fit" the customer came
+          for.
+        */}
+        {addedPlants.map((plant) => {
+          const shape = addedShape(plant);
+          if (!shape) return null;
+          const [cx, cy] = addedPosition(plant);
+          return (
+            <g
+              key={plant.id}
+              transform={`translate(${cx * w} ${cy * h}) scale(${shape.rx * w} ${shape.ry * h})`}
+            >
+              <PlantGlyph kind={shape.option.glyph} />
+            </g>
+          );
+        })}
         {regions.map((region) =>
           (region.plantings ?? []).map((plant) => {
             const option = chosenPlant(plant.id);
@@ -1245,6 +1332,63 @@ export function PhotoCanvas({
               );
             }),
           )}
+          {/* An added plant is draggable the same way, and taken back out
+              by dragging it off the photograph — the gesture that means
+              "not this" everywhere else. */}
+          {onMoveAddedPlant &&
+            addedPlants.map((plant) => {
+              const shape = addedShape(plant);
+              if (!shape) return null;
+              const [cx, cy] = addedPosition(plant);
+              return (
+                <button
+                  key={`added-${plant.id}`}
+                  type="button"
+                  onPointerDown={(event) => {
+                    const at = atPointer(event);
+                    if (!at) return;
+                    event.currentTarget.setPointerCapture(event.pointerId);
+                    setDraggingPlant({
+                      plantingId: plant.id,
+                      from: at,
+                      point: at,
+                      dragging: false,
+                    });
+                  }}
+                  onPointerMove={(event) => {
+                    if (draggingPlant?.plantingId !== plant.id) return;
+                    const at = atPointer(event);
+                    if (!at) return;
+                    const travelled = Math.hypot(
+                      at[0] - draggingPlant.from[0],
+                      at[1] - draggingPlant.from[1],
+                    );
+                    const dragging =
+                      draggingPlant.dragging || travelled > DRAG_THRESHOLD;
+                    if (!dragging) return;
+                    setDraggingPlant({ ...draggingPlant, point: at, dragging });
+                  }}
+                  onPointerUp={(event) => {
+                    if (draggingPlant?.plantingId !== plant.id) return;
+                    event.currentTarget.releasePointerCapture(event.pointerId);
+                    if (draggingPlant.dragging) {
+                      onMoveAddedPlant(plant.id, draggingPlant.point);
+                    }
+                    setDraggingPlant(null);
+                  }}
+                  onPointerCancel={() => setDraggingPlant(null)}
+                  className="absolute -translate-x-1/2 -translate-y-1/2 touch-none cursor-grab rounded-full ring-2 ring-white/0 transition hover:ring-white/70 active:cursor-grabbing"
+                  style={{
+                    left: `${cx * 100}%`,
+                    top: `${cy * 100}%`,
+                    width: `${shape.rx * 2 * 100}%`,
+                    height: `${shape.ry * 2 * 100}%`,
+                  }}
+                >
+                  <span className="sr-only">{shape.option.label}, added</span>
+                </button>
+              );
+            })}
           {/* What it is, on hover. One at a time, so a bed of eight shrubs
               does not turn into eight labels the moment the pointer
               crosses it. */}

@@ -18,6 +18,7 @@ import { CatalogPicker } from "./CatalogPicker";
 import { PhotoCanvas, RegionStrip } from "./PhotoCanvas";
 import { OutlineControls } from "./OutlineControls";
 import { PlantMoveControls } from "./PlantMoveControls";
+import { PlantPalette } from "./PlantPalette";
 import { PlantPicker, PlantStrip } from "./PlantPicker";
 import { PriceRail, type BandPayload } from "./PriceRail";
 import { SubmitLead } from "./SubmitLead";
@@ -269,6 +270,47 @@ export function Configurator({ projectId }: { projectId: string }) {
     [projectId, refreshBand],
   );
 
+  const addPlant = useCallback(
+    async (optionId: string, at: NormalizedPoint) => {
+      setBusy(true);
+      try {
+        const res = await fetch(`/api/projects/${projectId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ addPlant: { optionId, at } }),
+        });
+        if (res.ok) {
+          setProject((await res.json()) as DesignProject);
+          // A plant put in is a plant to install, so the band moves.
+          await refreshBand();
+        }
+      } finally {
+        setBusy(false);
+      }
+    },
+    [projectId, refreshBand],
+  );
+
+  const applyAddedPlant = useCallback(
+    async (addedPlantId: string, point: NormalizedPoint | null) => {
+      setBusy(true);
+      try {
+        const res = await fetch(`/api/projects/${projectId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ addedPlantId, plantAt: point }),
+        });
+        if (res.ok) {
+          setProject((await res.json()) as DesignProject);
+          await refreshBand();
+        }
+      } finally {
+        setBusy(false);
+      }
+    },
+    [projectId, refreshBand],
+  );
+
   const applyOutline = useCallback(
     async (regionId: string, polygon: NormalizedPoint[] | null) => {
       setBusy(true);
@@ -424,6 +466,12 @@ export function Configurator({ projectId }: { projectId: string }) {
             plantSelections={project.plantSelections}
             clearedPlantings={project.clearedPlantings}
             plantPositions={project.plantPositions}
+            addedPlants={project.addedPlants}
+            onMoveAddedPlant={
+              locked
+                ? undefined
+                : (id, point) => void applyAddedPlant(id, point)
+            }
             onMovePlant={
               locked || !canMovePlants
                 ? undefined
@@ -587,6 +635,19 @@ export function Configurator({ projectId }: { projectId: string }) {
                       }
                     />
                   )}
+                  {!locked && (
+                    <PlantPalette
+                      catalog={plantOptionsForRegion(
+                        plantCatalog,
+                        selectedRegion.kind,
+                      )}
+                      busy={busy}
+                      fallbackPoint={centroidOf(
+                        effectiveOutline(selectedRegion, project.regionOutlines),
+                      )}
+                      onAdd={(optionId, at) => void addPlant(optionId, at)}
+                    />
+                  )}
                 </>
               ) : null}
 
@@ -650,4 +711,22 @@ function ConfiguratorSkeleton() {
       <p className="sr-only">Loading your design.</p>
     </div>
   );
+}
+
+/**
+ * The middle of a bed, for a plant added without a drag.
+ *
+ * A keyboard cannot point at a spot, so the one it gets is the one a
+ * person would pick if you made them choose blind — and the nudges move
+ * it from there.
+ */
+function centroidOf(polygon: readonly NormalizedPoint[]): NormalizedPoint | null {
+  if (polygon.length === 0) return null;
+  let x = 0;
+  let y = 0;
+  for (const [px, py] of polygon) {
+    x += px;
+    y += py;
+  }
+  return [x / polygon.length, y / polygon.length];
 }

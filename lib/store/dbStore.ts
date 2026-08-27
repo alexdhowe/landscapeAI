@@ -12,6 +12,7 @@ import { randomUUID } from "node:crypto";
 
 import type { MeasurementDelta } from "../confirm/types";
 import type {
+  AddedPlant,
   AerialRegion,
   DesignProject,
   ProjectLocation,
@@ -120,6 +121,18 @@ export function createDbStore(): ProjectStore {
       return edit(id, async (project) => {
         assertPlanting(project, plantingId);
         await q.setPlantPositionRow(await getDb(), id, plantingId, point);
+      });
+    },
+
+    addPlant(id: string, plant: AddedPlant) {
+      return edit(id, async () => {
+        await q.insertAddedPlantRow(await getDb(), id, plant);
+      });
+    },
+
+    setAddedPlant(id: string, addedPlantId: string, point: NormalizedPoint | null) {
+      return edit(id, async () => {
+        await q.setAddedPlantRow(await getDb(), id, addedPlantId, point);
       });
     },
 

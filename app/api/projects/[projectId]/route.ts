@@ -1,9 +1,12 @@
+import { randomUUID } from "node:crypto";
+
 import { NextResponse } from "next/server";
 
 import { getOption } from "@/lib/catalog/options";
 import {
   canMovePlants,
   canRemovePlants,
+  plantJobTypeForRegion,
   plantOptionsForRegion,
 } from "@/lib/catalog/plants";
 import {
@@ -11,8 +14,9 @@ import {
   effectiveOutline,
   isUsableOutline,
 } from "@/lib/design/outline";
-import { confineToRegion } from "@/lib/design/plantPlacement";
+import { confineToRegion, regionAtPoint } from "@/lib/design/plantPlacement";
 import type { RegionSelection } from "@/lib/design/types";
+import type { NormalizedPoint } from "@/lib/vision/types";
 import { resolveOrg } from "@/lib/org/resolve";
 import { regionOfPlanting } from "@/lib/store/gates";
 import {
@@ -25,6 +29,8 @@ import {
   setLocation,
   setMarketContext,
   setPlantPosition,
+  addPlant,
+  setAddedPlant,
   setPlantSelection,
   setPlantingsCleared,
   setRegionOutline,
@@ -41,6 +47,17 @@ type Params = { params: Promise<{ projectId: string }> };
  * bounds what one request can ask the store to write.
  */
 const MAX_CLEARED_AT_ONCE = 100;
+
+/** A point on the photograph: two numbers, both inside the frame. */
+function isNormalizedPoint(value: unknown): value is NormalizedPoint {
+  return (
+    Array.isArray(value) &&
+    value.length === 2 &&
+    value.every(
+      (n) => typeof n === "number" && Number.isFinite(n) && n >= 0 && n <= 1,
+    )
+  );
+}
 
 export async function GET(_request: Request, { params }: Params) {
   const { projectId } = await params;
@@ -71,6 +88,10 @@ export async function GET(_request: Request, { params }: Params) {
  *   { plantingId, plantAt: [x, y] | null }       — move one plant, or null
  *                                                   to put it back where
  *                                                   the photo found it
+ *   { addPlant: { optionId, at: [x, y] } }       — put a plant in where
+ *                                                   the photo had none
+ *   { addedPlantId, plantAt: [x, y] | null }     — move an added plant,
+ *                                                   or null to take it out
  *   { marketContext: "residential" | "hoa_commercial" }
  *   { location: { address, lat, lng, source } }   — confirmed geocode pick
  *   { addressDeclined: true }                     — the no-address path
@@ -89,6 +110,8 @@ export async function PATCH(request: Request, { params }: Params) {
     plantingId?: unknown;
     plantOptionId?: unknown;
     plantAt?: unknown;
+    addPlant?: unknown;
+    addedPlantId?: unknown;
     clearPlantings?: unknown;
     cleared?: unknown;
     polygon?: unknown;
@@ -222,6 +245,112 @@ export async function PATCH(request: Request, { params }: Params) {
     // Moving a plant. Before the plantOptionId branch, which also carries
     // a plantingId: these are different questions about the same plant,
     // and the key is what tells them apart.
+    // Putting a plant in where the photograph had none. Before the two
+    // branches keyed by a plant id, because this one names no plant yet.
+    if (patch.addPlant !== undefined) {
+      const spec = patch.addPlant;
+      if (
+        typeof spec !== "object" ||
+        spec === null ||
+        typeof (spec as { optionId?: unknown }).optionId !== "string"
+      ) {
+        return NextResponse.json(
+          { error: "addPlant must be { optionId, at: [x, y] }" },
+          { status: 400 },
+        );
+      }
+      const { optionId, at } = spec as { optionId: string; at: unknown };
+      if (!isNormalizedPoint(at)) {
+        return NextResponse.json(
+          { error: "at must be [x, y] between 0 and 1" },
+          { status: 400 },
+        );
+      }
+      const project = await getProject(projectId);
+      const org = await resolveOrg();
+      // Which bed it landed in is decided here, from the outlines, not by
+      // whatever the pointer happened to be over — the photograph has a
+      // texture and a handful of buttons on top of it and none of those
+      // are the design.
+      const regions = project.segmentation.status === "ready"
+        ? project.segmentation.regions
+        : [];
+      const region = regionAtPoint(
+        regions.map((r) => ({
+          ...r,
+          polygon: effectiveOutline(r, project.regionOutlines),
+        })),
+        at,
+        (r) => plantJobTypeForRegion(r.kind) !== null,
+      );
+      if (!region) {
+        return NextResponse.json(
+          { error: "Drop a plant on a bed" },
+          { status: 400 },
+        );
+      }
+      // The catalog is the guardrail, and it is the catalog *for this
+      // region*: an option id a browser made up buys nothing, and neither
+      // does a shade tree dropped against the house. Same rule the swap
+      // branch keeps, for the same reason.
+      const offerable = plantOptionsForRegion(org.plantCatalog, region.kind);
+      if (!offerable.some((option) => option.id === optionId)) {
+        return NextResponse.json(
+          { error: "That plant does not belong in this area" },
+          { status: 400 },
+        );
+      }
+      return NextResponse.json(
+        await addPlant(projectId, {
+          id: `added_${randomUUID()}`,
+          regionId: region.id,
+          optionId,
+          at: confineToRegion(region.polygon, at),
+        }),
+      );
+    }
+
+    // Moving one, or taking it back out. Its own branch because an added
+    // plant has no planting id and no original spot to be put back to.
+    if (patch.addedPlantId !== undefined) {
+      if (typeof patch.addedPlantId !== "string" || !patch.addedPlantId.trim()) {
+        return NextResponse.json(
+          { error: "addedPlantId must be a string" },
+          { status: 400 },
+        );
+      }
+      const project = await getProject(projectId);
+      const plant = (project.addedPlants ?? []).find(
+        (candidate) => candidate.id === patch.addedPlantId,
+      );
+      if (!plant) {
+        return NextResponse.json({ error: "Unknown plant" }, { status: 400 });
+      }
+      const to = patch.plantAt;
+      if (to === null) {
+        return NextResponse.json(await setAddedPlant(projectId, plant.id, null));
+      }
+      if (!isNormalizedPoint(to)) {
+        return NextResponse.json(
+          { error: "plantAt must be [x, y] between 0 and 1, or null" },
+          { status: 400 },
+        );
+      }
+      const regions = project.segmentation.status === "ready"
+        ? project.segmentation.regions
+        : [];
+      const region = regions.find((candidate) => candidate.id === plant.regionId);
+      const confined = region
+        ? confineToRegion(
+            effectiveOutline(region, project.regionOutlines),
+            to,
+          )
+        : to;
+      return NextResponse.json(
+        await setAddedPlant(projectId, plant.id, confined),
+      );
+    }
+
     if (patch.plantAt !== undefined) {
       if (typeof patch.plantingId !== "string" || !patch.plantingId.trim()) {
         return NextResponse.json({ error: "plantingId must be a string" }, { status: 400 });

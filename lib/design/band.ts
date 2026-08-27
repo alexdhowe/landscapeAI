@@ -14,6 +14,8 @@ import type {
 } from "../pricing/typology";
 import { getTypologyBand } from "../pricing/typology";
 import { getOption } from "../catalog/options";
+import type { ResolvedAddedPlant } from "./addedPlants";
+import { addedScopeLines } from "./addedPlants";
 import type {
   ResolvedPlantChoice,
   ResolvedPlantMove,
@@ -54,6 +56,7 @@ export function inferJobType(
   plantChoices: readonly ResolvedPlantChoice[] = [],
   removals: readonly ResolvedPlantRemoval[] = [],
   moves: readonly ResolvedPlantMove[] = [],
+  added: readonly ResolvedAddedPlant[] = [],
 ): JobType | null {
   const jobTypes = new Set<JobType>();
   for (const id of chosenOptionIds(selections)) {
@@ -71,6 +74,9 @@ export function inferJobType(
   // And rearranging what is already there is a job too: a customer who
   // only moves three shrubs has asked for real crew time.
   for (const move of moves) jobTypes.add(move.jobType);
+  // And putting a plant where there was none is a job too: a customer who
+  // only adds three shrubs to an empty bed has asked for real work.
+  for (const plant of added) jobTypes.add(plant.jobType);
   for (const jobType of JOB_TYPE_PRIORITY) {
     if (jobTypes.has(jobType)) return jobType;
   }
@@ -92,8 +98,9 @@ export function bandForSelections(
   plantChoices: readonly ResolvedPlantChoice[] = [],
   removals: readonly ResolvedPlantRemoval[] = [],
   moves: readonly ResolvedPlantMove[] = [],
+  added: readonly ResolvedAddedPlant[] = [],
 ): DesignBand | null {
-  const jobType = inferJobType(selections, plantChoices, removals, moves);
+  const jobType = inferJobType(selections, plantChoices, removals, moves, added);
   if (!jobType) return null;
   const scope = [
     ...new Set([
@@ -103,6 +110,7 @@ export function bandForSelections(
       ...plantScopeLines(plantChoices),
       ...removalScopeLines(removals),
       ...moveScopeLines(moves),
+      ...addedScopeLines(added),
     ]),
   ];
   return { band: getTypologyBand(jobType, context, config), jobType, scope };

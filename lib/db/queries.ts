@@ -21,6 +21,7 @@ import { plantOptionsFor } from "../catalog/plants";
 import type { ErrorStats } from "../confirm/analytics";
 import type { MeasurementDelta } from "../confirm/types";
 import type {
+  AddedPlant,
   AerialRegion,
   DesignProject,
   ProjectLocation,
@@ -52,6 +53,7 @@ import {
   assemblyComponents,
   costItems,
   disclosurePolicies,
+  addedPlants,
   estimateSnapshots,
   marginConfigs,
   measurementDeltas,
@@ -80,6 +82,7 @@ type RegionRow = typeof regions.$inferSelect;
 type SelectionRow = typeof selections.$inferSelect;
 type PlantSelectionRow = typeof plantSelections.$inferSelect;
 type PlantPositionRow = typeof plantPositions.$inferSelect;
+type AddedPlantRow = typeof addedPlants.$inferSelect;
 type SnapshotRow = typeof estimateSnapshots.$inferSelect;
 type DeltaRow = typeof measurementDeltas.$inferSelect;
 type PropertyRow = typeof properties.$inferSelect;
@@ -91,6 +94,7 @@ type ProjectBundle = ProjectRow & {
   selections: SelectionRow[];
   plantSelections: PlantSelectionRow[];
   plantPositions: PlantPositionRow[];
+  addedPlants: AddedPlantRow[];
   snapshots: SnapshotRow[];
   deltas: DeltaRow[];
 };
@@ -242,6 +246,14 @@ export function toDesignProject(row: ProjectBundle): DesignProject {
   if (cleared.length > 0) {
     project.clearedPlantings = cleared.map((p) => p.plantingId);
   }
+  if (row.addedPlants.length > 0) {
+    project.addedPlants = row.addedPlants.map((plant) => ({
+      id: plant.addedPlantId,
+      regionId: plant.regionId,
+      optionId: plant.optionId,
+      at: [plant.cx, plant.cy] as NormalizedPoint,
+    }));
+  }
   if (row.plantPositions.length > 0) {
     project.plantPositions = Object.fromEntries(
       row.plantPositions.map((p) => [p.plantingId, [p.cx, p.cy] as NormalizedPoint]),
@@ -271,6 +283,7 @@ const projectWith = {
   selections: { orderBy: [asc(selections.regionId)] },
   plantSelections: { orderBy: [asc(plantSelections.plantingId)] },
   plantPositions: { orderBy: [asc(plantPositions.plantingId)] },
+  addedPlants: { orderBy: [asc(addedPlants.addedAt)] },
   snapshots: { orderBy: [asc(estimateSnapshots.seq)] },
   deltas: { orderBy: [asc(measurementDeltas.correctedAt), asc(measurementDeltas.seq)] },
 };
@@ -550,6 +563,63 @@ export async function setPlantPositionRow(
       target: [plantPositions.projectId, plantPositions.plantingId],
       set: { cx: point[0], cy: point[1] },
     });
+}
+
+/**
+ * Put a plant in where the photograph never had one.
+ *
+ * The id comes in already minted rather than being generated here: the
+ * route confines the drop to a region before it writes, and both need to
+ * name the same plant.
+ */
+export async function insertAddedPlantRow(
+  db: Database,
+  projectId: string,
+  plant: AddedPlant,
+): Promise<void> {
+  await db.insert(addedPlants).values({
+    projectId,
+    addedPlantId: plant.id,
+    regionId: plant.regionId,
+    optionId: plant.optionId,
+    cx: plant.at[0],
+    cy: plant.at[1],
+  });
+}
+
+/**
+ * Move an added plant, or take it back out.
+ *
+ * Null deletes the row. Unlike a plant the photograph found, there is no
+ * original position to fall back to — an added plant that is not
+ * somewhere is not anything.
+ */
+export async function setAddedPlantRow(
+  db: Database,
+  projectId: string,
+  addedPlantId: string,
+  point: NormalizedPoint | null,
+): Promise<void> {
+  if (point === null) {
+    await db
+      .delete(addedPlants)
+      .where(
+        and(
+          eq(addedPlants.projectId, projectId),
+          eq(addedPlants.addedPlantId, addedPlantId),
+        ),
+      );
+    return;
+  }
+  await db
+    .update(addedPlants)
+    .set({ cx: point[0], cy: point[1] })
+    .where(
+      and(
+        eq(addedPlants.projectId, projectId),
+        eq(addedPlants.addedPlantId, addedPlantId),
+      ),
+    );
 }
 
 export async function upsertPlantSelection(

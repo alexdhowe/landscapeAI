@@ -16,6 +16,7 @@ import {
   isInsidePolygon,
   isPlantMoved,
   plantPosition,
+  regionAtPoint,
 } from "../plantPlacement";
 
 const SHRUB: Planting = { id: "p1", cx: 0.3, cy: 0.6, rx: 0.04, ry: 0.04 };
@@ -96,5 +97,45 @@ describe("confineToRegion", () => {
     // A region with two vertices cannot contain anything. That is a bug
     // upstream, and refusing to move a plant is not how to report it.
     expect(confineToRegion([[0.1, 0.1], [0.2, 0.2]], [0.9, 0.9])).toEqual([0.9, 0.9]);
+  });
+});
+
+describe("regionAtPoint", () => {
+  const bed = { id: "bed", polygon: BED, plantable: true };
+  const walk = {
+    id: "walk",
+    polygon: [
+      [0.6, 0.5],
+      [0.9, 0.5],
+      [0.9, 0.7],
+      [0.6, 0.7],
+    ] as NormalizedPoint[],
+    plantable: false,
+  };
+  const plantable = (r: { plantable: boolean }) => r.plantable;
+
+  it("finds the bed a plant was dropped into", () => {
+    expect(regionAtPoint([bed, walk], [0.3, 0.6], plantable)?.id).toBe("bed");
+  });
+
+  it("will not drop a plant on the walkway", () => {
+    // What counts as plantable is the catalog's business, not geometry's,
+    // so it comes in from the caller — but a walkway is never it.
+    expect(regionAtPoint([walk], [0.7, 0.6], plantable)).toBeNull();
+  });
+
+  it("catches a drop that landed just outside a bed", () => {
+    // Same reason confineToRegion nudges rather than refuses: a fingertip
+    // on a phone misses by a few pixels and refusing reads as broken.
+    expect(regionAtPoint([bed], [0.3, 0.72], plantable)?.id).toBe("bed");
+  });
+
+  it("finds nothing for a drop nowhere near a bed", () => {
+    expect(regionAtPoint([bed], [0.3, 0.99], plantable)).toBeNull();
+  });
+
+  it("finds nothing when the photo has no plantable region at all", () => {
+    expect(regionAtPoint([walk], [0.7, 0.6], plantable)).toBeNull();
+    expect(regionAtPoint([], [0.3, 0.6], plantable)).toBeNull();
   });
 });

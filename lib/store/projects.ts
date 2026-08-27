@@ -22,6 +22,7 @@
  */
 import type { MeasurementDelta } from "../confirm/types";
 import type {
+  AddedPlant,
   AerialRegion,
   DesignProject,
   ProjectLocation,
@@ -150,6 +151,23 @@ export async function setPlantPosition(
   point: NormalizedPoint | null,
 ): Promise<DesignProject> {
   return (await store()).setPlantPosition(id, plantingId, point);
+}
+
+/** Put a plant in where the photograph never had one. */
+export async function addPlant(
+  id: string,
+  plant: AddedPlant,
+): Promise<DesignProject> {
+  return (await store()).addPlant(id, plant);
+}
+
+/** Move an added plant, or pass null to take it back out. */
+export async function setAddedPlant(
+  id: string,
+  addedPlantId: string,
+  point: NormalizedPoint | null,
+): Promise<DesignProject> {
+  return (await store()).setAddedPlant(id, addedPlantId, point);
 }
 
 /** Take plants out of the design, or put them back. */

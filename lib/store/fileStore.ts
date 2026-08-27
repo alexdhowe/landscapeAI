@@ -15,6 +15,7 @@ import path from "node:path";
 
 import type { MeasurementDelta } from "../confirm/types";
 import type {
+  AddedPlant,
   AerialRegion,
   DesignProject,
   ProjectLocation,
@@ -219,6 +220,28 @@ export function createFileStore(): ProjectStore {
         // round-trips identically to one from before plants could move.
         if (Object.keys(moved).length === 0) delete project.plantPositions;
         else project.plantPositions = moved;
+      });
+    },
+
+    addPlant(id: string, plant: AddedPlant) {
+      return edit(id, (project) => {
+        project.addedPlants = [...(project.addedPlants ?? []), plant];
+      });
+    },
+
+    setAddedPlant(id: string, addedPlantId: string, point: NormalizedPoint | null) {
+      return edit(id, (project) => {
+        const kept = (project.addedPlants ?? []).flatMap((plant) =>
+          plant.id !== addedPlantId
+            ? [plant]
+            : point === null
+              ? []
+              : [{ ...plant, at: point }],
+        );
+        // Absent rather than empty, so a design nobody has planted into
+        // round-trips identically to one from before plants could be added.
+        if (kept.length === 0) delete project.addedPlants;
+        else project.addedPlants = kept;
       });
     },
 

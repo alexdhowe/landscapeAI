@@ -24,6 +24,7 @@ import type {
 } from "../pricing/types";
 import type { JobType, MarketContext, TypologyConfig } from "../pricing/typology";
 import type { PlantOption } from "../catalog/plants";
+import { resolveAddedPlants } from "./addedPlants";
 import { bandForSelections } from "./band";
 import {
   resolvePlantChoices,
@@ -192,6 +193,11 @@ export function quoteProject(
     project.clearedPlantings,
   );
 
+  // Plants the photograph never had. Resolved against the current
+  // segmentation like every other plant decision, so one dropped into a
+  // bed a re-segmentation no longer finds is ignored rather than priced.
+  const plantsAdded = resolveAddedPlants(regions, project.addedPlants, plantCatalog);
+
   const typology = bandForSelections(
     project.selections,
     project.marketContext,
@@ -199,6 +205,7 @@ export function quoteProject(
     plantChoices,
     plantRemovals,
     plantMoves,
+    plantsAdded,
   );
   if (!typology) return null;
 
@@ -246,6 +253,7 @@ export function quoteProject(
     plantChoices,
     plantRemovals,
     plantMoves,
+    plantsAdded,
   );
 
   if (measured) {

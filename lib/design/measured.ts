@@ -21,6 +21,8 @@ import type {
 import type { JobType, MarketContext, TypologyConfig } from "../pricing/typology";
 import { inferJobType } from "./band";
 import { canMovePlants, canRemovePlants } from "../catalog/plants";
+import type { ResolvedAddedPlant } from "./addedPlants";
+import { addedScopeLines } from "./addedPlants";
 import type {
   ResolvedPlantChoice,
   ResolvedPlantMove,
@@ -180,6 +182,7 @@ export function designEngineInput(
   plantChoices: readonly ResolvedPlantChoice[] = [],
   removals: readonly ResolvedPlantRemoval[] = [],
   moves: readonly ResolvedPlantMove[] = [],
+  added: readonly ResolvedAddedPlant[] = [],
 ): DesignEngineInput {
   const selectedRegionIds = Object.keys(selections).filter((id) =>
     hasChoice(selections[id]),
@@ -257,7 +260,17 @@ export function designEngineInput(
       quantity: { value: count, unit: "EA", source: "photo", confidence: 0.9, capturedAt },
     });
   }
+  // An added plant is one install, exactly as a swap is: same assembly,
+  // same quantity, same engine. Nothing is removed and nothing is lifted.
+  for (const [assemblyId, count] of plantAssemblyCounts(added)) {
+    engineSelections.push({
+      assemblyId,
+      quantity: { value: count, unit: "EA", source: "photo", confidence: 0.9, capturedAt },
+    });
+  }
   for (const line of plantScopeLines(plantChoices)) scope.add(line);
+  for (const line of plantScopeLines(added)) scope.add(line);
+  for (const line of addedScopeLines(added)) scope.add(line);
   for (const line of removalScopeLines(removals)) scope.add(line);
   for (const line of moveScopeLines(moves)) scope.add(line);
 
@@ -285,8 +298,9 @@ export function measuredBandForSelections(
   plantChoices: readonly ResolvedPlantChoice[] = [],
   removals: readonly ResolvedPlantRemoval[] = [],
   moves: readonly ResolvedPlantMove[] = [],
+  added: readonly ResolvedAddedPlant[] = [],
 ): MeasuredDesignBand | null {
-  const jobType = inferJobType(selections, plantChoices, removals, moves);
+  const jobType = inferJobType(selections, plantChoices, removals, moves, added);
   if (!jobType) return null;
 
   const input = designEngineInput(
@@ -298,6 +312,7 @@ export function measuredBandForSelections(
     plantChoices,
     removals,
     moves,
+    added,
   );
   const { engineSelections, scope, measuredRegionIds, unmeasuredRegionIds } = input;
   if (measuredRegionIds.length === 0) return null;

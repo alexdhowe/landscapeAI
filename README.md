@@ -71,6 +71,7 @@ deployment.
 | A bed of one stone size, edge to edge | ✅ fixed — the other half of "maybe the scaling or the angle doesn't match". The photograph carries the answer: shrubs in one bed are roughly one size in the world, so how their drawn size falls off up the frame *is* the perspective. `lib/design/perspective.ts` fits a horizon through the plant ellipses — on the first real bed it landed on the porch floor line — and the material is drawn in three depth bands that crossfade into one another |
 | A hedge drawn as a row of ovals | ✅ fixed — the plant cut-outs were painted one over the next, so a later one's pale rim overwrote an earlier one's dark core and seven boxwoods grown into one hedge came out as seven ovals with seams between them. They are darkened together now, which is what a union of cut-outs means |
 | Material that ignored the light it was sitting in | ✅ fixed — the shading ramp mapped the photo's whole 0..1 luminance onto a 0.52–1.0 multiplier, so a bed that lives in the bottom third of that range moved barely at all. Measured across one real yard: the photograph ranged 1.47× and the material over it 1.22×, with its bright end where the photo was dim. A steep absolute ramp, blurred past the *things* in a bed rather than just their grain, gets 1.42× and falls off where the photograph does |
+| Putting a plant in where there was none | ✅ done — drag one off the palette onto the bed and it is drawn at the size the catalog says it grows to, against that region's own scale and the perspective at the row it lands in. The bed it went into is decided server-side from the outlines, and the plant is checked against the catalog *for that region* — a shade tree still cannot be dropped against the house |
 | Moving a plant that is already there | ✅ done — drag it anywhere in its bed, no mode and no toggle; the drop is confined to the outline server-side and each move is bid as `shrub_transplant` |
 | The aerial leg (`/design/[id]/locate`) | ⛔ gated off — deliberately: no paid imagery or geocoder until there is a working MVP |
 
@@ -78,7 +79,7 @@ All six phases are in, they run on Postgres, the contractor console is behind
 a login, the price book is editable, photos live in object storage when a
 bucket is configured, and the whole thing has been designed and opened on a
 phone — on a phone *branch*, for the first time in the twelfth session,
-which is its own story. `npm test` runs 728 tests — with a database and
+which is its own story. `npm test` runs 759 tests — with a database and
 without one.
 
 **It has not been deployed.** The tenth session wrote the configuration —
@@ -105,7 +106,7 @@ store, so a clean checkout runs the demo with nothing to provision.
 ```sh
 npm run doctor    # is this machine set up? checks .env.local, the API key (against the
                   # real API), and the console login — and says what to fix, in English.
-npm test          # Vitest — 728 tests across every phase. No server, no network, no browser.
+npm test          # Vitest — 759 tests across every phase. No server, no network, no browser.
 npm run typecheck
 npm run dev
 npm run build
@@ -984,6 +985,53 @@ not a move and bills nothing.
 The old spot is a hole like any other, so it is clone-stamped shut before
 the plant is stamped down in its new one.
 
+### Putting a plant in where there was none
+
+Three verbs shipped before this one — swap a plant, take one out, move
+one — and all three are *about* a plant the camera happened to see.
+Together they are a rearrangement. Nobody planning a bed only ever wants a
+plant exactly where a plant already is, so until a customer could put one
+in an empty spot the design was still a reading of the photograph rather
+than a design.
+
+**It prices as the install it is.** One `install_<sku>` at quantity 1 EA —
+the same assembly a swap bills, off the same catalog, through the same
+engine. There is nothing to remove and nothing to lift, so no other line
+appears, and `plantAssemblyCounts` now takes anything carrying an option
+because a plant put in where one stood and a plant put in where none did
+are the same install. Only the reason differs, and the reason is a scope
+line rather than a price.
+
+**Three guardrails, and the route trusts the browser for none of them.**
+The option id is resolved against the catalog derived from the org's own
+book, so an id a browser made up buys nothing. *Which bed it landed in* is
+resolved from the outlines on the server — the photograph has a texture, a
+mask and a handful of buttons on top of it and none of those are the
+design — and a drop that finds no bed adds nothing. And the plant is
+checked against the catalog **for that region**, so the rule that refuses
+a shade tree against the house holds whether or not the palette that
+offered it was filtered. A drop a little outside a bed still finds it, for
+the same reason `confineToRegion` nudges rather than refuses.
+
+**It is drawn at the size it grows to.** The catalog carries
+`matureSpreadFt`, the photograph carries a scale and now a perspective, so
+a five-foot viburnum dropped at the front of a bed is drawn five feet
+across at the front of that bed and a smaller one further back is drawn
+smaller. That is the whole reason to drop a plant on a photograph rather
+than pick it off a list: the customer finds out it will not fit before a
+crew plants it. On the first real bed this ran against, an arborvitae
+dropped near the lawn edge came out overhanging the grass — which is
+exactly what a ten-foot arborvitae in a twelve-foot bed does.
+
+**Dragging is not the only way in.** The gesture is the obvious one and
+the palette owns all of it: a pointer that starts on a chip and ends over
+the photograph belongs to neither component, so the chip keeps the moves
+coming and the drop asks the document what is under it. But a drag is the
+one interaction a keyboard cannot make, so every chip is also a real
+button — activating it drops the plant in the middle of the open bed, and
+the nudges take it from there. That is the only path a screen reader has,
+so it has to actually work, and it does.
+
 ### What none of this has been through
 
 There is still no `ANTHROPIC_API_KEY` in this container, so:
@@ -1008,6 +1056,11 @@ There is still no `ANTHROPIC_API_KEY` in this container, so:
   patch, and how visible that is on a bed with a shadow falling across it
   is the thing to look at first on the next real yard.
 - **The materials have been seen on one real yard and reworked against it, and mulch is still the weakest of them.** Stone reads as stone; shredded mulch drawn over a bed of real shredded mulch is close but softer and more even than the thing beside it. Every other material in the picker is judged against a contact sheet rather than against its own photograph.
+- **An added plant is a glyph, not a photograph.** A moved plant is drawn
+  with its own pixels; an added one has no pixels to draw with, so it is
+  the same flat catalog glyph the swap path uses, and it does not pick up
+  the light of the yard the way a swapped material now does. It reads as a
+  plan symbol standing on a photo rather than as a plant.
 - **The perspective is fitted, not measured.** The horizon comes off a least-squares line through the plant ellipses, which assumes the plants in one bed are roughly one size in the world. A bed with a specimen tree at the back and groundcover at the front will fit a horizon that is wrong; the module refuses the obviously bad cases and clamps the rest, so the failure is a bed drawn flat rather than a bed drawn wrong. A region with fewer than three plants gets no perspective at all.
 - **The hole is only ever as big as the model says the plant is.** On a
   test photo drawn with shrubs deliberately larger than the segmentation's

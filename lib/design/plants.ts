@@ -76,7 +76,9 @@ export function resolvePlantChoices(
  * recognises as their design and three identical lines is what a bug looks
  * like.
  */
-export function plantScopeLines(choices: readonly ResolvedPlantChoice[]): string[] {
+export function plantScopeLines(
+  choices: readonly { option: PlantOption }[],
+): string[] {
   const counts = new Map<string, { label: string; n: number }>();
   for (const choice of choices) {
     const entry = counts.get(choice.option.id);
@@ -86,9 +88,16 @@ export function plantScopeLines(choices: readonly ResolvedPlantChoice[]): string
   return [...counts.values()].map(({ label, n }) => (n > 1 ? `${n} × ${label}` : label));
 }
 
-/** assemblyId → how many of that plant the design now calls for. */
+/**
+ * assemblyId → how many of that plant the design now calls for.
+ *
+ * Takes anything carrying an option, because a plant put in where one
+ * already stood and a plant put in where none did are the same install:
+ * one `install_<sku>`, one EA, one line. Only the reason differs, and the
+ * reason is a scope line rather than a price.
+ */
 export function plantAssemblyCounts(
-  choices: readonly ResolvedPlantChoice[],
+  choices: readonly { option: PlantOption }[],
 ): Map<string, number> {
   const counts = new Map<string, number>();
   for (const choice of choices) {

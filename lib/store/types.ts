@@ -12,6 +12,7 @@
  */
 import type { MeasurementDelta } from "../confirm/types";
 import type {
+  AddedPlant,
   AerialRegion,
   DesignProject,
   ProjectLocation,
@@ -123,6 +124,25 @@ export type ProjectStore = {
   setPlantPosition(
     id: string,
     plantingId: string,
+    point: NormalizedPoint | null,
+  ): Promise<DesignProject>;
+  /**
+   * Put a plant in where the photograph never had one.
+   *
+   * The plant arrives with its id already minted and its position already
+   * confined to a region — the route does both, because a browser can be
+   * told anything and the outline is what the crew will work to.
+   */
+  addPlant(id: string, plant: AddedPlant): Promise<DesignProject>;
+  /**
+   * Move an added plant, or pass null to take it back out.
+   *
+   * There is no "put it back" for one of these: an added plant that is
+   * nowhere is nothing, so null removes it entirely.
+   */
+  setAddedPlant(
+    id: string,
+    addedPlantId: string,
     point: NormalizedPoint | null,
   ): Promise<DesignProject>;
   setPlantingsCleared(

@@ -623,6 +623,41 @@ export const plantPositions = pgTable(
   (t) => [primaryKey({ columns: [t.projectId, t.plantingId] })],
 );
 
+/**
+ * Plants the customer put in that the photograph never had.
+ *
+ * A row of its own rather than a column on `plantings`, because there is
+ * no planting to hang it off: this is the one plant decision that is not
+ * about something the segmentation found. It keys on a minted id so the
+ * customer can move it, or take it out again, without the row's identity
+ * depending on where it happens to be standing.
+ *
+ * `region_id` is not a foreign key to `regions` on purpose. Re-segmenting
+ * a project replaces its regions, and an added plant should be *ignored*
+ * when its bed no longer exists rather than deleted — the same rule every
+ * other plant decision follows, resolved by the reader against the
+ * current segmentation.
+ */
+export const addedPlants = pgTable(
+  "added_plants",
+  {
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    /** Minted server-side when the plant is dropped. */
+    addedPlantId: text("added_plant_id").notNull(),
+    /** The segmentation region it was dropped into. */
+    regionId: text("region_id").notNull(),
+    /** Catalog option id, resolved against the org's book by the reader. */
+    optionId: text("option_id").notNull(),
+    /** Fractions of the image, origin top-left. */
+    cx: doublePrecision("cx").notNull(),
+    cy: doublePrecision("cy").notNull(),
+    addedAt: timestamp("added_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.projectId, t.addedPlantId] })],
+);
+
 // ---------------------------------------------------------------------------
 // The frozen record
 // ---------------------------------------------------------------------------
@@ -763,6 +798,7 @@ export const projectRelations = relations(projects, ({ one, many }) => ({
   selections: many(selections),
   plantSelections: many(plantSelections),
   plantPositions: many(plantPositions),
+  addedPlants: many(addedPlants),
   snapshots: many(estimateSnapshots),
   deltas: many(measurementDeltas),
 }));
@@ -832,6 +868,13 @@ export const deltaRelations = relations(measurementDeltas, ({ one }) => ({
 export const plantPositionRelations = relations(plantPositions, ({ one }) => ({
   project: one(projects, {
     fields: [plantPositions.projectId],
+    references: [projects.id],
+  }),
+}));
+
+export const addedPlantRelations = relations(addedPlants, ({ one }) => ({
+  project: one(projects, {
+    fields: [addedPlants.projectId],
     references: [projects.id],
   }),
 }));

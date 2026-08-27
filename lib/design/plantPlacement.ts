@@ -134,3 +134,59 @@ function nudgeToward(
   const step = Math.min(0.004, length);
   return [point[0] + (dx / length) * step, point[1] + (dy / length) * step];
 }
+
+/**
+ * Which region a customer dropped a plant into.
+ *
+ * Decided here rather than in the browser, and decided from the outline
+ * rather than from whatever the pointer happened to be over: the drop
+ * lands on a photograph with a mask and a texture and a handful of
+ * buttons on top of it, and none of those are the design. `plantable`
+ * comes in from the caller because what counts as a plantable region is
+ * the catalog's business, not geometry's.
+ *
+ * A drop a little outside every bed still finds one, for the same reason
+ * `confineToRegion` nudges rather than refuses — a fingertip on a phone
+ * misses by a few pixels, and refusing reads as the drag not working.
+ * A drop nowhere near a bed finds nothing, and nothing is added.
+ */
+export function regionAtPoint<
+  T extends { id: string; polygon: readonly NormalizedPoint[] },
+>(
+  regions: readonly T[],
+  point: NormalizedPoint,
+  plantable: (region: T) => boolean,
+  reach = 0.05,
+): T | null {
+  const candidates = regions.filter(plantable);
+  for (const region of candidates) {
+    if (isInsidePolygon(region.polygon, point)) return region;
+  }
+  let best: T | null = null;
+  let bestDistance = reach;
+  for (const region of candidates) {
+    if (region.polygon.length < 3) continue;
+    let distance = Infinity;
+    for (let i = 0, j = region.polygon.length - 1; i < region.polygon.length; j = i++) {
+      distance = Math.min(
+        distance,
+        distanceToSegment(region.polygon[j], region.polygon[i], point),
+      );
+    }
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      best = region;
+    }
+  }
+  return best;
+}
+
+/** Distance from a point to a segment, in normalized space. */
+function distanceToSegment(
+  a: NormalizedPoint,
+  b: NormalizedPoint,
+  point: NormalizedPoint,
+): number {
+  const closest = closestOnSegment(a, b, point);
+  return Math.hypot(closest[0] - point[0], closest[1] - point[1]);
+}

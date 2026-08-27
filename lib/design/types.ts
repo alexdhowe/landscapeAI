@@ -89,6 +89,18 @@ export type AerialRegion = {
   perimeterLf: Quantity;
 };
 
+/** One plant the customer added, at the spot they dropped it. */
+export type AddedPlant = {
+  /** Minted on the server when it is added; unique within the project. */
+  id: string;
+  /** The region it was dropped into. */
+  regionId: string;
+  /** Catalog option id — resolved against the org's book before it counts. */
+  optionId: string;
+  /** Where it stands, normalized. */
+  at: NormalizedPoint;
+};
+
 export type DesignProject = {
   id: string;
   createdAt: string;
@@ -148,6 +160,17 @@ export type DesignProject = {
    * position is meaningless and is dropped with it.
    */
   plantPositions?: Record<string, NormalizedPoint>;
+  /**
+   * Plants the customer put in that the photograph never had.
+   *
+   * The other three plant decisions are all *about* a plant the
+   * segmentation found — swap it, take it out, move it — and are keyed by
+   * its planting id. This one is not: nobody designing a bed only ever
+   * wants a plant where a plant already is. An added plant carries its own
+   * id, minted when it is dropped, so the same three verbs can eventually
+   * apply to it too.
+   */
+  addedPlants?: AddedPlant[];
   /**
    * regionId → the outline after the customer corrected it.
    *
