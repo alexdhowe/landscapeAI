@@ -30,13 +30,23 @@
  */
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { chromium, type Browser, type Page } from "playwright";
+import { chromium, type Browser, type Locator, type Page } from "playwright";
 
 type Viewport = { name: string; width: number; height: number; mobile: boolean };
 
+/**
+ * The phone is still audited — it is where the 44px and overflow rules
+ * were written for — but the desktop is the primary surface now, and one
+ * desktop width does not cover it: 1440 is a laptop and 1920 is the
+ * monitor most desks actually have. Separate entries rather than one,
+ * because a capped measure that reads deliberate at 1440 can read as a
+ * column stranded in a field of empty at 1920, and only a shot shows
+ * which.
+ */
 const VIEWPORTS: Viewport[] = [
   { name: "390x844", width: 390, height: 844, mobile: true },
   { name: "1440x900", width: 1440, height: 900, mobile: false },
+  { name: "1920x1080", width: 1920, height: 1080, mobile: false },
 ];
 
 /**
@@ -63,6 +73,8 @@ const PHOTO = args.get("photo") ?? process.env.SHOTS_PHOTO ?? "";
 const OUT = args.get("out") ?? ".shots";
 const EMAIL = process.env.CONTRACTOR_EMAIL ?? "";
 const PASSWORD = process.env.CONTRACTOR_PASSWORD ?? "";
+
+type Point = { x: number; y: number };
 
 type Finding = { where: string; what: string };
 const findings: Finding[] = [];
@@ -187,8 +199,7 @@ async function audit(page: Page, where: string, viewport: Viewport) {
   });
   for (const item of misplaced) findings.push({ where, what: item });
 
-  const small = await page.evaluate(() => {
-    const MIN = 44;
+  const small = await page.evaluate((MIN: number) => {
     const results: string[] = [];
     const selector = 'a[href], button, input:not([type="hidden"]), select, textarea, [role="button"], [tabindex]:not([tabindex="-1"])';
     for (const el of document.querySelectorAll<HTMLElement>(selector)) {
@@ -218,8 +229,15 @@ async function audit(page: Page, where: string, viewport: Viewport) {
       }
     }
     return [...new Set(results)];
-  });
-  for (const item of small) findings.push({ where, what: `tap target ${item}` });
+    // 44 CSS px is the *fingertip* floor and only means anything where
+    // there is a fingertip. Holding a desktop to it reported every 38px
+    // button in the price book as a defect — noise, and noise is what
+    // buried the 18px-tall links beside them that really are hard to hit
+    // with a mouse. 24px is the pointer floor.
+  }, viewport.mobile ? 44 : 24);
+  for (const item of small) {
+    findings.push({ where, what: `${viewport.mobile ? "tap" : "click"} target ${item}` });
+  }
 }
 
 async function shoot(page: Page, viewport: Viewport, name: string) {
@@ -425,6 +443,8 @@ async function uploadAndDesign(page: Page, viewport: Viewport): Promise<string |
     }
   }
 
+  await dragGestures(page, viewport);
+
   // Send it, so the console downstream has a lead to render.
   const nameField = page.getByLabel("Your name");
   if (await nameField.count()) {
@@ -440,6 +460,287 @@ async function uploadAndDesign(page: Page, viewport: Viewport): Promise<string |
   }
 
   return new URL(page.url()).pathname;
+}
+
+/**
+ * The three drags, on one photograph, told apart only by how far the
+ * pointer travelled.
+ *
+ * `DRAG_THRESHOLD` in PhotoCanvas is 0.0045 of the frame — about seven
+ * pixels on a 1600px photo. Under it a press is a tap and opens a picker;
+ * over it the same press moves the thing. There is no mode and no toggle,
+ * which means every one of these gestures is a near miss away from doing
+ * the other one. A mouse has no fingertip wobble, so the risk on a desktop
+ * is the phone's in reverse: a deliberate small drag read as a click.
+ *
+ * So this drives both sides of the threshold and asserts they did
+ * *different* things, rather than screenshotting a drag and calling it
+ * tested.
+ *
+ * Two rules, both learned the hard way on the first run of this leg:
+ *
+ *   - **Both ends of a drag must be inside the viewport.** `boundingBox()`
+ *     is page coordinates and will happily describe an element scrolled
+ *     out of the window; `page.mouse` is *viewport* coordinates and
+ *     silently delivers nothing outside it. Together they produce a drag
+ *     that runs its whole loop, presses nothing, and reports the feature
+ *     broken. The rail on this page is taller than a 900px window, so the
+ *     palette was below the fold and neither it nor the bed edge was ever
+ *     actually grabbed.
+ *   - **A drop has to land in the open bed.** A fraction of the frame is
+ *     not a bed: dropping at 45%/72% of this photo is the lawn, and the
+ *     server refuses a shrub there exactly as it is meant to. The refusal
+ *     was right and the test was wrong.
+ */
+async function dragGestures(page: Page, viewport: Viewport) {
+  if (viewport.mobile) return; // driven with a mouse, by design
+  const where = `design-drags @ ${viewport.name}`;
+
+  /** The centre of an element in viewport coordinates, or null. */
+  async function centre(locator: Locator): Promise<Point | null> {
+    const box = await locator.boundingBox();
+    return box ? { x: box.x + box.width / 2, y: box.y + box.height / 2 } : null;
+  }
+
+  const inView = (p: Point | null): p is Point =>
+    p !== null && p.x >= 0 && p.y >= 0 && p.x <= viewport.width && p.y <= viewport.height;
+
+  /** Scroll it in, re-measure, and say so loudly if it is still unreachable. */
+  async function grabPoint(locator: Locator, what: string) {
+    await locator.scrollIntoViewIfNeeded().catch(() => {});
+    await page.waitForTimeout(150);
+    const point = await centre(locator);
+    if (!point) {
+      findings.push({ where, what: `${what}: nothing to grab` });
+      return null;
+    }
+    if (!inView(point)) {
+      findings.push({
+        where,
+        what: `${what}: at ${Math.round(point.x)},${Math.round(point.y)}, outside the ${viewport.name} viewport — a drag from there presses nothing`,
+      });
+      return null;
+    }
+    return point;
+  }
+
+  /**
+   * Both ends of a drag, on the screen *at the same time*.
+   *
+   * Scrolling one end into view moves the other, so measuring them one
+   * after another gives you two readings from two different scroll
+   * positions and a drag that starts from where the source used to be.
+   * That is the second way this leg reported a working feature broken:
+   * the palette lives at the bottom of a rail taller than the window and
+   * the bed is at the top of the photo, so scrolling to the palette and
+   * then to the bed left the card's coordinates a screen out of date.
+   *
+   * Try it from each end, and only give up when neither scroll position
+   * has both.
+   */
+  async function bothInView(
+    a: Locator,
+    b: Locator,
+    what: string,
+  ): Promise<[Point, Point] | null> {
+    for (const anchor of [a, b]) {
+      await anchor.scrollIntoViewIfNeeded().catch(() => {});
+      await page.waitForTimeout(200);
+      const [pa, pb] = [await centre(a), await centre(b)];
+      if (inView(pa) && inView(pb)) return [pa, pb];
+    }
+    findings.push({
+      where,
+      what: `${what}: cannot get both ends of the drag on a ${viewport.name} screen at once`,
+    });
+    return null;
+  }
+
+  /** A pointer path a hand could have made, rather than one jump. */
+  async function dragTo(from: Point, to: Point, steps = 14) {
+    const end = {
+      x: Math.max(2, Math.min(viewport.width - 2, to.x)),
+      y: Math.max(2, Math.min(viewport.height - 2, to.y)),
+    };
+    await page.mouse.move(from.x, from.y);
+    await page.mouse.down();
+    for (let i = 1; i <= steps; i++) {
+      await page.mouse.move(
+        from.x + ((end.x - from.x) * i) / steps,
+        from.y + ((end.y - from.y) * i) / steps,
+      );
+      await page.waitForTimeout(20);
+    }
+    await page.mouse.up();
+  }
+
+  const strip = page.locator("ul[aria-describedby='region-strip-help'] button");
+  const plants = page.locator("figure button[data-plant]");
+  const palette = page.locator("[data-plant-option]");
+
+  /**
+   * Open a region that has plants in it and a palette to add more, and
+   * leave the *region* panel showing rather than a plant's.
+   *
+   * Opening a plant replaces the region panel with that plant's picker,
+   * which takes the palette and the edge controls off the screen with it.
+   * So this is called again between the legs below: leg 1 deliberately
+   * opens a plant, and legs 3 and 4 need the panel it displaced. Without
+   * that, both report the controls missing — which is true, and is not
+   * what they are there to find out.
+   */
+  async function openARegionWithPlants(): Promise<number | null> {
+    for (let i = 0, n = await strip.count(); i < n; i++) {
+      await strip.nth(i).click();
+      await page.waitForTimeout(400);
+      if ((await plants.count()) > 0 && (await palette.count()) > 0) return i;
+    }
+    return null;
+  }
+
+  const openRegion = await openARegionWithPlants();
+  if (openRegion === null) {
+    findings.push({ where, what: "no region in this photo had both plants and a palette" });
+    return;
+  }
+
+  const figure = await page.locator("figure").first().boundingBox();
+  const from = await grabPoint(plants.first(), "a plant on the photo");
+  if (!figure || !from) return;
+  const centreOf = async () => {
+    const b = await plants.first().boundingBox();
+    return b ? { x: b.x + b.width / 2, y: b.y + b.height / 2 } : null;
+  };
+
+  // 1. Press and lift, inside the threshold: opens the picker, moves nothing.
+  const before = await centreOf();
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.down();
+  await page.mouse.move(from.x + 2, from.y + 1);
+  await page.mouse.up();
+  await page.waitForTimeout(500);
+  if ((await page.locator('input[type="radio"][name^="plant-"]').count()) === 0) {
+    findings.push({ where, what: "press-and-lift on a plant did not open the picker" });
+  }
+  const afterTap = await centreOf();
+  if (before && afterTap && Math.hypot(afterTap.x - before.x, afterTap.y - before.y) > 2) {
+    findings.push({ where, what: "press-and-lift moved the plant — a tap was read as a drag" });
+  }
+  await shoot(page, viewport, "design-drag-tap");
+
+  // 2. Press and travel, well past it: moves the plant.
+  await dragTo(from, { x: from.x + figure.width * 0.12, y: from.y + figure.height * 0.06 });
+  await page.waitForTimeout(1500);
+  const afterDrag = await centreOf();
+  if (before && afterDrag && Math.hypot(afterDrag.x - before.x, afterDrag.y - before.y) < 5) {
+    findings.push({ where, what: "press-and-travel did not move the plant" });
+  }
+  await shoot(page, viewport, "design-drag-plant");
+
+  // 3. A plant off the palette onto the bed. Leg 1 opened a plant, which
+  //    displaced the region panel the palette lives in, so put it back.
+  await strip.nth(openRegion).click();
+  await page.waitForTimeout(500);
+  if ((await palette.count()) === 0) {
+    findings.push({ where, what: "re-opening the region did not bring back the plant palette" });
+  } else {
+    const addedBefore = await page.locator("figure button[data-added-plant]").count();
+    const ends = await bothInView(palette.first(), plants.first(), "palette card to bed");
+    if (ends) {
+      const [card, intoBed] = ends;
+      await dragTo(card, { x: intoBed.x + 10, y: intoBed.y + 10 });
+      await page.waitForTimeout(2000);
+      if ((await page.locator("figure button[data-added-plant]").count()) <= addedBefore) {
+        findings.push({ where, what: "dragging from the palette onto the bed added no plant" });
+      }
+      await shoot(page, viewport, "design-drag-added");
+    }
+  }
+
+  // 4. The bed edge. What you grab is the fat transparent stroke over the
+  //    outline, not the marker circles: on a phone a forty-point outline's
+  //    handles are smaller and closer together than a fingertip, so the
+  //    line itself is the target.
+  const adjust = page.getByRole("button", { name: "Adjust the edge" });
+  if ((await adjust.count()) === 0) {
+    findings.push({ where, what: 'no open region offered "Adjust the edge" — the edge drag went untested' });
+  } else {
+    await adjust.click();
+    await page.waitForTimeout(400);
+    // The palette leg above scrolls the rail, which can leave the
+    // photograph above the top of the window; the point computed below is
+    // in client coordinates and would be negative.
+    await page.locator("figure").first().scrollIntoViewIfNeeded().catch(() => {});
+    await page.waitForTimeout(250);
+    // A point ON the line, not the centre of the path's bounding box —
+    // that centre is inside the bed, where the plants are, and grabbing
+    // it drags a plant instead. `getScreenCTM` is what turns an SVG user
+    // coordinate into a client one; the box and the viewBox between them
+    // do not, once the frame is scaled.
+    const grab = await page.evaluate(() => {
+      const path = document.querySelector<SVGPathElement>(
+        'figure svg path[stroke="transparent"]',
+      );
+      const length = path?.getTotalLength() ?? 0;
+      const ctm = path?.getScreenCTM();
+      if (!path || !ctm || length === 0) return null;
+      const point = path.getPointAtLength(length * 0.25).matrixTransform(ctm);
+      return { x: point.x, y: point.y };
+    });
+    if (!grab) {
+      findings.push({ where, what: "adjusting the edge offered no line to grab" });
+    } else {
+      if (!inView(grab)) {
+        findings.push({
+          where,
+          what: `the bed edge is at ${Math.round(grab.x)},${Math.round(grab.y)}, outside the ${viewport.name} viewport`,
+        });
+      } else {
+        await dragTo(grab, {
+          x: grab.x + figure.width * 0.06,
+          y: grab.y + figure.height * 0.04,
+        });
+        await page.waitForTimeout(1800);
+        if ((await page.getByRole("button", { name: /Put back the edge/ }).count()) === 0) {
+          findings.push({ where, what: "dragging the bed edge recorded no correction to put back" });
+        }
+        await shoot(page, viewport, "design-drag-edge");
+      }
+    }
+    await page.getByRole("button", { name: "Done adjusting" }).click().catch(() => {});
+    await page.waitForTimeout(250);
+  }
+
+  // Hover: a first-class input on a desktop, not a fallback. The plant
+  // whose picker is open shows no hover label on purpose — its name is
+  // already in the panel — so close the picker or this measures that rule
+  // instead of hover.
+  await page.getByRole("button", { name: /^close/i }).first().click().catch(() => {});
+  await page.mouse.move(2, 2);
+  await page.waitForTimeout(250);
+  await plants.first().hover();
+  await page.waitForTimeout(400);
+  if ((await page.locator("[data-plant-label]").count()) === 0) {
+    findings.push({ where, what: "hovering a plant showed no label — hover carries no weight here" });
+  }
+
+  // Keyboard: the polygons are pointer-only on purpose (see PhotoCanvas);
+  // the strip beneath the photo is the real control, so it has to take
+  // focus and Enter has to open a region.
+  await strip.first().focus();
+  const opened = await page.evaluate(() => {
+    const el = document.activeElement as HTMLElement | null;
+    return { tag: el?.tagName ?? "", pressed: el?.getAttribute("aria-pressed") };
+  });
+  if (opened.tag !== "BUTTON") {
+    findings.push({ where, what: `the region strip did not take focus (active element is ${opened.tag || "nothing"})` });
+  } else {
+    await page.keyboard.press("Enter");
+    await page.waitForTimeout(400);
+    if ((await page.locator("h2, h3").filter({ hasText: /./ }).count()) === 0) {
+      findings.push({ where, what: "Enter on a focused region opened no panel" });
+    }
+  }
 }
 
 async function run(browser: Browser, viewport: Viewport) {

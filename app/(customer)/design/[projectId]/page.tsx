@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 
 import { Configurator } from "@/components/configurator/Configurator";
+import { ByPointer } from "@/components/ui/ByPointer";
 
 export const metadata: Metadata = {
   title: "Your design",
@@ -20,7 +21,10 @@ export default async function DesignPage({
           Your yard, your call
         </h1>
         <p className="mt-1 text-sm text-bark-600">
-          Tap a labelled area, swap what&apos;s in it, watch the budget follow.
+          <ByPointer
+            touch="Tap a labelled area, swap what's in it, watch the budget follow."
+            pointer="Click a labelled area, swap what's in it, watch the budget follow."
+          />
         </p>
       </header>
       <Configurator projectId={projectId} />

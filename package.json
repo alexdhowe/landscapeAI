@@ -17,6 +17,7 @@
     "typecheck": "tsc --noEmit",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
+    "db:migrate:direct": "tsx scripts/db-migrate.ts",
     "db:seed": "tsx scripts/db-seed.ts",
     "db:setup": "npm run db:migrate && npm run db:seed",
     "db:user": "tsx scripts/db-user.ts",

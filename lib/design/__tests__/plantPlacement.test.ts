@@ -13,6 +13,7 @@ import { describe, expect, it } from "vitest";
 import type { NormalizedPoint, Planting } from "../../vision/types";
 import {
   confineToRegion,
+  isDragTravel,
   isInsidePolygon,
   isPlantMoved,
   plantPosition,
@@ -137,5 +138,49 @@ describe("regionAtPoint", () => {
   it("finds nothing when the photo has no plantable region at all", () => {
     expect(regionAtPoint([walk], [0.7, 0.6], plantable)).toBeNull();
     expect(regionAtPoint([], [0.3, 0.6], plantable)).toBeNull();
+  });
+});
+
+describe("isDragTravel", () => {
+  // The frame is the photograph as rendered, and it is not a fixed size:
+  // about 1600px wide on a phone in portrait, and about 435px on a
+  // 1440x900 laptop once the desktop height cap applies.
+  const phone = { width: 1600, height: 2133 };
+  const laptop = { width: 435, height: 580 };
+
+  it("calls a press that did not move a tap", () => {
+    expect(isDragTravel([0.5, 0.5], [0.5, 0.5], phone)).toBe(false);
+  });
+
+  it("on a large frame, uses the fraction: ~7px on a 1600px photo", () => {
+    // 6px across: under. 9px: over.
+    expect(isDragTravel([0.5, 0.5], [0.5 + 6 / 1600, 0.5], phone)).toBe(false);
+    expect(isDragTravel([0.5, 0.5], [0.5 + 9 / 1600, 0.5], phone)).toBe(true);
+  });
+
+  it("on a small frame, the pixel floor is what decides", () => {
+    // 0.0045 of a 435px frame is under 2px, which is inside the movement
+    // of an ordinary click — this is the bug the floor exists for. A
+    // 3px press must still be a tap.
+    expect(isDragTravel([0.5, 0.5], [0.5 + 3 / 435, 0.5], laptop)).toBe(false);
+    expect(isDragTravel([0.5, 0.5], [0.5 + 7 / 435, 0.5], laptop)).toBe(true);
+  });
+
+  it("measures real distance, so a diagonal press counts both axes", () => {
+    // 4px right and 4px down is 5.7px travelled: over the floor, where
+    // neither axis alone would be.
+    expect(isDragTravel([0.5, 0.5], [0.5 + 4 / 435, 0.5 + 4 / 580], laptop)).toBe(true);
+  });
+
+  it("is symmetric — direction does not decide", () => {
+    const a: [number, number] = [0.5, 0.5];
+    const b: [number, number] = [0.5 + 20 / 435, 0.5];
+    expect(isDragTravel(a, b, laptop)).toBe(isDragTravel(b, a, laptop));
+  });
+
+  it("refuses to decide on a frame with no size", () => {
+    // Before the photo has laid out there is no scale to judge against,
+    // and guessing would move a plant the customer only pressed.
+    expect(isDragTravel([0, 0], [1, 1], { width: 0, height: 0 })).toBe(false);
   });
 });

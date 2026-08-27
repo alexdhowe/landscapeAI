@@ -1,6 +1,6 @@
 # Deploying this thing
 
-Everything an operator needs to put LandscapeAI in front of real people,
+Everything an operator needs to put MyScape in front of real people,
 and the reasoning behind the choices so they can be overruled rather than
 guessed at again.
 
@@ -11,6 +11,10 @@ deploying irresponsible (rate limiting), verify the production artifact end
 to end locally, and hand over a runbook. The steps below have not been run
 against a real host. Where a step could be checked locally it was, and it
 says so.
+
+A later session went through §2 against a real Postgres and an Anthropic
+key. What it found is in §2.1, and one item there stops a first deploy
+from shipping the product you think it is.
 
 ---
 
@@ -82,6 +86,70 @@ a redeploy, not a rewrite.
 | `SITE_URL` | set after the first deploy | The absolute base for Open Graph and icon URLs. **Build-time** — see below. |
 | `S3_BUCKET`, `S3_ENDPOINT`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` | **skip all four** | Only for Path B. All four or none: half-configured is a deliberate fatal error, never a quiet fall back to keeping photos in this deployment. With none set and a database configured, photo bytes live in `photo_objects` rows, which is exactly what the free path wants. |
 
+### 2.1 What the pre-flight actually found
+
+Checked against a real Postgres 16 and a real Anthropic key, in the
+session before the first deploy.
+
+**The default branch is not the branch you want deployed.** Render's
+Blueprint deploys the repository's **default branch**, and GitHub's
+default here is `claude/read-begin-execution-imfwzz`, which is **eight
+commits behind `main`** — and those eight commits are the whole of the
+material rendering, the clone-stamp fill, dragging a plant, the
+perspective fit and the plant palette. A Blueprint deploy today ships a
+build with none of them, and nothing about the deploy would look wrong.
+Fix it *before* step 4, either way round:
+
+- GitHub → Settings → General → Default branch → switch to `main`; or
+- after Render creates the service, Settings → Build & Deploy → Branch →
+  `main`, then Manual Deploy.
+
+The first is better: it is one setting rather than one per service, and
+the branch a repository points at is the one a reader assumes is live.
+
+**`npm run db:migrate` works.** The eleventh session reported
+`drizzle-kit migrate` hanging against a local server and applied the
+schema with `psql` instead, which was the one unknown that could stall
+this deploy. It does not reproduce: against Postgres 16 over TCP, all
+twelve migrations applied in about two seconds and the process exited on
+its own; a second run was a one-second no-op; the same held with
+`?sslmode=require`, which is how Neon connects. Whatever the eleventh
+session hit was local to that machine — the likeliest candidate being
+`drizzle.config.ts`'s fallback URL, `postgres://localhost:5432/landscapeai`,
+which carries no password and will sit waiting on a server that wants one.
+
+**There is a fallback now anyway**, because a hang with no message is a
+bad thing to meet for the first time during a deploy:
+
+```sh
+npm run db:migrate          # drizzle-kit — the normal path
+npm run db:migrate:direct   # scripts/db-migrate.ts — when that one will not finish
+```
+
+The fallback runs drizzle-orm's own migrator rather than a
+reimplementation of it, so the journal rows it writes are the rows
+drizzle-kit would have written: either command can follow the other and
+picks up where it left off (verified in both directions). What it adds is
+a connection timeout with a message naming the likely causes, a count of
+what was already applied and what it did, and a process that closes the
+connection and exits. `DB_CONNECT_TIMEOUT` sets the timeout; the default
+is 30 seconds, which is generous for Neon's free tier waking from its
+five-minute idle suspend.
+
+**Migration 0011 is in `drizzle/meta/_journal.json`** and applies cleanly
+to an empty database — twelve entries, `0000_init` through
+`0011_plants_added`, and `added_plants` and `plant_positions` are among
+the 21 tables afterwards.
+
+**`npm run db:seed` and `npm run db:user` both work against a real
+server**, which the GitHub Action in step 3 depends on and which had only
+ever been run against PGlite.
+
+**`RATE_LIMIT_CLIENT_IP_HEADER` cannot be settled from here.** It is a
+security decision (§10) and the answer is a fact about Render's proxy, so
+§8 step 8 below is an experiment against the live deployment rather than a
+guess written down now.
+
 **Two of these are build-time values, not runtime ones**, and getting that
 wrong is silent rather than loud:
 
@@ -132,9 +200,10 @@ Then delete the `CONTRACTOR_ADMIN_PASSWORD` secret. The password is now a
 scrypt hash in your database and the secret has no further use.
 
 **4. Deploy — [render.com](https://render.com), no card.** New → Blueprint →
-connect this repository. Render deploys the repo's **default branch**,
-which is `claude/read-begin-execution-imfwzz` — the trunk, and where every
-session's work lands. It reads `render.yaml` and asks for:
+connect this repository. Render deploys the repo's **default branch** —
+see §2.1, which is currently eight commits behind `main`; settle that
+first or the deploy is of the wrong code. It reads `render.yaml` and asks
+for:
 
 - `DATABASE_URL` — the same string.
 - `ANTHROPIC_API_KEY` — your key. Type it into Render's field; it does not
@@ -346,7 +415,43 @@ that fails here fails before the address is given to a customer.
 6. Rate limiting: `for i in $(seq 1 20); do curl -s -o /dev/null -w '%{http_code} ' -X POST https://<host>/api/projects -F photo=@some.heic; done`
    → a short run of 201s and then 429s with a `Retry-After`, while a second
    device on a different network is unaffected.
-7. **The HEIC path specifically.** The wasm decoder is the one thing a
+7. **Which header carries the caller's address — an experiment, not a
+   guess.** `RATE_LIMIT_CLIENT_IP_HEADER` decides what the rate limiter
+   buckets on, so a header the *client* can set is a budget the client can
+   reset by changing it (§10). The limiter's default order tries
+   `fly-client-ip`, `cf-connecting-ip`, `true-client-ip`, `x-real-ip` and
+   then `x-forwarded-for`, and the first four are only safe if Render's
+   proxy overwrites them. Render fronts services with Cloudflare, which
+   writes and overwrites `cf-connecting-ip`, so that is the expected
+   answer — but "expected" is not "measured", and this is two minutes:
+
+   ```sh
+   # 1. Spend the upload budget from one address.
+   for i in $(seq 1 12); do
+     curl -s -o /dev/null -w '%{http_code} ' -X POST https://<host>/api/projects -F photo=@some.jpg
+   done; echo          # → 201s, then 429s
+
+   # 2. While still refused, try again claiming to be somebody else.
+   for h in x-real-ip true-client-ip cf-connecting-ip; do
+     printf '%s -> ' "$h"
+     curl -s -o /dev/null -w '%{http_code}\n' -H "$h: 203.0.113.7" \
+       -X POST https://<host>/api/projects -F photo=@some.jpg
+   done
+   ```
+
+   Any header that turns the 429 back into a 201 is one the client
+   controls end to end, and the limiter must not trust it. Set
+   `RATE_LIMIT_CLIENT_IP_HEADER` in the Render dashboard to a header that
+   *stayed* 429 — `cf-connecting-ip` if it did — and redeploy. If every
+   one of them resets the budget, set it to `x-forwarded-for`: it is a
+   list a client can prepend to, but Render documents the leftmost entry
+   as the real caller, and the limiter reads the leftmost.
+
+   Naming one header explicitly is worth doing even when the default order
+   happens to be right, because the default is a guess that re-runs on
+   every request and this is a fact you have now measured.
+
+8. **The HEIC path specifically.** The wasm decoder is the one thing a
    bundler can get wrong quietly, and the failure mode is an upload that
    works locally and 500s in production. Upload an actual iPhone HEIC and
    confirm what comes back from `GET /api/projects/[id]/photo` is a JPEG,
@@ -400,9 +505,10 @@ order:
 1. **Set `RATE_LIMIT_CLIENT_IP_HEADER`** to the one header your platform
    writes (`fly-client-ip`; `cf-connecting-ip` behind Cloudflare). Without
    it the limiter guesses, and the fallback is a header a client can forge.
-   On Render, leave it unset unless you have confirmed which header their
-   proxy writes — the default order tries the single-valued proxy headers
-   before falling back to `x-forwarded-for`. On the free tier the budgets
+   On Render this is not a thing to reason about from documentation —
+   **§8 step 7 is the experiment that settles it**, and it takes two
+   minutes against the live deployment. Until it has been run, the default
+   order is a guess that re-runs on every request. On the free tier the budgets
    matter less as a defence against a determined attacker than as a
    guarantee that one script cannot spend your whole Anthropic balance
    while you sleep, and they do that either way.

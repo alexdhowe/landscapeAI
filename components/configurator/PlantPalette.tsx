@@ -109,6 +109,10 @@ export function PlantPalette({
             <button
               type="button"
               disabled={busy}
+              // The browser pass drags one of these onto the photo and
+              // asserts a plant appeared. It needs something stable to
+              // grab that is not the visible label.
+              data-plant-option={option.id}
               // A press that travels drags; a press that lifts where it
               // started drops in the middle of the open bed, which is the
               // path a keyboard and a screen reader take.

@@ -73,14 +73,34 @@ deployment.
 | Material that ignored the light it was sitting in | ✅ fixed — the shading ramp mapped the photo's whole 0..1 luminance onto a 0.52–1.0 multiplier, so a bed that lives in the bottom third of that range moved barely at all. Measured across one real yard: the photograph ranged 1.47× and the material over it 1.22×, with its bright end where the photo was dim. A steep absolute ramp, blurred past the *things* in a bed rather than just their grain, gets 1.42× and falls off where the photograph does |
 | Putting a plant in where there was none | ✅ done — drag one off the palette onto the bed and it is drawn at the size the catalog says it grows to, against that region's own scale and the perspective at the row it lands in. The bed it went into is decided server-side from the outlines, and the plant is checked against the catalog *for that region* — a shade tree still cannot be dropped against the house |
 | Moving a plant that is already there | ✅ done — drag it anywhere in its bed, no mode and no toggle; the drop is confined to the outline server-side and each move is bid as `shrub_transplant` |
+| The three drags, driven with a mouse | ✅ verified — `npm run shots` drives press-and-lift and press-and-travel across the threshold and asserts they did *different* things, then drags a plant off the palette and drags the bed edge. Three of the four now pass at 1440×900 and 1920×1080; the fourth is the row below |
+| A click on a plant read as a drag | ✅ **fixed — a real bug, and only a mouse could find it.** The threshold was a fraction of the *frame*, and the frame is not a fixed size: 0.0045 is seven screen pixels on a 1600px-wide photo and two on a 435px one. Two pixels is inside the movement of an ordinary click, so pressing a plant to open its picker dragged the plant instead. It is `max(0.0045 × frame width, 5px)` now — `isDragTravel` in `lib/design/plantPlacement.ts`, with the decision moved out of the component so it is covered by `npm test` |
+| A photograph taller than the screen | ✅ fixed — width-driven sizing is right on a phone and made a portrait photo 956px tall on a 1440×900 laptop. The frame is capped by *width* derived from the aspect ratio, because the overlay is `inset-0` of that box: cap the image's height instead and the outlines drift off the photograph |
+| Reaching the plant palette on a desktop | ⚠️ **open** — measured at 1273px from the top of the photo to the bottom of the "Add a plant" palette, against a 900px laptop and a 1080px monitor. So "Drag one onto your photo" names a gesture whose two ends are not on screen together, and `npm run shots` reports it rather than pretending otherwise. The palette's buttons still *click* to drop a plant in the middle of the open bed, so the feature is reachable; the drag is what is not. The fix is a shorter rail, which is a design decision rather than a patch |
+| Desktop as the primary surface | ✅ addressed — `/start` no longer tells somebody at a desk to point a camera: the drop zone *is* the button, paste is bound at the window, and the verbs are chosen by pointer type (`components/ui/ByPointer.tsx`). `npm run shots` audits 1920×1080 alongside 1440×900 and 390×844 |
+| The 44px rule on a desktop | ✅ corrected — it is a *fingertip* floor and was being applied to a mouse, which reported every 38px button in the price book as a defect and buried the 18px-tall links next to them. 44px on coarse pointers, 24px on fine |
+| A moved plant read as a misplaced one | ✅ fixed — the canvas published each plant's *reported* position in `data-cx` while rendering it at its *resolved* one, so the browser pass flagged every moved plant as badly placed: the one thing a move is supposed to do |
+| Segmentation on a real key | ⏳ **still the gap this session was meant to close.** The key works (`npm run doctor` gets an accepted-key answer from the real API) and a photo with no landscape in it comes back with zero regions and the right "No landscape areas found in this photo" screen. But no real yard photograph has been through it: this environment's egress policy blocks Drive, and the connector returns files as inline base64, which multi-megabyte photos do not survive. **Every one of the eight rendering features above is still judged only against a hand-traced segmentation** |
+| `npm run db:migrate` against a real server | ✅ verified — the eleventh session's hang does not reproduce: 12 migrations in ~2s over TCP and over TLS, a 1s idempotent re-run, clean exit. `npm run db:migrate:direct` is the fallback if it ever does, and it interoperates with drizzle-kit's journal in both directions |
+| What Render would actually deploy | ⚠️ **the default branch is 8 commits behind `main`** — and those 8 commits are the whole of this table's last eight rows. `docs/deploy.md` §2.1 has the two ways to fix it. Not a code defect; a deploy that would have looked fine and shipped the wrong product |
+| Which header the rate limiter may trust | ⏳ unresolved by design — it is a fact about Render's proxy, not something to reason out here. `docs/deploy.md` §8 step 7 is a two-minute experiment against the live deployment that settles it |
+| The contractor console, end to end | ✅ verified against Postgres — sign in, open a lead, correct 300 SF to 352.5, the snapshot is byte-identical either side of the correction (384 bytes both times), the final quote issues and carries no `unitCost`, `burdenPct`, `marginPct` or `internalTotal`, four rows land at `/deltas`, and `GET /api/leads/[id]/photo` is 401 signed out |
 | The aerial leg (`/design/[id]/locate`) | ⛔ gated off — deliberately: no paid imagery or geocoder until there is a working MVP |
 
 All six phases are in, they run on Postgres, the contractor console is behind
 a login, the price book is editable, photos live in object storage when a
 bucket is configured, and the whole thing has been designed and opened on a
 phone — on a phone *branch*, for the first time in the twelfth session,
-which is its own story. `npm test` runs 759 tests — with a database and
+which is its own story. `npm test` runs 776 tests — with a database and
 without one.
+
+The primary surface is a **desktop browser** now. The customer surfaces
+were built mobile-first and it showed: `/start` opened with "point your
+camera" next to a mouse pointer, and the photo somebody at a desk
+actually has — already on their disk or already on their clipboard — had
+a dashed rectangle below the fold and no paste at all. That is fixed, and
+`npm run shots` audits a 1920×1080 monitor as well as a laptop and a
+phone.
 
 **It has not been deployed.** The tenth session wrote the configuration —
 [`docs/deploy.md`](./docs/deploy.md) is the runbook, `Dockerfile` and
@@ -106,7 +126,7 @@ store, so a clean checkout runs the demo with nothing to provision.
 ```sh
 npm run doctor    # is this machine set up? checks .env.local, the API key (against the
                   # real API), and the console login — and says what to fix, in English.
-npm test          # Vitest — 759 tests across every phase. No server, no network, no browser.
+npm test          # Vitest — 776 tests across every phase. No server, no network, no browser.
 npm run typecheck
 npm run dev
 npm run build
@@ -116,8 +136,12 @@ npm run segment   # dev-only: segment one photo and write what every stage did t
                   # clamp, after the second look, and as drawn. Needs a key.
 
 npm run shots     # dev-only: drive the customer flow in a real browser at
-                  # 390x844 and 1440x900, capture every surface, and audit
-                  # horizontal scroll and 44px tap targets. Includes the three
+                  # 390x844, 1440x900 and 1920x1080, capture every surface,
+                  # and audit horizontal scroll and pointer target size.
+                  # On the desktop viewports it also drives the three drags
+                  # with a real mouse — a plant, a plant off the palette,
+                  # and the bed edge — and checks that a press which stayed
+                  # under DRAG_THRESHOLD opened the picker instead. Includes the three
                   # states of the segmentation wait, which no run with a key
                   # is slow enough and no run without one is long enough to
                   # reach — they are driven by answering the design page's own
@@ -125,6 +149,9 @@ npm run shots     # dev-only: drive the customer flow in a real browser at
 
 npm run db:generate   # regenerate migrations from lib/db/schema.ts
 npm run db:migrate    # apply them
+npm run db:migrate:direct   # the same migrations without the drizzle-kit CLI: a connect
+                            # timeout, a count of what it did, and a process that exits.
+                            # For when the CLI will not finish. See docs/deploy.md §2.1.
 npm run db:seed       # load the org's price book from seed/pricebook.seed.ts
 npm run db:setup      # migrate + seed
 npm run db:user -- --email sam@example.com --name "Sam Rep"   # a contractor login

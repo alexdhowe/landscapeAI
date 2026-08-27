@@ -6,7 +6,7 @@ import { getOption } from "@/lib/catalog/options";
 import type { SwatchId } from "@/lib/catalog/options";
 import type { PlantOption } from "@/lib/catalog/plants";
 import { holesToFill, planHoles } from "@/lib/design/inpaint";
-import { isPlantMoved } from "@/lib/design/plantPlacement";
+import { isDragTravel, isPlantMoved } from "@/lib/design/plantPlacement";
 import { layoutRegionMarkers } from "@/lib/design/markers";
 import {
   assumedPixelsPerFoot,
@@ -155,16 +155,7 @@ const PLANTING_CORE = 1 / PLANTING_MASK_MARGIN;
  */
 const MATERIAL_INSET = 0.006;
 
-/**
- * How far a pointer has to travel before a press on a plant is a drag
- * rather than a tap, as a fraction of the frame.
- *
- * This is what lets a plant be draggable without a mode: press and lift
- * opens the picker, press and travel moves the plant. About seven pixels
- * on a 1600px photo — past a fingertip's wobble, short of anything
- * deliberate.
- */
-const DRAG_THRESHOLD = 0.0045;
+
 
 /**
  * How much of the photograph is blurred away before what is left counts
@@ -343,6 +334,16 @@ export function PhotoCanvas({
       : effectiveOutline(region, regionOutlines);
 
   /** Pointer position as a fraction of the photo. */
+  /**
+   * Has this press travelled far enough to be a drag rather than a tap?
+   * The decision is `isDragTravel` in lib/design/plantPlacement; all this
+   * adds is the frame's rendered size, which only the DOM knows.
+   */
+  const travelledFar = (a: NormalizedPoint, b: NormalizedPoint): boolean => {
+    const box = frameRef.current?.getBoundingClientRect();
+    return box ? isDragTravel(b, a, box) : false;
+  };
+
   const atPointer = (event: { clientX: number; clientY: number }): NormalizedPoint | null => {
     const box = frameRef.current?.getBoundingClientRect();
     if (!box || box.width === 0 || box.height === 0) return null;
@@ -532,7 +533,34 @@ export function PhotoCanvas({
       // gesture starts in another component, so the drop asks the
       // document what is under the pointer and looks for this.
       data-photo-frame=""
-      className="relative overflow-hidden rounded-xl bg-bark-900 shadow-e3 sm:rounded-2xl"
+      className="relative mx-auto overflow-hidden rounded-xl bg-bark-900 shadow-e3 sm:rounded-2xl"
+      // ---------------------------------------------------------------
+      // Why a desktop caps this by WIDTH to get a height
+      // ---------------------------------------------------------------
+      // Width-driven is right on a phone, where the column is the screen.
+      // On a 1440x900 laptop it made a portrait photo 956px tall, and the
+      // page measured 1273px from the top of the photograph to the bottom
+      // of the "Add a plant" palette — so the palette's own instruction,
+      // "Drag one onto your photo", named a gesture whose two ends were
+      // never on screen together. The browser pass could not perform it
+      // either, which is how it was found.
+      //
+      // The cap is on *width* rather than height, and that is the whole
+      // trick: the SVG overlay is `inset-0` of this box and draws in
+      // normalized coordinates, so the box has to stay exactly the
+      // rendered picture. Capping the image's height instead leaves the
+      // figure at full column width and the outlines drift off the
+      // photograph. Narrowing the frame and letting the image fill it
+      // keeps the two identical, and the aspect ratio turns the height
+      // budget into the width that produces it.
+      //
+      // Only once the image has loaded: before that there is no ratio to
+      // divide by, and a guess would resize the frame under the customer.
+      style={
+        dims
+          ? { maxWidth: `calc((100vh - 20rem) * ${(dims.w / dims.h).toFixed(4)})` }
+          : undefined
+      }
     >
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
@@ -1263,10 +1291,16 @@ export function PhotoCanvas({
                   type="button"
                   tabIndex={-1}
                   data-plant={plant.id}
-                  // What this element's position is supposed to be, so the
+                  // Where this element is supposed to be *now*, so the
                   // browser pass can check where it actually landed.
-                  data-cx={plant.cx}
-                  data-cy={plant.cy}
+                  //
+                  // The resolved position, not the reported one. Those
+                  // are the same until the customer moves the plant, and
+                  // publishing `plant.cx` meant the alignment audit
+                  // flagged every moved plant as misplaced — the one
+                  // thing a move is supposed to do.
+                  data-cx={position[0]}
+                  data-cy={position[1]}
                   onClick={() => {
                     // A press that travelled was a drag, and a drag is not
                     // a request to open the picker.
@@ -1291,12 +1325,8 @@ export function PhotoCanvas({
                           if (draggingPlant?.plantingId !== plant.id) return;
                           const at = atPointer(event);
                           if (!at) return;
-                          const travelled = Math.hypot(
-                            at[0] - draggingPlant.from[0],
-                            at[1] - draggingPlant.from[1],
-                          );
                           const dragging =
-                            draggingPlant.dragging || travelled > DRAG_THRESHOLD;
+                            draggingPlant.dragging || travelledFar(at, draggingPlant.from);
                           if (!dragging) return;
                           setDraggingPlant({ ...draggingPlant, point: at, dragging });
                         },
@@ -1344,6 +1374,7 @@ export function PhotoCanvas({
                 <button
                   key={`added-${plant.id}`}
                   type="button"
+                  data-added-plant={plant.id}
                   onPointerDown={(event) => {
                     const at = atPointer(event);
                     if (!at) return;
@@ -1359,12 +1390,8 @@ export function PhotoCanvas({
                     if (draggingPlant?.plantingId !== plant.id) return;
                     const at = atPointer(event);
                     if (!at) return;
-                    const travelled = Math.hypot(
-                      at[0] - draggingPlant.from[0],
-                      at[1] - draggingPlant.from[1],
-                    );
                     const dragging =
-                      draggingPlant.dragging || travelled > DRAG_THRESHOLD;
+                      draggingPlant.dragging || travelledFar(at, draggingPlant.from);
                     if (!dragging) return;
                     setDraggingPlant({ ...draggingPlant, point: at, dragging });
                   }}

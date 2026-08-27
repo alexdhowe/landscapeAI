@@ -8,6 +8,7 @@ import {
   UPLOAD_ACCEPT_ATTRIBUTE,
   UPLOAD_MEDIA_TYPE_LABEL,
 } from "@/lib/image/mediaTypes";
+import { nothingToUploadMessage, pickImage } from "@/lib/image/transfer";
 
 import { Callout } from "@/components/ui/Card";
 import { buttonClass } from "@/components/ui/Button";
@@ -15,10 +16,24 @@ import { buttonClass } from "@/components/ui/Button";
 /**
  * Choosing the photo, and the wait that follows.
  *
- * Two affordances, in the order a person standing outside needs them: the
- * camera first, the camera roll second. The camera button is hidden where
- * there is no camera to open — `capture` is ignored on a desktop browser,
- * so showing it there would be two buttons that do the same thing.
+ * ---------------------------------------------------------------------
+ * The three ways in, and which device gets which
+ * ---------------------------------------------------------------------
+ * On a phone: the camera, then the camera roll. `capture` is ignored on a
+ * desktop browser, so the camera button is hidden where there is no
+ * camera — otherwise it is two buttons that do the same thing.
+ *
+ * On a desktop there is no camera, so the photo is one the customer
+ * already has, and the three ways to hand it over are drop, paste and
+ * browse. Drop and browse are one target rather than two: the dashed
+ * region *is* the button, so the largest thing on the screen is also the
+ * thing you can throw a file at. Paste is bound at the window because a
+ * clipboard has no target — Cmd/Ctrl+V anywhere on this page uploads,
+ * which is what somebody who just screenshotted a listing will try.
+ *
+ * A paste or a drop carrying nothing usable says so (see
+ * lib/image/transfer). Silence there is the worst outcome: the gesture
+ * looks broken and there is nothing to read.
  *
  * The upload is not a spinner. The moment a file is chosen the browser's
  * own copy of it is shown at full width, dimmed, with a band of light
@@ -87,6 +102,35 @@ export function StartUpload() {
     event.target.value = "";
   }
 
+  /** A paste or a drop: same bag, same choice, same refusal. */
+  const fromTransfer = useCallback(
+    (files: FileList | null | undefined, gesture: "paste" | "drop") => {
+      const picked = pickImage(Array.from(files ?? []));
+      if (picked) {
+        void upload(picked);
+        return;
+      }
+      setError(nothingToUploadMessage(gesture));
+    },
+    [upload],
+  );
+
+  // Paste, bound at the window: a clipboard has nothing to aim at, so
+  // there is no element that would be the right target for it. Skipped
+  // while an upload is already in flight, so a second Cmd+V during the
+  // wait cannot start a second project.
+  useEffect(() => {
+    if (busy || preview) return;
+    const onPaste = (event: ClipboardEvent) => {
+      const files = event.clipboardData?.files;
+      if (!files || files.length === 0) return;
+      event.preventDefault();
+      fromTransfer(files, "paste");
+    };
+    window.addEventListener("paste", onPaste);
+    return () => window.removeEventListener("paste", onPaste);
+  }, [busy, preview, fromTransfer]);
+
   if (preview || busy) {
     return (
       <section aria-live="polite" className="mt-8">
@@ -149,12 +193,6 @@ export function StartUpload() {
             Take a photo
           </FilePicker>
         </div>
-        <div className="coarse:hidden">
-          <FilePicker tone="primary" onPicked={onPicked}>
-            <CameraIcon />
-            Choose a photo
-          </FilePicker>
-        </div>
         <div className="hidden coarse:block">
           <FilePicker tone="secondary" onPicked={onPicked}>
             Choose from your photos
@@ -162,26 +200,43 @@ export function StartUpload() {
         </div>
       </div>
 
-      {/* Drag and drop, where there is something to drag with. */}
-      <div
-        onDragOver={(e) => {
-          e.preventDefault();
-          setDragging(true);
-        }}
-        onDragLeave={() => setDragging(false)}
-        onDrop={(e) => {
-          e.preventDefault();
-          setDragging(false);
-          const file = e.dataTransfer.files?.[0];
-          if (file) void upload(file);
-        }}
-        className={`coarse:hidden mt-3 rounded-xl border-2 border-dashed px-6 py-7 text-center text-sm transition-colors ${
-          dragging
-            ? "border-canopy-500 bg-canopy-50 text-canopy-800"
-            : "border-bark-300 text-bark-600"
-        }`}
-      >
-        …or drop one here
+      {/*
+        The desktop target. One region, not a button beside a drop zone:
+        the whole dashed area is the label wrapping the file input, so
+        clicking anywhere in it browses and dropping anywhere in it
+        uploads. No camera glyph — this opens a file picker.
+      */}
+      <div className="coarse:hidden">
+        <label
+          onDragOver={(e) => {
+            e.preventDefault();
+            setDragging(true);
+          }}
+          onDragLeave={() => setDragging(false)}
+          onDrop={(e) => {
+            e.preventDefault();
+            setDragging(false);
+            fromTransfer(e.dataTransfer.files, "drop");
+          }}
+          className={`flex cursor-pointer flex-col items-center rounded-2xl border-2 border-dashed px-6 py-10 text-center transition-colors has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-canopy-700 ${
+            dragging
+              ? "border-canopy-500 bg-canopy-50"
+              : "border-bark-300 bg-white/50 hover:border-canopy-400 hover:bg-canopy-50/40"
+          }`}
+        >
+          <input
+            type="file"
+            accept={UPLOAD_ACCEPT_ATTRIBUTE}
+            className="sr-only"
+            onChange={onPicked}
+          />
+          <span className="text-base font-medium text-bark-900">
+            Drop a photo here
+          </span>
+          <span className="mt-1 text-sm text-bark-600">
+            or paste one, or <span className="underline underline-offset-4">browse</span>
+          </span>
+        </label>
       </div>
 
       <p className="mt-3 text-xs text-bark-500">

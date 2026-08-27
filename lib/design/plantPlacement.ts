@@ -26,6 +26,57 @@
  */
 import type { NormalizedPoint, Planting } from "../vision/types";
 
+/**
+ * How far a press must travel before it is a drag rather than a tap, as a
+ * fraction of the frame's width — about seven pixels on a 1600px photo.
+ *
+ * This is what lets a plant be draggable without a mode: press and lift
+ * opens the picker, press and travel moves the plant.
+ */
+export const DRAG_THRESHOLD = 0.0045;
+
+/**
+ * …and the same distance as a floor in CSS pixels.
+ *
+ * A fraction of the frame is the wrong unit on its own, because the frame
+ * is not a fixed size: it is the photograph as rendered, 1600px wide on a
+ * phone in portrait and about 435px wide on a 1440x900 laptop once the
+ * desktop height cap applies. The same 0.0045 is seven screen pixels in
+ * the first case and two in the second — and two pixels is inside the
+ * movement of an ordinary click, so a customer at a desk pressing a plant
+ * to open its picker got the plant dragged out from under them instead.
+ *
+ * Found by driving both sides of the threshold with a real mouse
+ * (`npm run shots`): a press that moved two pixels was supposed to open
+ * the picker and moved the plant.
+ *
+ * Five pixels is the slop a browser's own native drag uses. A fingertip
+ * on glass wanders further than a mouse does, which is what the fraction
+ * above covers on a large frame; this floor only ever binds on a small
+ * one.
+ */
+export const DRAG_THRESHOLD_PX = 5;
+
+/**
+ * Has a press travelled far enough to be a drag?
+ *
+ * Points are normalized to the frame; `frame` is its rendered size in CSS
+ * pixels, which is the only thing that can turn the pixel floor into the
+ * same units. Whichever threshold is larger wins.
+ */
+export function isDragTravel(
+  from: NormalizedPoint,
+  to: NormalizedPoint,
+  frame: { width: number; height: number },
+): boolean {
+  if (frame.width <= 0 || frame.height <= 0) return false;
+  const travelledPx = Math.hypot(
+    (to[0] - from[0]) * frame.width,
+    (to[1] - from[1]) * frame.height,
+  );
+  return travelledPx > Math.max(DRAG_THRESHOLD * frame.width, DRAG_THRESHOLD_PX);
+}
+
 /** Where this plant is drawn and priced: moved if moved, else reported. */
 export function plantPosition(
   planting: Planting,
