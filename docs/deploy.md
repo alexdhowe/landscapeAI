@@ -16,6 +16,13 @@ A later session went through §2 against a real Postgres and an Anthropic
 key. What it found is in §2.1, and one item there stops a first deploy
 from shipping the product you think it is.
 
+**Step 3 has now been run for real.** The database half of this runbook is
+no longer theoretical: the "Database setup" Action applied all twelve
+migrations to a free Neon project in about four seconds, seeded the price
+book and created the first contractor account, against the *pooled*
+endpoint, in a 25-second run. What has still never been run is the Render
+half — the image build and everything downstream of it.
+
 ---
 
 ## 1. Two paths, and which one you are on
@@ -175,6 +182,26 @@ five-minute idle suspend.
 to an empty database — twelve entries, `0000_init` through
 `0011_plants_added`, and `added_plants` and `plant_positions` are among
 the 21 tables afterwards.
+
+**Confirmed against Neon itself**, by the Action rather than by argument:
+
+```
+12 migrations on disk, through 0011_plants_added.
+Connecting to ep-…-pooler.us-east-2.aws.neon.tech (30s timeout)…
+Connected. 0 already applied.
+Applied 12. Now at 12 of 12.
+```
+
+Four seconds, on the free tier, through the pooled endpoint, with the
+connection string exactly as Neon's console gives it out. Without the
+parameter stripping above that step would not have finished; it would have
+sat until the ten-minute cap with nothing in the log.
+
+One thing this rules out that reading could not: a session container is
+not the place to test this even if you want to. Outbound TCP to port 5432
+is blocked in the Claude Code web environment — DNS resolves, 443 answers
+on the same host, 5432 times out — so the Action is not merely the
+documented path, it is the only one available from there.
 
 **`npm run db:seed` and `npm run db:user` both work against a real
 server**, which the GitHub Action in step 3 depends on and which had only
