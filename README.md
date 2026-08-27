@@ -67,6 +67,7 @@ deployment.
 | Taking the plants out | ✅ done — clear one or a whole bed, the hole is clone-stamped out of the photograph itself, and every removal is bid as `shrub_removal` |
 | "It fills the hole in like MS Paint" | ✅ fixed — the fill was a repaint in a material nobody chose, clipped to the bed so the half of a shrub standing against the brick survived it. It is real pixels now: a hole cut wide, tiled from the nearest clean piece of that bed, and the slices that stood above or below the bed filled from what was actually behind them |
 | A stamped rectangle where a plant had been | ✅ fixed — the fill was tiling a thumbnail of bed six times across one hole, and reaching across a bed for a big bright patch to do it with. It magnifies a small patch rather than repeating it, and will not cross a bed for one in different light |
+| Material that ignored the light it was sitting in | ✅ fixed — the shading ramp mapped the photo's whole 0..1 luminance onto a 0.52–1.0 multiplier, so a bed that lives in the bottom third of that range moved barely at all. Measured across one real yard: the photograph ranged 1.47× and the material over it 1.22×, with its bright end where the photo was dim. A steep absolute ramp, blurred past the *things* in a bed rather than just their grain, gets 1.42× and falls off where the photograph does |
 | Moving a plant that is already there | ✅ done — drag it anywhere in its bed, no mode and no toggle; the drop is confined to the outline server-side and each move is bid as `shrub_transplant` |
 | The aerial leg (`/design/[id]/locate`) | ⛔ gated off — deliberately: no paid imagery or geocoder until there is a working MVP |
 
@@ -925,6 +926,8 @@ There is still no `ANTHROPIC_API_KEY` in this container, so:
   tiled patch on a real photograph will carry whatever light was on the
   patch, and how visible that is on a bed with a shadow falling across it
   is the thing to look at first on the next real yard.
+- **The materials have now been seen on one real yard, and they are not there yet.** Tone, gauge and the plant cut-outs hold up; the light does now follow the photograph. What still reads as a decal is the grain itself: shreds and chips at the size a real bed calls for come out too uniform and too contrasty against ground that has no fine texture under them. And the gauge is one number per region, so a bed photographed at a shallow angle draws the same size stone at the near edge and the far — which is the "angle" half of a report from two sessions ago, still open.
+- **A hedge is drawn as a row of ovals.** The plant cut-out is per plant, so seven boxwoods grown together into one hedge leave seven oval haloes of old mulch rather than one continuous line. Visible on the first real photo with a hedge in it.
 - **The hole is only ever as big as the model says the plant is.** On a
   test photo drawn with shrubs deliberately larger than the segmentation's
   ellipses, the fill lands correctly and a ring of shrub remains around it,

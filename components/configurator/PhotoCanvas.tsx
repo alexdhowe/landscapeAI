@@ -153,6 +153,42 @@ const MATERIAL_INSET = 0.006;
 const DRAG_THRESHOLD = 0.0045;
 
 /**
+ * How much of the photograph is blurred away before what is left counts
+ * as light, as a fraction of the frame.
+ *
+ * It has to be wider than the *things* in a bed, not just their grain. At
+ * a quarter of this a shrub the customer had removed came back as a dark
+ * blob in the middle of the new stone: the material covered the plant,
+ * and the plant's own darkness was still being multiplied over it. A
+ * shadow's edge goes soft at this width, which is the price.
+ */
+const SHADING_LIGHT = 0.025;
+
+/**
+ * The luminance a bed in open daylight sits at, and how steeply the
+ * material darkens below it.
+ *
+ * A bed photographed in sun lands around 0.42 of full brightness and the
+ * same bed under a porch or a tree well below that. The ramp is written
+ * so 0.42 passes the material through unchanged and everything darker is
+ * pulled down 2.2× as fast. Brighter than 0.42 clamps: a multiply cannot
+ * lighten, and a bed that bright needs no help.
+ *
+ * Steeper than it looks, and measured. Sampling seven patches across one
+ * real bed — box means, because a single pixel of mulch grain says
+ * nothing — the photograph's own light ranged **1.47×** end to end. The
+ * gentle ramp this replaced (the whole 0..1 range onto a 0.52..1.0
+ * multiplier) put the material at 1.22× and, worse, not in the same
+ * places: its bright end was where the photo's was dim. This ramp gets
+ * 1.42×, falling off where the photograph falls off.
+ */
+const SHADING_FULL = 0.42;
+const SHADING_SLOPE = 2.2;
+
+/** So that a bed at SHADING_FULL passes through untouched. */
+const SHADING_INTERCEPT = 1 - SHADING_SLOPE * SHADING_FULL;
+
+/**
  * The path drawn for a region.
  *
  * Smoothed, because the graph stores a bed edge as a list of vertices and
@@ -451,24 +487,51 @@ export function PhotoCanvas({
 
             What belongs here is the illumination and none of the
             material: a tree's shadow across the bed, the sunlit half of a
-            yard, the shade under a porch. Those are large and soft;
-            mulch grain and gravel speckle are small and hard. So the
-            luminance is blurred well past the scale of any material's
-            grain and kept only at that scale.
+            yard, the shade under a porch. Those are large and soft; mulch
+            grain and gravel speckle are small and hard. So the luminance
+            is blurred well past the scale of any material's grain and
+            kept only at that scale.
 
-            The transfer then compresses what is left around white:
-            black in the photo becomes 0.62 rather than 0, so a dark
-            existing surface tints the new one instead of drowning it,
-            while a real shadow still reads as a shadow. Written in sRGB
-            so those numbers mean what they say (see swatches.tsx).
+            ---------------------------------------------------------
+            Why the ramp is steep, and why it is not a local average
+            ---------------------------------------------------------
+            The first version was gentle — the whole 0..1 luminance range
+            onto a 0.52..1.0 multiplier — and against a real yard it did
+            almost nothing. Measured across seven patches of one bed, the
+            photograph's light ranged 1.47× and the material laid over it
+            ranged 1.22×, with its bright end in the wrong place. Material
+            that does not carry the light of the yard it sits in reads as
+            a decal on the picture, which is what it looked like.
+
+            The obvious repair is to make the shading *relative* — measure
+            each patch against a heavily blurred copy of the same photo,
+            so the answer does not depend on how bright this bed happens
+            to be. That was built, and it is worth recording why it
+            failed: a tree's shadow is hundreds of pixels across, so any
+            blur local enough to be a local average sits inside the shadow
+            and reports the shadow's own level, and one wide enough to
+            escape it is measuring the house and the sky. No radius
+            separates them.
+
+            So the ramp is absolute and steep instead, anchored where beds
+            in daylight actually sit. It gives up robustness to a wildly
+            over- or under-exposed photo — which clamps rather than
+            breaks — and buys back the thing that was missing.
+
+                        Multiplier over 1 clamps, so a lit patch is the material's own
+            colour and a shaded one is darker than it — which is what a
+            multiply can honestly do.
           */}
           <filter id="photo-shading" colorInterpolationFilters="sRGB">
-            <feColorMatrix type="saturate" values="0" />
-            <feGaussianBlur stdDeviation={w * 0.006} />
-            <feComponentTransfer>
-              <feFuncR type="linear" slope="0.5" intercept="0.52" />
-              <feFuncG type="linear" slope="0.5" intercept="0.52" />
-              <feFuncB type="linear" slope="0.5" intercept="0.52" />
+            <feColorMatrix type="saturate" values="0" result="grey" />
+            {/* The light: blurred past the *things* in the bed, not just
+                their grain, so what survives is illumination and none of
+                the old surface — see SHADING_LIGHT. */}
+            <feGaussianBlur in="grey" stdDeviation={w * SHADING_LIGHT} result="light" />
+            <feComponentTransfer in="light">
+              <feFuncR type="linear" slope={SHADING_SLOPE} intercept={SHADING_INTERCEPT} />
+              <feFuncG type="linear" slope={SHADING_SLOPE} intercept={SHADING_INTERCEPT} />
+              <feFuncB type="linear" slope={SHADING_SLOPE} intercept={SHADING_INTERCEPT} />
             </feComponentTransfer>
           </filter>
           {/*
@@ -767,7 +830,6 @@ export function PhotoCanvas({
                     height={h}
                     preserveAspectRatio="none"
                     filter="url(#photo-shading)"
-                    opacity={0.9}
                     style={{ mixBlendMode: "multiply" }}
                   />
                 </g>
