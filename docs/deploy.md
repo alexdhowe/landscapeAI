@@ -500,8 +500,28 @@ that is honoured even when a URL is discovered some other way.
 
 ## 8. Smoke tests, against the real deployment
 
-Run these in order, from a phone on cellular where it says so. Anything
-that fails here fails before the address is given to a customer.
+**Most of this is a command now:**
+
+```sh
+npm run smoke -- --base https://<your host>
+npm run shots -- --base https://<your host>     # the funnel, in a browser
+```
+
+`npm run smoke` is browser-free and finishes in under a minute. It covers
+the cold start, health, robots, whether `SITE_URL` actually made it into
+the build, the aerial gate, the HEIC round trip, the snapshot byte-check,
+the private lead photo, the limiter, and the forged-header experiment in
+step 7 below. A runbook nobody runs is a runbook that is wrong, and the
+tedious checks — twenty uploads to see a 429, the same snapshot fetched
+twice and compared byte for byte — are exactly the ones that get skipped.
+
+Two things it cannot do, and they are listed at the end of its own output
+so they are not quietly forgotten: **the camera leg from a real iPhone on
+cellular** (step 3), and the console's confirm → quote → `/deltas` path.
+
+The list below is what it checks, and why each one is there. Run these in
+order, from a phone on cellular where it says so. Anything that fails here
+fails before the address is given to a customer.
 
 0. On the free tier, wake it first: open the URL and wait out the ~1 minute
    cold start. Everything below assumes a warm instance, and the first
@@ -555,6 +575,16 @@ that fails here fails before the address is given to a customer.
    Naming one header explicitly is worth doing even when the default order
    happens to be right, because the default is a guess that re-runs on
    every request and this is a fact you have now measured.
+
+   `npm run smoke` runs this for you, and gives each header its own
+   address — sending one address four times puts all four probes in the
+   same bucket, so the first spends from it and the rest read as "did not
+   reset" whether or not the platform overwrote the header. A wrong
+   answer, arrived at confidently, on a security check. It also
+   distinguishes the two failures that look alike: *some* headers
+   resetting means the proxy passes those through and you should name one
+   of the others; *all four* resetting means nothing is proxying the host
+   at all, and no value of this variable can fix that.
 
 8. **The HEIC path specifically.** The wasm decoder is the one thing a
    bundler can get wrong quietly, and the failure mode is an upload that

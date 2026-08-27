@@ -22,7 +22,8 @@
     "db:setup": "npm run db:migrate && npm run db:seed",
     "db:user": "tsx scripts/db-user.ts",
     "segment": "tsx scripts/segment.mts",
-    "shots": "tsx scripts/screenshots.mts"
+    "shots": "tsx scripts/screenshots.mts",
+    "smoke": "tsx scripts/smoke.mts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.120.0",

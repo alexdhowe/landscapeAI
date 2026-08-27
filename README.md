@@ -138,6 +138,14 @@ npm run segment   # dev-only: segment one photo and write what every stage did t
                   # the outlines — the model's own polygons, after the ground
                   # clamp, after the second look, and as drawn. Needs a key.
 
+npm run smoke -- --base https://<host>
+                  # docs/deploy.md section 8, executable: cold start, health,
+                  # robots, whether SITE_URL survived the build, the aerial
+                  # gate, a HEIC round trip, the snapshot byte-check, the
+                  # private lead photo, the rate limiter, and whether a caller
+                  # can forge a header to mint a fresh budget. Browser-free,
+                  # under a minute, and it names the two checks it cannot do.
+
 npm run shots     # dev-only: drive the customer flow in a real browser at
                   # 390x844, 1440x900 and 1920x1080, capture every surface,
                   # and audit horizontal scroll and pointer target size.
