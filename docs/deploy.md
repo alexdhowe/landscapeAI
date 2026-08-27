@@ -233,13 +233,23 @@ forms.
 **1. Postgres — [neon.com](https://neon.com), no card.** Create a project
 and copy the connection string. Neon appends `&channel_binding=require` to
 it; the repo strips that for you now (§2.1), and removing it yourself does
-no harm. **Take the direct one, not the pooled one**
-— the pooled host has `-pooler` in it, and this app opens at most five
-connections from one small instance, so there is nothing to pool. (Paste
-the pooled one anyway and it still works: `lib/db/client.ts` recognises a
-pooler and turns off named prepared statements, which is the failure that
-would otherwise look like a database fault. The direct endpoint is simply
-one less thing between you and Postgres.) Keep the tab open.
+no harm. Keep the tab open.
+
+**Prefer the direct endpoint over the pooled one**, because this app opens
+at most five connections from one small instance and there is nothing to
+pool. Recent versions of Neon's console show only the pooled string and
+put the direct one behind a "Connection pooling" toggle in the Connect
+dialog — but you do not need to find it. **The direct host is the same
+host with `-pooler` deleted:**
+
+    ep-example-123-pooler.us-east-2.aws.neon.tech   ← what it gives you
+    ep-example-123.us-east-2.aws.neon.tech          ← the direct endpoint
+
+Paste the pooled one anyway and everything still works. `lib/db/client.ts`
+recognises a pooler and turns off named prepared statements — the failure
+that would otherwise look like a database fault — and the migrator in step
+3 does the same. The direct endpoint is simply one less thing between you
+and Postgres.
 
 **2. GitHub secrets.** In this repository → Settings → Secrets and
 variables → Actions → New repository secret:
@@ -253,6 +263,16 @@ workflow. Tick "Also create/update a contractor admin login", fill in your
 email and name, run it. It applies the migrations, seeds the price book as
 revision 1, and creates your admin account. It is safe to re-run: the seed
 refuses to overwrite an org that already exists.
+
+The workflow runs `npm run db:migrate:direct` rather than the drizzle-kit
+CLI, and every database step carries a ten-minute cap. Both are about
+running unattended: the CLI answers a bad connection with an endless
+spinner rather than an error (§2.1), and a runner's default limit is six
+hours, so the failure mode was six hours of billed minutes and a log that
+says nothing. The direct migrator times out, names the cause, and exits.
+It also turns named prepared statements off against a pooled endpoint,
+which the CLI's config has no way to express — and the pooled host is the
+one Neon offers first.
 
 Then delete the `CONTRACTOR_ADMIN_PASSWORD` secret. The password is now a
 scrypt hash in your database and the secret has no further use.

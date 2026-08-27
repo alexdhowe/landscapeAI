@@ -55,17 +55,43 @@ jobs:
 
       - run: npm ci
 
+      # `db:migrate:direct` rather than `db:migrate`, and the reason is
+      # specific to running unattended.
+      #
+      # Both apply the same migrations and write the same journal rows —
+      # the direct one runs drizzle-orm's own migrator, so either can
+      # follow the other. What differs is how they behave when the
+      # connection is wrong, which is the only interesting case here
+      # because nobody is watching:
+      #
+      #   * `drizzle-kit migrate` prints "applying migrations..." and
+      #     spins indefinitely. No error, no timeout, no exit. On a runner
+      #     that means six hours of billed minutes and a log that says
+      #     nothing. A connection string copied out of Neon's console
+      #     triggers exactly this (see docs/deploy.md §2.1).
+      #   * the direct one has a connect timeout, names the failure, and
+      #     exits non-zero.
+      #
+      # It also turns off named prepared statements when it recognises a
+      # pooled endpoint, which drizzle-kit's config has no way to express
+      # — and the pooled host is the one Neon offers first.
+      #
+      # `timeout-minutes` is the belt to that braces: whatever goes wrong,
+      # this step ends.
       - name: Apply migrations
+        timeout-minutes: 10
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-        run: npm run db:migrate
+        run: npm run db:migrate:direct
 
       - name: Seed the price book
+        timeout-minutes: 10
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: npm run db:seed
 
       - name: Create the contractor admin
+        timeout-minutes: 10
         if: ${{ inputs.create_admin }}
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
