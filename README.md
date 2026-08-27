@@ -67,6 +67,9 @@ deployment.
 | Taking the plants out | ✅ done — clear one or a whole bed, the hole is clone-stamped out of the photograph itself, and every removal is bid as `shrub_removal` |
 | "It fills the hole in like MS Paint" | ✅ fixed — the fill was a repaint in a material nobody chose, clipped to the bed so the half of a shrub standing against the brick survived it. It is real pixels now: a hole cut wide, tiled from the nearest clean piece of that bed, and the slices that stood above or below the bed filled from what was actually behind them |
 | A stamped rectangle where a plant had been | ✅ fixed — the fill was tiling a thumbnail of bed six times across one hole, and reaching across a bed for a big bright patch to do it with. It magnifies a small patch rather than repeating it, and will not cross a bed for one in different light |
+| "It reads as a decal, not as ground" | ✅ fixed — three separate causes, all found on one real photograph. The pieces were drawn with a mathematically hard vector edge over a flat ground and no surface under them, so a sub-grain finer than one piece is multiplied over all of them now; every piece was near enough the same size, so the distribution runs 0.45–2.0× squared, with a shred varying in length far more than in thickness; and the gaps read as black cut-out lines, so the ground sits at 0.76 of the darkest piece |
+| A bed of one stone size, edge to edge | ✅ fixed — the other half of "maybe the scaling or the angle doesn't match". The photograph carries the answer: shrubs in one bed are roughly one size in the world, so how their drawn size falls off up the frame *is* the perspective. `lib/design/perspective.ts` fits a horizon through the plant ellipses — on the first real bed it landed on the porch floor line — and the material is drawn in three depth bands that crossfade into one another |
+| A hedge drawn as a row of ovals | ✅ fixed — the plant cut-outs were painted one over the next, so a later one's pale rim overwrote an earlier one's dark core and seven boxwoods grown into one hedge came out as seven ovals with seams between them. They are darkened together now, which is what a union of cut-outs means |
 | Material that ignored the light it was sitting in | ✅ fixed — the shading ramp mapped the photo's whole 0..1 luminance onto a 0.52–1.0 multiplier, so a bed that lives in the bottom third of that range moved barely at all. Measured across one real yard: the photograph ranged 1.47× and the material over it 1.22×, with its bright end where the photo was dim. A steep absolute ramp, blurred past the *things* in a bed rather than just their grain, gets 1.42× and falls off where the photograph does |
 | Moving a plant that is already there | ✅ done — drag it anywhere in its bed, no mode and no toggle; the drop is confined to the outline server-side and each move is bid as `shrub_transplant` |
 | The aerial leg (`/design/[id]/locate`) | ⛔ gated off — deliberately: no paid imagery or geocoder until there is a working MVP |
@@ -75,7 +78,7 @@ All six phases are in, they run on Postgres, the contractor console is behind
 a login, the price book is editable, photos live in object storage when a
 bucket is configured, and the whole thing has been designed and opened on a
 phone — on a phone *branch*, for the first time in the twelfth session,
-which is its own story. `npm test` runs 711 tests — with a database and
+which is its own story. `npm test` runs 728 tests — with a database and
 without one.
 
 **It has not been deployed.** The tenth session wrote the configuration —
@@ -102,7 +105,7 @@ store, so a clean checkout runs the demo with nothing to provision.
 ```sh
 npm run doctor    # is this machine set up? checks .env.local, the API key (against the
                   # real API), and the console login — and says what to fix, in English.
-npm test          # Vitest — 711 tests across every phase. No server, no network, no browser.
+npm test          # Vitest — 728 tests across every phase. No server, no network, no browser.
 npm run typecheck
 npm run dev
 npm run build
@@ -753,14 +756,92 @@ Judged on a contact sheet of every material at the two gauges a real photo
 produces — a bed twelve feet off the camera and one forty — plus a
 bed-width strip of each to check for a repeat, and then on the app itself.
 
-**Still open: the angle.** Half of the owner's guess was right and half is
-untouched. The gauge is one number per region, so stones at the near edge
-of a bed are drawn the same size as stones at the far edge — on a bed
-photographed at a shallow angle the near ones should be visibly larger.
-Fixing it means banding the region by depth, or a projective transform SVG
-filters cannot express; at four or five pixels a stone it is a much
-smaller error than the one just fixed, and it is worth measuring on a real
-photo before building anything.
+**The angle, which was the other half of that report, is fixed below** —
+it was worth measuring on a real photo before building anything, and the
+real photo said it mattered more than four or five pixels a stone
+suggested.
+
+### A bed of one stone size, edge to edge
+
+The gauge fix above got the *average* size of a stone right and drew it at
+that one size from the front of a bed to the back. A bed does not work
+that way: it recedes. On the first real photograph the stones at the lawn
+edge came out the same size as the stones six feet further in, and the
+result reads as carpet laid over the picture rather than as ground going
+away from you. This is the other half of the same report — *"maybe the
+scaling or the angle doesn't match"*.
+
+**The photograph already carries the answer, and it costs nothing to
+read.** There is no camera model here, no focal length, no height, and
+there does not need to be. The segmentation reports the plants standing in
+a region as ellipses, and shrubs in one bed are roughly one size in the
+world — so how fast their drawn size falls off up the frame *is* the
+perspective. Under a pinhole camera looking at a ground plane, a thing of
+fixed real size appears with a height proportional to its distance below
+the horizon, so a least-squares line through (centre row, radius) and the
+row where it crosses zero is the horizon.
+
+On the first bed this ran against — ten plants, three tulip clumps and
+seven boxwoods — it put the horizon at 0.26 of frame height, which lands
+on the porch floor line where a standing photographer's eye level belongs.
+Across that bed it asks for stones 0.64× at the back and 1.36× at the
+front, a little over two to one.
+
+`lib/design/perspective.ts` refuses more cases than it accepts, on
+purpose: fewer than three plants, all at one depth, or a line that says
+things grow as they recede, and the region gets one gauge exactly as
+before. A wrong perspective is far worse than none, and the scale it does
+hand back is clamped either way.
+
+**The material is drawn in three bands, and they crossfade.** Rows of a
+photograph are lines of equal depth on a ground plane, so a horizontal
+slice is the right shape — but slicing with a hard edge puts a visible
+straight line across the bed where the stone size steps, which is what the
+first render showed. Each band fades in over the one above it and is
+opaque from there down; fading *in* only, never out, because two bands
+that both fade would leave the photograph showing through the middle of
+the crossfade where neither is opaque.
+
+Bands cost nothing in geometry. The pieces are built once per material as
+a `<g>` in the defs and each band is a `<pattern>` containing a `<use>` of
+it with a `patternTransform` scale — one set of a thousand stones, three
+tiles.
+
+### Why a drawn bed looked drawn
+
+Two more faults surfaced on the same photograph, and the control that
+found them was hardwood mulch drawn over a bed of real hardwood mulch:
+
+**Nothing had a surface.** Drawing the pieces got the shapes right and
+left everything between and across them perfectly clean, which no material
+is. A sub-grain a third of a piece across — the wood's own grain, the dust
+in the gaps, the dirt on a stone — is multiplied over all of them now, and
+the vector edge is taken off each piece with a blur a sixteenth of its
+width. A shape cut with a mathematically hard edge is the other half of
+why a drawn bed reads as drawn: a photograph of gravel has no such edge
+anywhere in it.
+
+**Every piece was the same size.** The size distribution ran 0.72–1.28× of
+the gauge, a range narrow enough to read as manufactured. It runs 0.45–2.0
+squared now, so most pieces are small and a few are large, which is what
+mulch and gravel actually do. Shreds vary in *length* far more than in
+thickness — mulch is shredded off a log — and scaling both together turned
+the large end of the distribution into blobs.
+
+The ground under the pieces also went from 0.62 of the darkest piece to
+0.76. At the distance a yard is photographed from, the gap between two
+stones is mostly full of fines and dust rather than shadow, and too dark a
+ground makes every piece read as a cut-out sitting on a board.
+
+### A hedge is not seven ovals
+
+The plant cut-out is a black core fading to white at its rim, one per
+plant, and they were painted one over the next — so a later one's pale rim
+overwrote an earlier one's dark core, and seven boxwoods grown together
+into a single hedge came out as seven ovals with pale seams between them.
+They are drawn with `darken` inside an isolated group now, which takes the
+deeper cut of the two wherever they overlap: the union of cut-outs, which
+is what was meant all along.
 
 ### Taking the plants out
 
@@ -926,8 +1007,8 @@ There is still no `ANTHROPIC_API_KEY` in this container, so:
   tiled patch on a real photograph will carry whatever light was on the
   patch, and how visible that is on a bed with a shadow falling across it
   is the thing to look at first on the next real yard.
-- **The materials have now been seen on one real yard, and they are not there yet.** Tone, gauge and the plant cut-outs hold up; the light does now follow the photograph. What still reads as a decal is the grain itself: shreds and chips at the size a real bed calls for come out too uniform and too contrasty against ground that has no fine texture under them. And the gauge is one number per region, so a bed photographed at a shallow angle draws the same size stone at the near edge and the far — which is the "angle" half of a report from two sessions ago, still open.
-- **A hedge is drawn as a row of ovals.** The plant cut-out is per plant, so seven boxwoods grown together into one hedge leave seven oval haloes of old mulch rather than one continuous line. Visible on the first real photo with a hedge in it.
+- **The materials have been seen on one real yard and reworked against it, and mulch is still the weakest of them.** Stone reads as stone; shredded mulch drawn over a bed of real shredded mulch is close but softer and more even than the thing beside it. Every other material in the picker is judged against a contact sheet rather than against its own photograph.
+- **The perspective is fitted, not measured.** The horizon comes off a least-squares line through the plant ellipses, which assumes the plants in one bed are roughly one size in the world. A bed with a specimen tree at the back and groundcover at the front will fit a horizon that is wrong; the module refuses the obviously bad cases and clamps the rest, so the failure is a bed drawn flat rather than a bed drawn wrong. A region with fewer than three plants gets no perspective at all.
 - **The hole is only ever as big as the model says the plant is.** On a
   test photo drawn with shrubs deliberately larger than the segmentation's
   ellipses, the fill lands correctly and a ring of shrub remains around it,

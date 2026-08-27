@@ -56,16 +56,21 @@ describe("grainTile", () => {
       [...tile.grains.map((g) => g.ry)].sort((a, b) => a - b)[
         Math.floor(tile.grains.length / 2)
       ];
-    expect(median(large) / median(small)).toBeCloseTo(4, 1);
+    expect(median(large) / median(small)).toBeGreaterThan(3.6);
+    expect(median(large) / median(small)).toBeLessThan(4.4);
   });
 
   it("makes a tile several pieces across, not one or two", () => {
     // A tile barely longer than the piece in it *is* the pattern: a bed
-    // of mulch came out as visible houndstooth that way.
+    // of mulch came out as visible houndstooth that way. Measured against
+    // the typical piece, since the distribution has a long tail by
+    // design and one outsized shred in a tile is not a motif.
     for (const shape of [PEBBLE, STRAND, CHIP]) {
       const tile = grainTile(shape, 10);
-      const longest = Math.max(...tile.grains.map((g) => g.rx * 2));
-      expect(tile.size / longest).toBeGreaterThan(4);
+      const lengths = tile.grains.map((g) => g.rx * 2).sort((a, b) => a - b);
+      const median = lengths[Math.floor(lengths.length / 2)];
+      expect(tile.size / median).toBeGreaterThan(6);
+      expect(tile.size / lengths[lengths.length - 1]).toBeGreaterThan(3);
     }
   });
 
@@ -103,8 +108,26 @@ describe("grainTile", () => {
 
   it("lays a strand longer than it is wide", () => {
     for (const grain of grainTile(STRAND, 10).grains) {
-      expect(grain.rx / grain.ry).toBeCloseTo(4.5, 5);
+      expect(grain.rx / grain.ry).toBeGreaterThan(2);
     }
+  });
+
+  it("makes a long shred longer, not fatter", () => {
+    // Mulch is shredded off a log: the pieces vary in length far more
+    // than in thickness, and scaling both together turns the large end of
+    // the distribution into blobs.
+    const grains = [...grainTile(STRAND, 10).grains].sort((a, b) => a.rx - b.rx);
+    const short = grains[Math.floor(grains.length * 0.1)];
+    const long = grains[Math.floor(grains.length * 0.9)];
+    expect(long.rx / short.rx).toBeGreaterThan(2);
+    expect(long.ry / short.ry).toBeLessThan(long.rx / short.rx);
+  });
+
+  it("makes a big stone bigger both ways", () => {
+    const grains = [...grainTile(PEBBLE, 10).grains].sort((a, b) => a.rx - b.rx);
+    const small = grains[Math.floor(grains.length * 0.1)];
+    const large = grains[Math.floor(grains.length * 0.9)];
+    expect(large.ry / small.ry).toBeCloseTo(large.rx / small.rx, 5);
   });
 
   it("keeps every tone on the ramp", () => {

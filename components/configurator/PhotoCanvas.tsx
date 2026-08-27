@@ -29,6 +29,7 @@ import { PlantGlyph } from "./plantGlyphs";
 import { SegmentationWait } from "./SegmentationWait";
 import { KIND_COLORS } from "./regionColors";
 import { MaterialDefs, grainInches, type RegionTexture } from "./swatches";
+import { depthBands, fitGroundPlane, type DepthBand } from "@/lib/design/perspective";
 
 type Props = {
   photoUrl: string;
@@ -163,6 +164,15 @@ const DRAG_THRESHOLD = 0.0045;
  * shadow's edge goes soft at this width, which is the price.
  */
 const SHADING_LIGHT = 0.025;
+
+/**
+ * How much of a depth band is spent fading in over the one above it.
+ *
+ * A third. Less and the join is a line you can find; more and the two
+ * stone sizes are mixed across most of the bed, which is the flatness the
+ * bands exist to remove.
+ */
+const BAND_CROSSFADE = 0.34;
 
 /**
  * The luminance a bed in open daylight sits at, and how steeply the
@@ -419,6 +429,21 @@ export function PhotoCanvas({
    * a "1.5in river rock" thirteen times life size, which is what made a
    * swapped bed look like a bed of boulders.
    */
+  /**
+   * How a region is sliced by depth, if its own plants said anything
+   * about depth. Keyed by region id so the fill and the clip paths cannot
+   * disagree about where a band starts.
+   */
+  const bandsFor = (region: SegmentedRegion): DepthBand[] => {
+    const outline = liveOutline(region);
+    const rows = outline.map(([, y]) => y);
+    return depthBands(
+      fitGroundPlane(region.plantings),
+      Math.min(...rows),
+      Math.max(...rows),
+    );
+  };
+
   const textures: RegionTexture[] = regions.flatMap((region) => {
     const swatch = surfaceSwatch(region);
     if (!swatch) return [];
@@ -436,6 +461,7 @@ export function PhotoCanvas({
         swatch,
         gaugePx: renderedGaugePx(grainInches(swatch), perFoot, w),
         pixelsPerFoot: (perFoot * w) / 1600,
+        bands: bandsFor(region),
       },
     ];
   });
@@ -676,6 +702,55 @@ export function PhotoCanvas({
                 );
               }),
           )}
+          {/*
+            How one depth band gives way to the next.
+
+            Rows of a photograph are lines of equal depth on a ground
+            plane, so a horizontal slice is the right shape for a band —
+            but slicing it with a hard edge puts a visible straight line
+            across the bed where the stone size steps, which is what the
+            first render showed. Each band instead fades in over the one
+            above it and is opaque from there down, so the material
+            crossfades from one size to the next and the change reads as
+            recession rather than as a join.
+
+            Fading *in* only, never out: two bands that both fade would
+            leave the photograph showing through the middle of the
+            crossfade, where neither is fully opaque.
+          */}
+          {textures.flatMap((texture) => {
+            const region = regions.find((r) => `tex-${r.id}` === texture.fillId);
+            if (!region || texture.bands.length < 2) return [];
+            return texture.bands.slice(1).map((band, index) => {
+              const i = index + 1;
+              const overlap = (band.bottom - band.top) * BAND_CROSSFADE;
+              const start = (band.top - overlap) * h;
+              return (
+                <g key={`band-${region.id}-${i}`}>
+                  <linearGradient
+                    id={`bandfade-${region.id}-${i}`}
+                    gradientUnits="userSpaceOnUse"
+                    x1={0}
+                    y1={start}
+                    x2={0}
+                    y2={(band.top + overlap) * h}
+                  >
+                    <stop offset="0" stopColor="#000000" />
+                    <stop offset="1" stopColor="#ffffff" />
+                  </linearGradient>
+                  <mask id={`band-${region.id}-${i}`} maskUnits="userSpaceOnUse">
+                    <rect
+                      x={0}
+                      y={start}
+                      width={w}
+                      height={h - start}
+                      fill={`url(#bandfade-${region.id}-${i})`}
+                    />
+                  </mask>
+                </g>
+              );
+            });
+          })}
           {regions.map((region) => (
             // The region, minus the plants standing in it. White shows the
             // new material, black lets the photograph through — so
@@ -707,21 +782,34 @@ export function PhotoCanvas({
                   the old plant was taken out rather than hidden — and one
                   they took out entirely is covered and left covered, which
                   is what makes it look gone. */}
-              {(region.plantings ?? [])
-                .filter(
-                  (plant) =>
-                    !chosenPlant(plant.id) && !isCleared(plant.id) && !hasMoved(plant),
-                )
-                .map((plant) => (
-                  <ellipse
-                    key={plant.id}
-                    cx={plant.cx * w}
-                    cy={plant.cy * h}
-                    rx={plant.rx * w * PLANTING_MASK_MARGIN}
-                    ry={plant.ry * h * PLANTING_MASK_MARGIN}
-                    fill="url(#planting-fade)"
-                  />
-                ))}
+              {/* Darkened together, not painted one over the next.
+                  Each cut-out is a black core fading to white at its rim,
+                  and a later one painted normally *overwrites* an earlier
+                  one's rim with its own — so seven boxwoods grown into a
+                  single hedge came out as seven ovals with pale seams
+                  between them, which is what a real photograph of a hedge
+                  showed. `darken` takes the deeper cut of the two
+                  wherever they overlap, which is what a union of
+                  cut-outs means; `isolate` keeps that blending inside the
+                  group so the region underneath is unaffected. */}
+              <g style={{ isolation: "isolate" }}>
+                {(region.plantings ?? [])
+                  .filter(
+                    (plant) =>
+                      !chosenPlant(plant.id) && !isCleared(plant.id) && !hasMoved(plant),
+                  )
+                  .map((plant) => (
+                    <ellipse
+                      key={plant.id}
+                      cx={plant.cx * w}
+                      cy={plant.cy * h}
+                      rx={plant.rx * w * PLANTING_MASK_MARGIN}
+                      ry={plant.ry * h * PLANTING_MASK_MARGIN}
+                      fill="url(#planting-fade)"
+                      style={{ mixBlendMode: "darken" }}
+                    />
+                  ))}
+              </g>
             </mask>
           ))}
         </defs>
@@ -817,8 +905,27 @@ export function PhotoCanvas({
                       the feather are filtered over both together, which
                       is why they share one group. */}
                   <g filter={`url(#texfx-${region.id})`} opacity={0.96}>
-                    <path d={d} fill={`url(#tex-${region.id})`} />
-                    <path d={d} fill={`url(#tex2-${region.id})`} />
+                    {(textures.find((t) => t.fillId === `tex-${region.id}`)?.bands ?? [
+                      { top: 0, bottom: 1, scale: 1 },
+                    ]).map((band, i, all) => {
+                      const layers = (
+                        <>
+                          <path d={d} fill={`url(#tex-${region.id}-${i})`} />
+                          <path d={d} fill={`url(#tex2-${region.id}-${i})`} />
+                        </>
+                      );
+                      // The first band covers the whole region; each one
+                      // after it fades in over the one above. A region
+                      // whose photograph said nothing about depth has one
+                      // band and needs neither.
+                      return all.length < 2 || i === 0 ? (
+                        <g key={i}>{layers}</g>
+                      ) : (
+                        <g key={i} mask={`url(#band-${region.id}-${i})`}>
+                          {layers}
+                        </g>
+                      );
+                    })}
                   </g>
                   {/* The photo's own shading, multiplied back on top so
                       existing light and shadow read through the swap. */}

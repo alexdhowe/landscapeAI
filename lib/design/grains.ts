@@ -127,6 +127,8 @@ export type TileOptions = {
   density?: number;
   /** Different pieces out of the same material. */
   seedOffset?: number;
+  /** Skip the geometry: `grainTileSize` only wants the measurement. */
+  sizeOnly?: boolean;
 };
 
 /**
@@ -152,6 +154,19 @@ const MIN_ACROSS = 6;
  * pattern. Two is a motif; six is a material.
  */
 const PIECES_ACROSS_A_TILE = 6;
+
+/**
+ * The range one piece's size runs over, as a multiple of the gauge.
+ *
+ * Wide, and drawn squared so the small end is where most of them land.
+ * A narrow range reads as manufactured — which is what a bed of it looked
+ * like next to the real mulch beside it in a photograph.
+ */
+const SMALLEST = 0.45;
+const LARGEST = 2.0;
+
+/** How much of a shred's extra length shows up as extra thickness. */
+const THICKENING = 0.4;
 
 /** Deterministic, and the same everywhere: no Math.random in a render. */
 function rng(seed: number): () => number {
@@ -208,6 +223,21 @@ function facets(
 }
 
 /**
+ * Just the tile's edge, without building the pieces in it.
+ *
+ * A pattern element needs the size to declare its tile; the geometry
+ * inside it is instantiated once and referenced, so nothing is served by
+ * generating a thousand stones twice.
+ */
+export function grainTileSize(
+  shape: GrainShape,
+  gaugePx: number,
+  options: TileOptions = {},
+): number {
+  return grainTile(shape, gaugePx, { ...options, sizeOnly: true }).size;
+}
+
+/**
  * One tile of material at this gauge.
  *
  * `gaugePx` is the width of a single piece in the units the pattern will
@@ -219,7 +249,7 @@ export function grainTile(
   gaugePx: number,
   options: TileOptions = {},
 ): GrainTile {
-  const { tileScale = 1, density = 1, seedOffset = 0 } = options;
+  const { tileScale = 1, density = 1, seedOffset = 0, sizeOnly = false } = options;
   const width = Math.max(1.2, gaugePx);
   const length = width * Math.max(1, shape.aspect);
   const spacing = length * shape.packing;
@@ -233,6 +263,7 @@ export function grainTile(
     ),
   );
   const size = across * spacing;
+  if (sizeOnly) return { size, grains: [] };
   const random = rng(shape.seed + seedOffset);
   const grains: Grain[] = [];
 
@@ -261,9 +292,20 @@ export function grainTile(
     const y = scattered
       ? random() * size
       : (Math.floor(i / across) + 0.5 + (random() - 0.5) * 0.9) * spacing;
-    const scale = 0.72 + random() * 0.56;
+    // Squared, so most pieces are small and a few are large. A uniform
+    // draw gives every piece nearly the same size, and a bed where every
+    // piece is the same size is the single loudest tell that a material
+    // was drawn rather than photographed: real mulch and real gravel run
+    // from dust to chunks.
+    const scale = SMALLEST + (LARGEST - SMALLEST) * random() ** 2;
+    // A big stone is bigger both ways; a long shred is not thicker. Mulch
+    // is shredded off a log, so the pieces vary in length far more than
+    // in thickness — scaling both together turned the large end of the
+    // distribution into blobs, which is what a bed of it looked like next
+    // to the real thing.
+    const thickness = shape.kind === "strand" ? scale ** THICKENING : scale;
     const rx = (width * shape.aspect * scale) / 2;
-    const ry = (width * scale) / 2;
+    const ry = (width * thickness) / 2;
     const angle = random() * 360;
     const tone = Math.min(
       1,
