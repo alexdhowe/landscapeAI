@@ -80,7 +80,7 @@ a redeploy, not a rewrite.
 
 | Variable | Free path | Why it is not optional |
 |---|---|---|
-| `AUTH_SECRET` | **Render generates it** (`render.yaml`) | The app refuses to serve in production without it, on purpose: a predictable secret means anyone can mint a contractor session, and the console shows cost, margin and every lead's contact details. |
+| `AUTH_SECRET` | **Render generates it** (`render.yaml`) | A predictable secret means anyone can mint a contractor session, and the console shows cost, margin and every lead's contact details. Without it the process still starts and the *customer* funnel serves normally — it is the console that dies: `/login` renders, signing in answers 500, and the log says `AUTH_SECRET is not set`. Verified against the standalone build. So the failure to watch for is a site that looks fine with a login that does not work, not a site that will not boot. |
 | `DATABASE_URL` | Neon, free | Without it the app runs on the local file store — which in a container means writing to a filesystem that disappears on the next deploy. |
 | `ANTHROPIC_API_KEY` | your own key | Without it segmentation falls back to a demo overlay that the UI labels as such. Shipping the demo overlay to a customer is not an option; shipping it *labelled* is the difference between a demo and a lie, and it must stay labelled. |
 | `SITE_URL` | set after the first deploy | The absolute base for Open Graph and icon URLs. **Build-time** — see below. |
@@ -144,6 +144,27 @@ the 21 tables afterwards.
 **`npm run db:seed` and `npm run db:user` both work against a real
 server**, which the GitHub Action in step 3 depends on and which had only
 ever been run against PGlite.
+
+**The HEIC decoder survives the standalone build.** §8's last step warns
+that the wasm is the one thing a bundler can get wrong quietly, and that
+the failure is an iPhone upload which works locally and 500s in
+production. Run against `.next/standalone/server.js` — the exact artifact
+the container starts, not `next start` — a HEIC fixture posted to
+`/api/projects` returned 201 and `GET /api/projects/[id]/photo` came back
+`image/jpeg`, a real baseline JPEG. libheif's wasm is inlined into the
+traced server chunk rather than left as a file to copy, which is why it
+works and why nothing in the Dockerfile has to name it. This does not
+replace the smoke test against a real container on a real host; it removes
+the bundler from the list of suspects.
+
+**`/robots.txt` is right**, checked on the same build: `Allow: /`, then
+`/start`, `/design/`, `/api/` and every console path disallowed; `/`
+carries `index, follow` and `/start` carries `noindex, nofollow`.
+
+**The image itself has not been built.** There is no Docker daemon in the
+session that wrote this, so the first Render build is the first time the
+`Dockerfile` runs. Everything it does *after* `npm run build` is checked
+above against that same output; what is unverified is the image build.
 
 **`RATE_LIMIT_CLIENT_IP_HEADER` cannot be settled from here.** It is a
 security decision (§10) and the answer is a fact about Render's proxy, so
