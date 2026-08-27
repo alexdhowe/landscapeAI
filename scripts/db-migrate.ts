@@ -32,7 +32,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 
 import { loadEnvLocal } from "../lib/env/localFile";
-import { isPooledConnection } from "../lib/db/client";
+import { isPooledConnection, normalizeConnectionUrl } from "../lib/db/client";
 import { MIGRATIONS_DIR } from "../lib/db/migrate";
 
 loadEnvLocal();
@@ -88,7 +88,7 @@ async function main() {
     import("drizzle-orm/postgres-js/migrator"),
   ]);
 
-  const sql = postgres(url, {
+  const sql = postgres(normalizeConnectionUrl(url), {
     max: 1,
     connect_timeout: CONNECT_TIMEOUT_SECONDS,
     // Same reasoning as lib/db/client.ts: a transaction pooler does not

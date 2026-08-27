@@ -81,7 +81,8 @@ deployment.
 | The 44px rule on a desktop | ✅ corrected — it is a *fingertip* floor and was being applied to a mouse, which reported every 38px button in the price book as a defect and buried the 18px-tall links next to them. 44px on coarse pointers, 24px on fine |
 | A moved plant read as a misplaced one | ✅ fixed — the canvas published each plant's *reported* position in `data-cx` while rendering it at its *resolved* one, so the browser pass flagged every moved plant as badly placed: the one thing a move is supposed to do |
 | Segmentation on a real key | ⏳ **still the gap this session was meant to close.** The key works (`npm run doctor` gets an accepted-key answer from the real API) and a photo with no landscape in it comes back with zero regions and the right "No landscape areas found in this photo" screen. But no real yard photograph has been through it: this environment's egress policy blocks Drive, and the connector returns files as inline base64, which multi-megabyte photos do not survive. **Every one of the eight rendering features above is still judged only against a hand-traced segmentation** |
-| `npm run db:migrate` against a real server | ✅ verified — the eleventh session's hang does not reproduce: 12 migrations in ~2s over TCP and over TLS, a 1s idempotent re-run, clean exit. `npm run db:migrate:direct` is the fallback if it ever does, and it interoperates with drizzle-kit's journal in both directions |
+| The "drizzle-kit hang" | ✅ **root-caused and fixed.** It was never drizzle-kit. Neon's console hands out a connection string ending `&channel_binding=require`, which is a libpq *client* parameter; postgres.js forwards anything it does not recognise into the startup packet, and the server refuses it. The app and the seed report that error — `drizzle-kit migrate` prints `applying migrations...` and spins forever with no error and no exit, which is what the eleventh session worked around with psql. Reproduced deliberately, then fixed: `normalizeConnectionUrl` in `lib/db/client.ts` strips libpq's client-side parameters, and the app, `drizzle.config.ts` and `db:migrate:direct` all go through it |
+| `npm run db:migrate` against a real server | ✅ verified — 12 migrations in ~2s over TCP and over TLS, a 1s idempotent re-run, clean exit, and now with a raw Neon-shaped string too. `npm run db:migrate:direct` is the fallback, journal-compatible with drizzle-kit in both directions, and it names the failure above in about a second where the CLI hangs |
 | The HEIC path on the artifact the container runs | ✅ verified — a HEIC posted to `.next/standalone/server.js` (not `next start`) came back a real baseline JPEG. libheif's wasm is inlined into the traced chunk, so there is nothing for the Dockerfile to copy and nothing for a bundler to drop. The image build itself is still unrun: no Docker daemon in this session |
 | What Render would actually deploy | ⚠️ **the default branch is 8 commits behind `main`** — and those 8 commits are the whole of this table's last eight rows. `docs/deploy.md` §2.1 has the two ways to fix it. Not a code defect; a deploy that would have looked fine and shipped the wrong product |
 | Which header the rate limiter may trust | ⏳ unresolved by design — it is a fact about Render's proxy, not something to reason out here. `docs/deploy.md` §8 step 7 is a two-minute experiment against the live deployment that settles it |
@@ -92,7 +93,7 @@ All six phases are in, they run on Postgres, the contractor console is behind
 a login, the price book is editable, photos live in object storage when a
 bucket is configured, and the whole thing has been designed and opened on a
 phone — on a phone *branch*, for the first time in the twelfth session,
-which is its own story. `npm test` runs 776 tests — with a database and
+which is its own story. `npm test` runs 784 tests — with a database and
 without one.
 
 The primary surface is a **desktop browser** now. The customer surfaces
@@ -127,7 +128,7 @@ store, so a clean checkout runs the demo with nothing to provision.
 ```sh
 npm run doctor    # is this machine set up? checks .env.local, the API key (against the
                   # real API), and the console login — and says what to fix, in English.
-npm test          # Vitest — 776 tests across every phase. No server, no network, no browser.
+npm test          # Vitest — 784 tests across every phase. No server, no network, no browser.
 npm run typecheck
 npm run dev
 npm run build

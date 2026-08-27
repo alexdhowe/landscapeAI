@@ -107,19 +107,54 @@ Fix it *before* step 4, either way round:
 The first is better: it is one setting rather than one per service, and
 the branch a repository points at is the one a reader assumes is live.
 
-**`npm run db:migrate` works.** The eleventh session reported
-`drizzle-kit migrate` hanging against a local server and applied the
-schema with `psql` instead, which was the one unknown that could stall
-this deploy. It does not reproduce: against Postgres 16 over TCP, all
-twelve migrations applied in about two seconds and the process exited on
-its own; a second run was a one-second no-op; the same held with
-`?sslmode=require`, which is how Neon connects. Whatever the eleventh
-session hit was local to that machine — the likeliest candidate being
-`drizzle.config.ts`'s fallback URL, `postgres://localhost:5432/landscapeai`,
-which carries no password and will sit waiting on a server that wants one.
+**The connection string Neon gives you does not work, and the way it
+fails is the "drizzle-kit hang".** This is the single most useful thing on
+this page. Neon's console hands out
 
-**There is a fallback now anyway**, because a hang with no message is a
-bad thing to meet for the first time during a deploy:
+    postgresql://…/neondb?sslmode=require&channel_binding=require
+
+and `channel_binding` is a **libpq client-side parameter, not a Postgres
+server setting**. postgres.js copies every query parameter it does not
+recognise as one of its own options straight into the connection's startup
+packet (see `parseOptions` in the driver — `sslmode` is special-cased and
+nothing else is), so the server answers:
+
+    unrecognized configuration parameter "channel_binding"
+
+The app and `npm run db:seed` report that error and stop. **`drizzle-kit
+migrate` does not.** It prints `applying migrations...` and spins there
+indefinitely with no error, no timeout and no exit — which is exactly the
+symptom the eleventh session recorded as a drizzle-kit hang and worked
+around by piping the .sql files through psql. It was never a drizzle-kit
+bug; it was a connection failure that drizzle-kit swallows.
+
+Reproduced deliberately against Postgres 16 with that parameter in the URL,
+and confirmed as the cause: with it, an indefinite spinner; without it,
+twelve migrations in about two seconds.
+
+**It is handled in the repo now**, so the paste works as pasted.
+`normalizeConnectionUrl` in `lib/db/client.ts` strips libpq's client-side
+parameters before the driver sees them, and all three entry points go
+through it — the app, `drizzle.config.ts` (so `npm run db:migrate` and the
+GitHub Action in step 3), and `npm run db:migrate:direct`. Verified after
+the fix by running all three against a URL carrying
+`sslmode=require&channel_binding=require`: migrations applied, seed
+succeeded, app connected.
+
+You can still strip it yourself, and on any platform whose driver you do
+not control you should. Anything not on libpq's client-side list is left
+alone, because it might be a real server setting somebody meant.
+
+**Otherwise `npm run db:migrate` works.** Against Postgres 16 over TCP,
+all twelve migrations applied in about two seconds and the process exited
+on its own; a second run was a one-second no-op; the same held with
+`?sslmode=require` alone.
+
+**There is a fallback**, and the hang above is precisely what it is for —
+a spinner with no message is a bad thing to meet for the first time during
+a deploy. Handed the same broken URL, it says
+`Migration failed: unrecognized configuration parameter "channel_binding"`
+in about a second:
 
 ```sh
 npm run db:migrate          # drizzle-kit — the normal path
@@ -196,7 +231,9 @@ Nothing here runs on your machine. Roughly 30 minutes, most of it signup
 forms.
 
 **1. Postgres — [neon.com](https://neon.com), no card.** Create a project
-and copy the connection string. **Take the direct one, not the pooled one**
+and copy the connection string. Neon appends `&channel_binding=require` to
+it; the repo strips that for you now (§2.1), and removing it yourself does
+no harm. **Take the direct one, not the pooled one**
 — the pooled host has `-pooler` in it, and this app opens at most five
 connections from one small instance, so there is nothing to pool. (Paste
 the pooled one anyway and it still works: `lib/db/client.ts` recognises a

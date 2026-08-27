@@ -79,6 +79,82 @@ export function isPooledConnection(url: string): boolean {
   );
 }
 
+/**
+ * Connection parameters libpq understands and a Postgres *server* does
+ * not.
+ *
+ * postgres.js copies every query parameter it does not recognise as one of
+ * its own options into the connection's startup packet — see
+ * `parseOptions` in the driver, where `sslmode` is special-cased and
+ * nothing else is. A startup packet naming something that is not a server
+ * setting is refused: `unrecognized configuration parameter "..."`.
+ *
+ * That is not a hypothetical. Neon's console hands out
+ * `...?sslmode=require&channel_binding=require` by default, and pasting it
+ * where this repo asks for a connection string fails — and fails *badly*,
+ * because `drizzle-kit migrate` does not report the error. It prints
+ * "applying migrations..." and spins there indefinitely, which is exactly
+ * the symptom an earlier session recorded as a drizzle-kit hang and worked
+ * around with psql.
+ *
+ * So the paste is made to work rather than documented as a trap. These are
+ * libpq's client-side parameters: they describe how the *client* connects,
+ * they are meaningless to the server, and the driver either handles them
+ * itself or cannot. Anything not on this list is left alone, because it
+ * might be a real server setting the operator meant to send.
+ */
+const LIBPQ_CLIENT_ONLY_PARAMS = [
+  "channel_binding",
+  "connect_timeout",
+  "fallback_application_name",
+  "gssencmode",
+  "gsslib",
+  "hostaddr",
+  "krbsrvname",
+  "load_balance_hosts",
+  "passfile",
+  "requirepeer",
+  "service",
+  "ssl_max_protocol_version",
+  "ssl_min_protocol_version",
+  "sslcert",
+  "sslcompression",
+  "sslcrl",
+  "sslcrldir",
+  "sslkey",
+  "sslpassword",
+  "sslsni",
+];
+
+/**
+ * The same connection string with the parameters above removed.
+ *
+ * Returns the input untouched when there is nothing to remove or when it
+ * does not parse as a URL — a malformed string is the driver's to complain
+ * about, with its own message, rather than this function's to swallow.
+ */
+export function normalizeConnectionUrl(url: string): string {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return url;
+  }
+  let changed = false;
+  for (const name of LIBPQ_CLIENT_ONLY_PARAMS) {
+    if (parsed.searchParams.has(name)) {
+      parsed.searchParams.delete(name);
+      changed = true;
+    }
+  }
+  if (!changed) return url;
+  // `URL.toString()` leaves a bare "?" behind once the last parameter
+  // goes, which is harmless but reads like a truncated string in a log.
+  return parsed.searchParams.size === 0
+    ? parsed.toString().replace(/\?$/, "")
+    : parsed.toString();
+}
+
 let handle: Promise<Database> | null = null;
 
 async function connect(): Promise<Database> {
@@ -89,7 +165,7 @@ async function connect(): Promise<Database> {
       import("drizzle-orm/postgres-js"),
     ]);
     const schemaName = dbSchemaName();
-    const client = postgres(url, {
+    const client = postgres(normalizeConnectionUrl(url), {
       max: Number(process.env.DATABASE_POOL_MAX ?? 5),
       // A disposable schema per test run needs the search path to follow
       // it. Deployments run in "public", which is already the default, so
